@@ -1,14 +1,32 @@
-class Agent(object):
+import numpy as np
 
-    def act(self, observation):
+class Agent(object):
+    """
+    Attributes
+    ----------
+    learner
+    """
+
+    def set_target_policy(self, policy):
+        self.target_policy = policy
+
+    def set_behaviour_policy(self, policy):
+        self.behaviour_policy = policy
+
+    def act(self, observation, testing=False):
         """Return a random action according to the current behaviour policy"""
-        raise NotImplementedError
+        if testing:
+            dist = self.learner.get_target_policy(observation)
+        else:
+            dist = self.learner.get_behaviour_policy(observation)
+        return np.random.choice(len(dist), 1, p=dist)[0]
 
     def test_once(self, env):
         """
-        Run an episode on the environment by following the target behaviour policy (Probably using a greedy deterministic policy)
+        Run an episode on the environment by following the target behaviour policy (Probably using a greedy deterministic policy).
 
-        env : ???
+        env
+            Environment on which to run the test
         """
         reward_sum = 0
         obs = env.reset()
@@ -20,6 +38,14 @@ class Agent(object):
         return reward_sum
         
     def test(self, env, iterations):
+        """
+        Run multiple episodes on the given environment, following the target policy.
+
+        env
+            Environment on which to run the tests
+        iterations
+            Number of episodes to run
+        """
         rewards = []
         for i in range(iterations):
             rewards.append(self.test_once(env))
