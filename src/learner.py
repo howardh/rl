@@ -1,5 +1,7 @@
 import collections
 import numpy as np
+from enum import Enum
+#from enum import auto
 
 class Learner(object):
     """
@@ -85,21 +87,46 @@ class Learner(object):
             return dist
         return f
 
+class Optimizer(Enum):
+    NONE = 1
+    MOMENTUM = 2
+    ADA_GRAD = 3
+    RMS_PROP = 4
+    ADAM = 5
+    KSGD = 6
+        
 class TabularLearner(Learner):
 
-    def __init__(self, action_space, discount_factor, learning_rate):
+    def __init__(self, action_space, discount_factor, learning_rate, optimizer=Optimizer.NONE):
         Learner.__init__(self)
         self.action_space = action_space
         self.discount_factor = discount_factor
         self.learning_rate = learning_rate
+        self.optimizer = optimizer
+        
         self.q = collections.defaultdict(lambda: 0)
         self.old_q = self.q.copy()
+        if self.optimizer == Optimizer.NONE:
+            pass
+        elif self.optimizer == Optimizer.RMS_PROP:
+            self.v = collections.defaultdict(lambda: 0)
+        else:
+            raise NotImplementedError
+        
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         alpha = self.learning_rate
         gamma = self.discount_factor
         delta = reward2 + gamma * self.get_state_value(state2) - self.get_state_action_value(state1, action1)
-        self.q[str((state1,action1))] += alpha * delta
+        index = str((state1,action1))
+        if self.optimizer == Optimizer.NONE:
+            self.q[index] += alpha * delta
+        elif self.optimizer == Optimizer.RMS_PROP:
+            forget = 0.1 # TODO: Forgetting Factor
+            self.v[index] = forget*self.v[index] + (1-forget)*(delta*delta)
+            self.q[index] += alpha/np.sqrt(self.v[index])*delta
+        else:
+            raise NotImplementedError
 
     def get_state_action_value(self, state, action):
         return self.q[str((state,action))]

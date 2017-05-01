@@ -3,6 +3,7 @@ import numpy as np
 
 from discrete_agent import TabularAgent
 from learner import TabularLearner
+from learner import Optimizer
 
 def features(x, a):
     """Return a feature vector representing the given state and action"""
@@ -53,7 +54,7 @@ def control():
     e = gym.make(env_name)
 
     action_space = np.array([0,1,2,3])
-    agent = TabularAgent(action_space=action_space, discount_factor=0.9, learning_rate=0.1)
+    agent = TabularAgent(action_space=action_space, discount_factor=0.9, learning_rate=0.1, optimizer=Optimizer.RMS_PROP)
 
     iters = 0
     while True:
@@ -71,7 +72,7 @@ def policy_evaluation():
     e = gym.make(env_name)
 
     action_space = np.array([0,1,2,3])
-    agent = TabularAgent(action_space=action_space, discount_factor=0.9, learning_rate=0.1)
+    agent = TabularAgent(action_space=action_space, discount_factor=0.9, learning_rate=0.1, optimizer=Optimizer.RMS_PROP)
     agent.set_target_policy(frozen_lake_policy)
     agent.set_behaviour_policy(frozen_lake_policy)
 
@@ -81,7 +82,6 @@ def policy_evaluation():
 
         agent.run_episode(e)
         if iters % 500 == 0:
-            # TODO: Check value difference
             weight_diff = agent.get_weight_change()
             if weight_diff < 0.01:
                 break

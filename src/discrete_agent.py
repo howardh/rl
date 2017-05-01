@@ -5,11 +5,12 @@ from learner import TabularLearner
 
 class TabularAgent(Agent):
 
-    def __init__(self, action_space, discount_factor, learning_rate):
+    def __init__(self, action_space, discount_factor, learning_rate, optimizer):
         self.learner = TabularLearner(
                 action_space=action_space,
                 discount_factor=discount_factor,
-                learning_rate=learning_rate
+                learning_rate=learning_rate,
+                optimizer=optimizer
         )
 
     def run_episode(self, env):
