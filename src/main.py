@@ -48,14 +48,12 @@ def print_frozen_lake_policy(agent):
             x = x+dirs[np.argmax(agent.learner.get_target_policy(i))]
     print(x)
 
-def main():
+def control():
     env_name = 'FrozenLake-v0'
     e = gym.make(env_name)
 
     action_space = np.array([0,1,2,3])
     agent = TabularAgent(action_space=action_space, discount_factor=0.9, learning_rate=0.1)
-    #agent.set_target_policy(frozen_lake_policy)
-    #agent.set_behaviour_policy(frozen_lake_policy)
 
     iters = 0
     while True:
@@ -84,7 +82,12 @@ def policy_evaluation():
         agent.run_episode(e)
         if iters % 500 == 0:
             # TODO: Check value difference
-            print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
+            weight_diff = agent.get_weight_change()
+            if weight_diff < 0.01:
+                break
+            agent.reset_weight_change()
+            print("Iteration %d\t Weight Change: %f" % (iters, weight_diff))
 
 if __name__ == "__main__":
-    main()
+    #main()
+    policy_evaluation()

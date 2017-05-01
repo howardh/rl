@@ -93,6 +93,7 @@ class TabularLearner(Learner):
         self.discount_factor = discount_factor
         self.learning_rate = learning_rate
         self.q = collections.defaultdict(lambda: 0)
+        self.old_q = self.q.copy()
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         alpha = self.learning_rate
@@ -102,6 +103,18 @@ class TabularLearner(Learner):
 
     def get_state_action_value(self, state, action):
         return self.q[str((state,action))]
+        
+    def get_weight_change(self):
+        change_sum = 0
+        val_count = 0
+        for key, val in self.q.items():
+            val_count += 1
+            diff = abs(self.q[key] - self.old_q[key])
+            change_sum += diff
+        return change_sum/val_count
+    
+    def reset_weight_change(self):
+        self.old_q = self.q.copy()
 
 class LSTDLearner(Learner):
     """

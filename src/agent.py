@@ -12,6 +12,12 @@ class Agent(object):
 
     def set_behaviour_policy(self, policy):
         self.behaviour_policy = policy
+        
+    def get_weight_change(self):
+        return self.learner.get_weight_change()
+        
+    def reset_weight_change(self):
+        return self.learner.reset_weight_change()
 
     def act(self, observation, testing=False):
         """Return a random action according to the current behaviour policy"""
