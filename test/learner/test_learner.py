@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from src import learner 
+from learner import learner 
 
 class TestTabularLearner(unittest.TestCase):
 
@@ -9,10 +9,11 @@ class TestTabularLearner(unittest.TestCase):
     DISCOUNT_FACTOR = 0.9
     
     def setUp(self):
-        self.learner = learner.TabularLearner()
-        self.learner.action_space = np.array([0])
-        self.learner.learning_rate = self.LEARNING_RATE
-        self.learner.discount_factor = self.DISCOUNT_FACTOR
+        self.learner = learner.TabularLearner(
+                action_space=np.array([0]),
+                discount_factor=self.DISCOUNT_FACTOR,
+                learning_rate=self.LEARNING_RATE,
+        )
 
     def test_non_existant_state(self):
         val = self.learner.get_state_action_value(0,0)
@@ -34,10 +35,12 @@ class TestTabularLearner(unittest.TestCase):
 class TestLSTDLearner(unittest.TestCase):
 
     NUM_FEATURES = 3
+    DISCOUNT_FACTOR = 0.9
 
     def setUp(self):
         self.learner = learner.LSTDLearner(
                 num_features=self.NUM_FEATURES,
+                discount_factor=self.DISCOUNT_FACTOR,
                 action_space=np.array([0,1])
         )
 

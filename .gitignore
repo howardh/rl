@@ -1,0 +1,3 @@
+.cs_files
+**/*.swp
+**/__pycache__
