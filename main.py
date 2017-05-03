@@ -43,7 +43,7 @@ def frozen_lake_policy(state):
     result[policy[state]] = 1
     return result
 
-def print_frozen_lake_policy(agent):
+def print_frozen_lake_policy(agent, f=lambda x: x):
     dirs = "<v>^"
     holes = [5,7,11,12]
     x = ''
@@ -53,7 +53,7 @@ def print_frozen_lake_policy(agent):
         if i in holes:
             x = x+' '
         else:
-            x = x+dirs[np.argmax(agent.learner.get_target_policy(i))]
+            x = x+dirs[np.argmax(agent.learner.get_target_policy(f(i)))]
     print(x)
 
 def print_frozen_lake_values(agent):
@@ -106,7 +106,7 @@ def lstd_control():
     e = gym.make(env_name)
 
     action_space = np.array([0,1,2,3])
-    agent = LSTDAgent(action_space=action_space, num_features=16, discount_factor=0.9, features=frozen_lake_features)
+    agent = LSTDAgent(action_space=action_space, num_features=16, discount_factor=0.99, features=frozen_lake_features)
 
     iters = 0
     while True:
@@ -116,7 +116,8 @@ def lstd_control():
             agent.update_weights()
             rewards = agent.test(e, 100)
             print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
-            print_frozen_lake_policy(agent)
+            print_frozen_lake_policy(agent, f=frozen_lake_features)
+            print_frozen_lake_values(agent)
             if np.mean(rewards) >= 0.78:
                 break
 
@@ -144,7 +145,7 @@ def lstd_policy_evaluation():
             print_frozen_lake_values(agent)
 
 if __name__ == "__main__":
-    #main()
+    #control()
     #policy_evaluation()
-    lstd_policy_evaluation()
-    #lstd_control()
+    #lstd_policy_evaluation()
+    lstd_control()

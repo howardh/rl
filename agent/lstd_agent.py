@@ -53,3 +53,21 @@ class LSTDAgent(Agent):
             obs = obs2
             action = action2
         return reward, step_count
+
+    def test_once(self, env):
+        """
+        Run an episode on the environment by following the target behaviour policy (Probably using a greedy deterministic policy).
+
+        env
+            Environment on which to run the test
+        """
+        reward_sum = 0
+        obs = env.reset()
+        obs = self.features(obs)
+        done = False
+        while not done:
+            action = self.act(obs, testing=True)
+            obs, reward, done, _ = env.step(action)
+            obs = self.features(obs)
+            reward_sum += reward
+        return reward_sum

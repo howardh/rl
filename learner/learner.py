@@ -175,6 +175,7 @@ class LSTDLearner(Learner):
         self.old_weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
 
     def combine_state_action(self, state, action):
+        self.validate_state(state)
         # Get index of given action
         action_index = self.action_space.tolist().index(action)
         result = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
@@ -201,6 +202,8 @@ class LSTDLearner(Learner):
         state1 : numpy.array
             A column vector representing the starting state
         """
+        self.validate_state(state1)
+        self.validate_state(state2)
         x1 = self.combine_state_action(state1, action1)
         x2 = self.combine_state_target_action(state2)
         gamma = self.discount_factor
@@ -208,6 +211,7 @@ class LSTDLearner(Learner):
         self.b_mat += reward2*x1
 
     def get_state_action_value(self, state, action):
+        self.validate_state(state)
         return (self.weights.transpose()*self.combine_state_action(state, action)).item(0)
 
     def get_weight_change(self):
@@ -217,3 +221,9 @@ class LSTDLearner(Learner):
     def reset_weight_change(self):
         # We can simply copy the reference, because the values are never modified
         self.old_weights = self.weights
+
+    def validate_state(self, state):
+        if type(state).__module__ != np.__name__:
+            raise TypeError("Invalid state: %s. Received an object of type %s. Expected an np.array with %d features." % (state, type(state), self.num_features))
+        if state.size != self.num_features:
+            raise ValueError("Invalid state: %s. Expected an np.array with %d features." % (state, self.num_features))
