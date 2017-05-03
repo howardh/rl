@@ -8,10 +8,10 @@ class Agent(object):
     """
 
     def set_target_policy(self, policy):
-        self.target_policy = policy
+        self.learner.set_target_policy(policy)
 
     def set_behaviour_policy(self, policy):
-        self.behaviour_policy = policy
+        self.learner.set_behaviour_policy(policy)
         
     def get_weight_change(self):
         return self.learner.get_weight_change()

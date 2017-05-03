@@ -1,7 +1,7 @@
 import numpy as np
 
-from agent import Agent
-from learner import TabularLearner
+from agent.agent import Agent
+from learner.learner import TabularLearner
 
 class TabularAgent(Agent):
 
