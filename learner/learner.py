@@ -168,7 +168,7 @@ class LSTDLearner(Learner):
         self.num_features = num_features
         self.action_space = action_space
 
-        self.a_mat = np.matrix(np.identity(self.num_features*len(self.action_space)))*0.0001
+        self.a_mat = np.matrix(np.zeros([self.num_features*len(self.action_space)]*2))
         self.b_mat = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
 
         self.weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
@@ -195,7 +195,7 @@ class LSTDLearner(Learner):
         return result
 
     def update_weights(self):
-        self.weights = np.linalg.inv(self.a_mat)*self.b_mat
+        self.weights = np.linalg.pinv(self.a_mat)*self.b_mat
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         """
@@ -204,10 +204,13 @@ class LSTDLearner(Learner):
         """
         self.validate_state(state1)
         self.validate_state(state2)
-        x1 = self.combine_state_action(state1, action1)
-        x2 = self.combine_state_target_action(state2)
         gamma = self.discount_factor
-        self.a_mat += x1*(x1-gamma*x2).transpose()
+        x1 = self.combine_state_action(state1, action1)
+        if not terminal:
+            x2 = self.combine_state_target_action(state2)
+            self.a_mat += x1*(x1-gamma*x2).transpose()
+        else:
+            self.a_mat += x1*x1.transpose()
         self.b_mat += reward2*x1
 
     def get_state_action_value(self, state, action):
