@@ -129,9 +129,37 @@ def lstd_tile_coding_control():
             if np.mean(rewards) >= 0.78:
                 break
 
+def lstd_trace_control():
+    env_name = 'FrozenLake-v0'
+    e = gym.make(env_name)
+
+    action_space = np.array([0,1,2,3])
+    agent = LSTDAgent(
+            action_space=action_space,
+            num_features=features.ONE_HOT_NUM_FEATURES,
+            discount_factor=0.99,
+            features=features.one_hot,
+            use_traces=True,
+            trace_factor=0.5
+    )
+
+    iters = 0
+    while True:
+        iters += 1
+        agent.run_episode(e)
+        if iters % 500 == 0:
+            agent.update_weights()
+            rewards = agent.test(e, 100)
+            print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
+            utils.print_policy(agent, f=features.one_hot)
+            utils.print_values(agent, f=features.one_hot)
+            if np.mean(rewards) >= 0.78:
+                break
+
 if __name__ == "__main__":
     #control()
     #policy_evaluation()
     #lstd_policy_evaluation()
-    lstd_control()
+    #lstd_control()
     #lstd_tile_coding_control()
+    lstd_trace_control()

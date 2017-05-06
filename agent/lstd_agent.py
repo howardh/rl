@@ -15,15 +15,25 @@ from gym import spaces
 
 from agent.agent import Agent
 from learner.learner import LSTDLearner
+from learner.learner import LSTDTraceLearner
 
 class LSTDAgent(Agent):
 
-    def __init__(self, num_features, action_space, discount_factor, features=lambda x: x):
-        self.learner = LSTDLearner(
-                num_features=num_features,
-                action_space=action_space,
-                discount_factor=discount_factor
-        )
+    def __init__(self, num_features, action_space, discount_factor,
+            use_traces=False, trace_factor=None, features=lambda x: x):
+        if use_traces:
+            self.learner = LSTDTraceLearner(
+                    num_features=num_features,
+                    action_space=action_space,
+                    discount_factor=discount_factor,
+                    trace_factor=trace_factor
+            )
+        else:
+            self.learner = LSTDLearner(
+                    num_features=num_features,
+                    action_space=action_space,
+                    discount_factor=discount_factor
+            )
         self.features = features
 
     def update_weights(self):
