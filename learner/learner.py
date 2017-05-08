@@ -161,9 +161,10 @@ class LSTDLearner(Learner):
     action_space
     """
 
-    def __init__(self, num_features, action_space, discount_factor):
+    def __init__(self, num_features, action_space, discount_factor, use_importance_sampling=False):
         Learner.__init__(self)
 
+        self.use_importance_sampling = use_importance_sampling
         self.discount_factor = discount_factor
         self.num_features = num_features
         self.action_space = action_space
@@ -204,14 +205,23 @@ class LSTDLearner(Learner):
         """
         self.validate_state(state1)
         self.validate_state(state2)
+        if self.use_importance_sampling:
+            rho = self.get_importance_sampling_ratio(state1, action1)
+        else:
+            rho = 1
         gamma = self.discount_factor
         x1 = self.combine_state_action(state1, action1)
         if not terminal:
             x2 = self.combine_state_target_action(state2)
-            self.a_mat += x1*(x1-gamma*x2).transpose()
+            self.a_mat += rho*x1*(x1-gamma*x2).transpose()
         else:
-            self.a_mat += x1*x1.transpose()
-        self.b_mat += reward2*x1
+            self.a_mat += rho*x1*x1.transpose()
+        self.b_mat += rho*reward2*x1
+
+    def get_importance_sampling_ratio(self, state, action):
+        mu = self.get_behaviour_policy(state)
+        pi = self.get_target_policy(state)
+        return pi[action]/mu[action]
 
     def get_state_action_value(self, state, action):
         self.validate_state(state)

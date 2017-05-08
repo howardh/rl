@@ -20,7 +20,8 @@ from learner.learner import LSTDTraceLearner
 class LSTDAgent(Agent):
 
     def __init__(self, num_features, action_space, discount_factor,
-            use_traces=False, trace_factor=None, features=lambda x: x):
+            use_traces=False, trace_factor=None,
+            use_importance_sampling=False, features=lambda x: x):
         if use_traces:
             self.learner = LSTDTraceLearner(
                     num_features=num_features,
@@ -32,7 +33,8 @@ class LSTDAgent(Agent):
             self.learner = LSTDLearner(
                     num_features=num_features,
                     action_space=action_space,
-                    discount_factor=discount_factor
+                    discount_factor=discount_factor,
+                    use_importance_sampling=use_importance_sampling
             )
         self.features = features
 
