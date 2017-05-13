@@ -64,7 +64,8 @@ def lstd_control():
             action_space=action_space,
             num_features=frozenlake.features.ONE_HOT_NUM_FEATURES,
             discount_factor=0.99,
-            features=frozenlake.features.one_hot
+            features=frozenlake.features.one_hot,
+            use_importance_sampling=False
     )
 
     iters = 0
@@ -188,11 +189,6 @@ def lstd_policy_evaluation_8x8():
             frozenlake8x8.utils.print_values(agent, f=frozenlake8x8.features.one_hot)
 
 def lstd_control_8x8():
-    """
-    Linear Function approximator with one-hot encoding
-    Vanilla LSTD
-    """
-
     env_name = 'FrozenLake8x8-v0'
     e = gym.make(env_name)
 
@@ -234,9 +230,9 @@ if __name__ == "__main__":
     #policy_evaluation()
 
     #lstd_policy_evaluation()
-    #lstd_control()
+    lstd_control()
     #lstd_tile_coding_control()
     #lstd_trace_control()
 
     #lstd_policy_evaluation_8x8()
-    lstd_control_8x8()
+    #lstd_control_8x8()

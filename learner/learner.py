@@ -258,11 +258,53 @@ class LSTDTraceLearner(LSTDLearner):
 
         x1 = self.combine_state_action(state1, action1)
 
-        self.e_mat = lam*self.e_mat + x1.transpose()
+        self.e_mat = lam*gamma*self.e_mat + x1.transpose()
 
         if not terminal:
             x2 = self.combine_state_target_action(state2)
             self.a_mat += self.e_mat.transpose()*(x1-gamma*x2).transpose()
+        else:
+            self.a_mat += self.e_mat.transpose()*x1.transpose()
+
+        self.b_mat += reward2*self.e_mat.transpose()
+
+        if terminal:
+            self.e_mat *= 0
+
+class LSTDTraceQsLearner(LSTDLearner):
+    def __init__(self, num_features, action_space, discount_factor, trace_factor, sigma):
+        LSTDLearner.__init__(self, num_features=num_features, action_space=action_space, discount_factor=discount_factor)
+
+        self.trace_factor = trace_factor
+        self.sigma = sigma
+
+        # Trace vector
+        self.e_mat = np.matrix(np.zeros([1,self.num_features*len(self.action_space)]))
+
+    def get_all_state_action_pairs(self, state):
+        num_actions = len(self.action_space)
+        results = np.zeros([self.num_features*num_actions,num_actions])
+        for a in range(num_actions):
+            results[a,:] = self.combine_state_action(state, self.action_space.item(a))
+        return results
+
+    def observe_step(self, state1, action1, reward2, state2, terminal=False):
+        self.validate_state(state1)
+        self.validate_state(state2)
+        gamma = self.discount_factor
+        lam = self.trace_factor
+        sigma = self.sigma
+
+        x1 = self.combine_state_action(state1, action1)
+        pi1 = self.get_target_policy(state1)
+
+        self.e_mat = lam*gamma*((1-sigma)*pi1[action1]+sigma)*self.e_mat + x1.transpose()
+
+        if not terminal:
+            x2 = self.combine_state_target_action(state2)
+            x2_all = self.get_all_state_action_pairs(state2)
+            pi2 = self.get_target_policy(state2).reshape([len(self.action_space),1])
+            self.a_mat += self.e_mat.transpose()*(x1-gamma*(sigma*x2 + (1-sigma)*(x2_all*pi2_all))).transpose()
         else:
             self.a_mat += self.e_mat.transpose()*x1.transpose()
 
