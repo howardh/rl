@@ -65,7 +65,8 @@ def lstd_control():
             num_features=frozenlake.features.ONE_HOT_NUM_FEATURES,
             discount_factor=0.99,
             features=frozenlake.features.one_hot,
-            use_importance_sampling=False
+            use_importance_sampling=False,
+            sigma=1
     )
 
     iters = 0
@@ -198,7 +199,8 @@ def lstd_control_8x8():
             num_features=frozenlake8x8.features.ONE_HOT_NUM_FEATURES,
             discount_factor=0.99,
             features=frozenlake8x8.features.one_hot,
-            use_importance_sampling=True
+            use_importance_sampling=True,
+            sigma=0.5
     )
 
     iters = 0
@@ -230,9 +232,9 @@ if __name__ == "__main__":
     #policy_evaluation()
 
     #lstd_policy_evaluation()
-    lstd_control()
+    #lstd_control()
     #lstd_tile_coding_control()
     #lstd_trace_control()
 
     #lstd_policy_evaluation_8x8()
-    #lstd_control_8x8()
+    lstd_control_8x8()
