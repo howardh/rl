@@ -16,6 +16,7 @@ from gym import spaces
 from agent.agent import Agent
 from learner.learner import LSTDLearner
 from learner.learner import LSTDTraceLearner
+from learner.learner import LSTDTraceQsLearner
 
 class LSTDAgent(Agent):
 

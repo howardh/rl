@@ -199,7 +199,9 @@ def lstd_control_8x8():
             num_features=frozenlake8x8.features.ONE_HOT_NUM_FEATURES,
             discount_factor=0.99,
             features=frozenlake8x8.features.one_hot,
-            use_importance_sampling=True,
+            use_importance_sampling=False,
+            use_traces=True,
+            trace_factor=0.5,
             sigma=0.5
     )
 

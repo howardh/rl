@@ -79,5 +79,26 @@ class TestLSTDLearner(unittest.TestCase):
             [0,0,0, 0,0,0]])
         self.assertTrue(np.allclose(a_mat, expected_a_mat), "Incorrect A matrix. Expected %s, Received %s" % (expected_a_mat, a_mat))
 
+class TestLSTDTraceQsLearner(unittest.TestCase):
+
+    NUM_FEATURES = 3
+    NUM_ACTIONS = 2
+    DISCOUNT_FACTOR = 0.9
+
+    def setUp(self):
+        self.learner = learner.LSTDTraceQsLearner(
+                num_features=self.NUM_FEATURES,
+                discount_factor=self.DISCOUNT_FACTOR,
+                action_space=np.array([0,1]),
+                trace_factor = 0,
+                sigma = 0,
+        )
+
+    def test_get_all_state_action_pairs(self):
+        state = np.array([[1,2,3]]).transpose()
+        expectedOutput = np.array([[1,2,3,0,0,0],[0,0,0,1,2,3]]).transpose()
+        actualOutput = self.learner.get_all_state_action_pairs(state)
+        self.assertTrue((actualOutput == expectedOutput).all())
+
 if __name__ == "__main__":
     unittest.main()
