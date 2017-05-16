@@ -32,7 +32,7 @@ def lstd_control():
         agent.run_episode(e)
         if iters % 500 == 0:
             agent.update_weights()
-            rewards = agent.test(e, 100)
+            rewards = agent.test(e, 100, render=False)
             print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
             if np.mean(rewards) >= 190:
                 break

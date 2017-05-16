@@ -27,7 +27,7 @@ class Agent(object):
             dist = self.learner.get_behaviour_policy(observation)
         return np.random.choice(len(dist), 1, p=dist)[0]
 
-    def test_once(self, env):
+    def test_once(self, env, render=False):
         """
         Run an episode on the environment by following the target behaviour policy (Probably using a greedy deterministic policy).
 
@@ -41,9 +41,11 @@ class Agent(object):
             action = self.act(obs, testing=True)
             obs, reward, done, _ = env.step(action)
             reward_sum += reward
+            if render:
+                env.render()
         return reward_sum
         
-    def test(self, env, iterations):
+    def test(self, env, iterations, render=False):
         """
         Run multiple episodes on the given environment, following the target policy.
 
@@ -54,5 +56,5 @@ class Agent(object):
         """
         rewards = []
         for i in range(iterations):
-            rewards.append(self.test_once(env))
+            rewards.append(self.test_once(env, render))
         return rewards
