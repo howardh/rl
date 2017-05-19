@@ -25,6 +25,7 @@ class LSTDAgent(Agent):
             use_importance_sampling=False, sigma=1, features=lambda x: x):
         if use_traces:
             if sigma==1:
+                print("Initializing LSTD agent with traces")
                 self.learner = LSTDTraceLearner(
                         num_features=num_features,
                         action_space=action_space,
@@ -32,6 +33,7 @@ class LSTDAgent(Agent):
                         trace_factor=trace_factor
                 )
             else:
+                print("Initializing LSTD agent with Q(sigma=%f)" % sigma)
                 self.learner = LSTDTraceQsLearner(
                         num_features=num_features,
                         action_space=action_space,
@@ -40,6 +42,7 @@ class LSTDAgent(Agent):
                         sigma=sigma
                 )
         else:
+            print("Initializing LSTD agent")
             self.learner = LSTDLearner(
                     num_features=num_features,
                     action_space=action_space,

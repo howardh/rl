@@ -1,4 +1,5 @@
 import numpy as np
+import re
 
 class Agent(object):
     """
@@ -7,11 +8,28 @@ class Agent(object):
     learner
     """
 
+    def parse_policy(self, policy):
+        if callable(policy):
+            return policy
+        pattern = re.compile(r"^((0|[1-9]\d*)?(\.\d+)?(?<=\d))-epsilon$")
+        match_obj = pattern.match(policy)
+        if match_obj is not None:
+            eps = float(match_obj.group(1))
+            print("e-greedy with epsilon %f" % eps)
+            return self.learner.get_epsilon_greedy(eps)
+        pattern = re.compile(r"^((0|[1-9]\d*)?(\.\d+)?(?<=\d))-softmax$")
+        match_obj = pattern.match(policy)
+        if match_obj is not None:
+            temp = float(match_obj.group(1))
+            print("Softmax with temperature %f" % temp)
+            return self.learner.get_softmax(temp)
+        raise ValueError("Invalid policy provided.")
+
     def set_target_policy(self, policy):
-        self.learner.set_target_policy(policy)
+        self.learner.set_target_policy(self.parse_policy(policy))
 
     def set_behaviour_policy(self, policy):
-        self.learner.set_behaviour_policy(policy)
+        self.learner.set_behaviour_policy(self.parse_policy(policy))
         
     def get_weight_change(self):
         return self.learner.get_weight_change()
@@ -45,7 +63,7 @@ class Agent(object):
                 env.render()
         return reward_sum
         
-    def test(self, env, iterations, render=False):
+    def test(self, env, iterations, render=False, record=True):
         """
         Run multiple episodes on the given environment, following the target policy.
 

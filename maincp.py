@@ -1,5 +1,6 @@
 import gym
 import numpy as np
+import datetime
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -15,6 +16,7 @@ from cartpole import utils
 def lstd_control():
     env_name = 'CartPole-v0'
     e = gym.make(env_name)
+    start_time = datetime.datetime.now()
 
     action_space = np.array([0,1])
     agent = LSTDAgent(
@@ -23,8 +25,12 @@ def lstd_control():
             discount_factor=0.99,
             features=cartpole.features.identity,
             use_importance_sampling=False,
-            sigma=1
+            use_traces=True,
+            sigma=0,
+            trace_factor=0.5,
     )
+    agent.set_behaviour_policy("1-softmax")
+    agent.set_target_policy("0.1-softmax")
 
     iters = 0
     while True:
@@ -32,8 +38,9 @@ def lstd_control():
         agent.run_episode(e)
         if iters % 500 == 0:
             agent.update_weights()
-            rewards = agent.test(e, 100, render=False)
+            rewards = agent.test(e, 100, render=True)
             print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
+            print(agent.learner.weights.transpose())
             if np.mean(rewards) >= 190:
                 break
 
