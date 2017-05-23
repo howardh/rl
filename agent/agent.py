@@ -1,5 +1,7 @@
 import numpy as np
 import re
+import itertools
+import gym
 
 class Agent(object):
     """
@@ -63,7 +65,7 @@ class Agent(object):
                 env.render()
         return reward_sum
         
-    def test(self, env, iterations, render=False, record=True):
+    def test(self, env, iterations, render=False, record=True, processors=1):
         """
         Run multiple episodes on the given environment, following the target policy.
 
@@ -72,7 +74,18 @@ class Agent(object):
         iterations
             Number of episodes to run
         """
-        rewards = []
-        for i in range(iterations):
-            rewards.append(self.test_once(env, render))
-        return rewards
+        if processors==1:
+            rewards = []
+            for i in range(iterations):
+                rewards.append(self.test_once(env, render))
+            return rewards
+        else:
+            from pathos.multiprocessing import ProcessPool
+            pool = ProcessPool(processes=processors)
+            env_name = env.spec.id
+            def test(proc_id):
+                output = self.test_once(gym.make(env_name))
+                return output
+            rewards = pool.map(test, range(iterations))
+            print(rewards)
+            return rewards

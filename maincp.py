@@ -29,8 +29,8 @@ def lstd_control():
             sigma=0,
             trace_factor=0.5,
     )
-    agent.set_behaviour_policy("1-softmax")
-    agent.set_target_policy("0.1-softmax")
+    agent.set_behaviour_policy("0.1-epsilon")
+    agent.set_target_policy("0-epsilon")
 
     iters = 0
     while True:
@@ -38,7 +38,7 @@ def lstd_control():
         agent.run_episode(e)
         if iters % 500 == 0:
             agent.update_weights()
-            rewards = agent.test(e, 100, render=True)
+            rewards = agent.test(e, 100, render=False, processors=3)
             print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
             print(agent.learner.weights.transpose())
             if np.mean(rewards) >= 190:
