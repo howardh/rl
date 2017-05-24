@@ -81,11 +81,11 @@ class Agent(object):
             return rewards
         else:
             from pathos.multiprocessing import ProcessPool
+            import logging
             pool = ProcessPool(processes=processors)
             env_name = env.spec.id
             def test(proc_id):
                 output = self.test_once(gym.make(env_name))
                 return output
             rewards = pool.map(test, range(iterations))
-            print(rewards)
             return rewards
