@@ -29,7 +29,7 @@ def lstd_control():
             sigma=0,
             trace_factor=0.5,
     )
-    agent.set_behaviour_policy("0.1-epsilon")
+    agent.set_behaviour_policy(utils.optimal_policy)
     agent.set_target_policy("0-epsilon")
 
     iters = 0
