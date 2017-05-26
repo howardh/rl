@@ -1,4 +1,5 @@
 import numpy as np
+import itertools
 
 IDENTITY_NUM_FEATURES = 5
 
@@ -48,7 +49,18 @@ def one_hot(x):
     output[x] = 1
     return np.array([output]).transpose()
 
+RBF_NUM_FEATURES = 4*4*4*4
+
+def _gaussian(x, mu, sig):
+    return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
 def radial_basis(x):
-    # Normalize
+    # Normalize to [-1,1]
+    state = np.array([0]*4)
+    state[0] = x[0]/CART_POSITION_MAX
+    state[1] = np.tanh(x[1]/10)
+    state[2] = x[2]/POLE_ANGLE_MAX
+    state[3] = np.tanh(x[3]/10)
     # generate centres
-    pass
+    centres = itertools.product(np.linspace(-1,1,4), repeat=4)
+    # compute value
+    return np.array([_gaussian(state, c, .3) for c in centres])
