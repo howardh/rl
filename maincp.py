@@ -44,5 +44,36 @@ def lstd_control():
             if np.mean(rewards) >= 190:
                 break
 
+def lstd_control_steps():
+    env_name = 'CartPole-v0'
+    e = gym.make(env_name)
+    start_time = datetime.datetime.now()
+
+    action_space = np.array([0,1])
+    agent = LSTDAgent(
+            action_space=action_space,
+            num_features=cartpole.features.IDENTITY_NUM_FEATURES,
+            discount_factor=0.99,
+            features=cartpole.features.identity,
+            use_importance_sampling=False,
+            use_traces=True,
+            sigma=0,
+            trace_factor=0.5,
+    )
+    agent.set_behaviour_policy(utils.optimal_policy)
+    agent.set_target_policy("0-epsilon")
+
+    steps = 0
+    while True:
+        steps += 1
+        agent.run_step(e)
+        if steps % 5000 == 0:
+            agent.update_weights()
+            rewards = agent.test(e, 100, render=False, processors=3)
+            print("Steps %d\t Rewards: %f" % (steps, np.mean(rewards)))
+            print(agent.learner.weights.transpose())
+            if np.mean(rewards) >= 190:
+                break
+
 if __name__ == "__main__":
-    lstd_control()
+    lstd_control_steps()

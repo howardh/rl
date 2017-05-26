@@ -2,6 +2,7 @@ import numpy as np
 import re
 import itertools
 import gym
+gym.undo_logger_setup()
 
 class Agent(object):
     """
@@ -84,8 +85,11 @@ class Agent(object):
             import logging
             pool = ProcessPool(processes=processors)
             env_name = env.spec.id
+            envs = [gym.make(env_name) for _ in range(processors)]
             def test(proc_id):
-                output = self.test_once(gym.make(env_name))
+                e = envs.pop()
+                output = self.test_once(e)
+                envs.append(e)
                 return output
             rewards = pool.map(test, range(iterations))
             return rewards

@@ -50,6 +50,9 @@ class LSTDAgent(Agent):
                     use_importance_sampling=use_importance_sampling
             )
         self.features = features
+        self.prev_obs = None
+        self.prev_done = True
+        self.prev_reward = None
 
     def update_weights(self):
         self.learner.update_weights()
@@ -78,6 +81,22 @@ class LSTDAgent(Agent):
             obs = obs2
             action = action2
         return reward, step_count
+
+    def run_step(self, env):
+        if self.prev_done:
+            self.prev_obs = self.features(env.reset())
+
+        obs = self.prev_obs
+        action = self.act(obs)
+
+        obs2, reward, done, _ = env.step(action)
+        obs2 = self.features(obs2)
+
+        self.learner.observe_step(obs, action, reward, obs2, terminal=done)
+
+        self.prev_obs = obs2
+        self.prev_reward = reward
+        self.prev_done = done
 
     def test_once(self, env, render=False):
         """
