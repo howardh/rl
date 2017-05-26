@@ -23,13 +23,13 @@ def lstd_control():
             action_space=action_space,
             num_features=cartpole.features.IDENTITY_NUM_FEATURES,
             discount_factor=0.99,
-            features=cartpole.features.identity,
+            features=cartpole.features.identity2,
             use_importance_sampling=False,
-            use_traces=True,
-            sigma=0,
-            trace_factor=0.5,
+            use_traces=False,
+            sigma=None,
+            trace_factor=None,
     )
-    agent.set_behaviour_policy(utils.optimal_policy)
+    agent.set_behaviour_policy("0.1-epsilon")
     agent.set_target_policy("0-epsilon")
 
     iters = 0
@@ -38,9 +38,11 @@ def lstd_control():
         agent.run_episode(e)
         if iters % 500 == 0:
             agent.update_weights()
+            print("Testing...")
+            print(agent.learner.weights.transpose())
+            print("%f %f %f %f" % (agent.min_x1, agent.max_x1, agent.min_x3, agent.max_x3))
             rewards = agent.test(e, 100, render=False, processors=3)
             print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
-            print(agent.learner.weights.transpose())
             if np.mean(rewards) >= 190:
                 break
 
@@ -56,7 +58,7 @@ def lstd_control_steps():
             discount_factor=0.99,
             features=cartpole.features.identity,
             use_importance_sampling=False,
-            use_traces=True,
+            use_traces=False,
             sigma=0,
             trace_factor=0.5,
     )
@@ -76,4 +78,5 @@ def lstd_control_steps():
                 break
 
 if __name__ == "__main__":
-    lstd_control_steps()
+    lstd_control()
+    #lstd_control_steps()

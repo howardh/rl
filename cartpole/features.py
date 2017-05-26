@@ -5,6 +5,10 @@ IDENTITY_NUM_FEATURES = 5
 def identity(x):
     return np.append(x,1).reshape([IDENTITY_NUM_FEATURES,1])
 
+def identity2(x):
+    state = [x[0], np.tanh(x[1]/10), x[2], np.tanh(x[3]/10)]
+    return np.append(x,1).reshape([IDENTITY_NUM_FEATURES,1])
+
 ONE_HOT_NUM_FEATURES = 4*4*4*4
 
 CART_POSITION_MIN = -2.4
@@ -44,3 +48,7 @@ def one_hot(x):
     output[x] = 1
     return np.array([output]).transpose()
 
+def radial_basis(x):
+    # Normalize
+    # generate centres
+    pass
