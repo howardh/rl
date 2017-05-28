@@ -8,6 +8,7 @@ from learner.learner import Optimizer
 import frozenlake
 from frozenlake import features
 from frozenlake import utils
+from frozenlake import experiments
 
 import frozenlake8x8
 from frozenlake8x8 import features
@@ -239,4 +240,5 @@ if __name__ == "__main__":
     #lstd_trace_control()
 
     #lstd_policy_evaluation_8x8()
-    lstd_control_8x8()
+    #lstd_control_8x8()
+    experiments.run_all()
