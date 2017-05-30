@@ -7,6 +7,7 @@ from agent.lstd_agent import LSTDAgent
 from learner.learner import Optimizer
 
 import cartpole
+from cartpole import experiments
 from cartpole import features
 from cartpole import utils
 
@@ -78,5 +79,6 @@ def lstd_control_steps():
                 break
 
 if __name__ == "__main__":
-    lstd_control()
+    experiments.run_all()
+    #lstd_control()
     #lstd_control_steps()

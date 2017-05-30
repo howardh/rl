@@ -12,16 +12,23 @@ import frozenlake
 from frozenlake import features
 from frozenlake import utils
 
+"""
+FrozenLake
+
+Tabular gridsearch
+LSTD gridsearch
+"""
+
 def exp1():
-    #print("Gridsearch")
-    #print("Environment: FrozenLake4x4")
-    #print("Parameter space:")
-    #print("""
-    #        \tDiscount factor: 
-    #        \tLearning rate:
-    #        \tOptimizer:
-    #""")
-    #print("Determines the best combination of parameters by comparing the performance over time of several algorithms.")
+    print("Gridsearch")
+    print("Environment: FrozenLake4x4")
+    print("Parameter space:")
+    print("""
+            \tDiscount factor: 
+            \tLearning rate:
+            \tOptimizer:
+    """)
+    print("Determines the best combination of parameters by comparing the performance over time of several algorithms.")
     #discount_factors = [1, 0.99, 0.9]
     #learning_rates = [0.1, 0.01, 0.001]
     #optimizers = [Optimizer.RMS_PROP, Optimizer.NONE]
@@ -31,10 +38,10 @@ def exp1():
     indices = pandas.MultiIndex.from_product(
             [discount_factors, learning_rates, optimizers],
             names=["Discount Factor", "Learning Rate", "Optimizer"])
-    print(indices)
     data = pandas.DataFrame(
             np.zeros([len(discount_factors)*len(learning_rates)*len(optimizers),1]),
             index=indices)
+
     def run_trial(gamma, alpha, op):
         env_name = 'FrozenLake-v0'
         e = gym.make(env_name)
@@ -58,6 +65,7 @@ def exp1():
             if iters >= 100000:
                 break
         return iters
+
     def foo(i):
         g,a,o = indices[i]
         g = float(g)
@@ -71,6 +79,7 @@ def exp1():
         g,a,o = indices[i]
         data.loc[g,a,o] = x
     print(data)
+    return data
 
 def exp2():
     print("Environment: FrozenLake4x4")
@@ -99,7 +108,7 @@ def exp2():
                 break
 
 def run_all():
-    exp1()
+    gridsearch_results = exp1()
     #exp2()
 
 if __name__ == "__main__":
