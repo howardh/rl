@@ -1,6 +1,8 @@
 import numpy as np
 import gym
 import itertools
+import pandas
+from pathos.multiprocessing import ProcessPool
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -11,18 +13,28 @@ from frozenlake import features
 from frozenlake import utils
 
 def exp1():
-    print("Gridsearch")
-    print("Environment: FrozenLake4x4")
-    print("Parameter space:")
-    print("""
-            \tDiscount factor: 
-            \tLearning rate:
-            \tOptimizer:
-    """)
-    print("Determines the best combination of parameters by comparing the performance over time of several algorithms.")
-    discount_factors = [1, 0.99, 0.9]
-    learning_rates = [0.1, 0.01, 0.001]
-    optimizers = [Optimizer.RMS_PROP, Optimizer.NONE]
+    #print("Gridsearch")
+    #print("Environment: FrozenLake4x4")
+    #print("Parameter space:")
+    #print("""
+    #        \tDiscount factor: 
+    #        \tLearning rate:
+    #        \tOptimizer:
+    #""")
+    #print("Determines the best combination of parameters by comparing the performance over time of several algorithms.")
+    #discount_factors = [1, 0.99, 0.9]
+    #learning_rates = [0.1, 0.01, 0.001]
+    #optimizers = [Optimizer.RMS_PROP, Optimizer.NONE]
+    discount_factors = ['1', '0.99', '0.9']
+    learning_rates = ['0.1', '0.01', '0.001']
+    optimizers = ['Optimizer.RMS_PROP', 'Optimizer.NONE']
+    indices = pandas.MultiIndex.from_product(
+            [discount_factors, learning_rates, optimizers],
+            names=["Discount Factor", "Learning Rate", "Optimizer"])
+    print(indices)
+    data = pandas.DataFrame(
+            np.zeros([len(discount_factors)*len(learning_rates)*len(optimizers),1]),
+            index=indices)
     def run_trial(gamma, alpha, op):
         env_name = 'FrozenLake-v0'
         e = gym.make(env_name)
@@ -46,35 +58,34 @@ def exp1():
             if iters >= 100000:
                 break
         return iters
+    def foo(i):
+        g,a,o = indices[i]
+        g = float(g)
+        a = float(a)
+        o = eval(o)
+        return run_trial(g,a,o)
 
-    highest_val = 0
-    best_params = None
-    for (gamma, alpha, op) in itertools.product(discount_factors, learning_rates, optimizers):
-        print("Running discount factor %f, learning rate %f, optimizer %s" % (gamma, alpha, op))
-        val = 0
-        for _ in range(10):
-            val += run_trial(gamma, alpha, op)
-        if highest_val < val:
-            highest_val = val
-            best_params = (gamma, alpha, op)
-    print("Grid search complete.")
-    print(best_params)
-    print("Discount factor: %f, Learning rate: %d, Optimizer: %s" % best_params)
+    pool = ProcessPool(processes=3)
+    output = pool.map(foo, range(len(indices)))
+    for i,x in enumerate(output):
+        g,a,o = indices[i]
+        data.loc[g,a,o] = x
+    print(data)
 
 def exp2():
     print("Environment: FrozenLake4x4")
     print("Params:")
     print("""
-            \tDiscount factor: 
-            \tLearning rate:
-            \tOptimizer:
+            \tDiscount factor: 1
+            \tLearning rate: 0.1
+            \tOptimizer: RMS Prop
     """)
 
     env_name = 'FrozenLake-v0'
     e = gym.make(env_name)
 
     action_space = np.array([0,1,2,3])
-    agent = TabularAgent(action_space=action_space, discount_factor=0.99, learning_rate=0.1, optimizer=Optimizer.RMS_PROP)
+    agent = TabularAgent(action_space=action_space, discount_factor=1, learning_rate=0.1, optimizer=Optimizer.RMS_PROP)
 
     iters = 0
     while True:
@@ -89,6 +100,7 @@ def exp2():
 
 def run_all():
     exp1()
+    #exp2()
 
 if __name__ == "__main__":
     run_all()
