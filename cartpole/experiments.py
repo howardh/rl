@@ -78,7 +78,8 @@ def exp1():
         n = int(n)
         eb = float(eb)
         et = float(et)
-        return run_trial(g,n,eb,et)
+        results = [run_trial(g,n,eb,et) for _ in range(10)]
+        return np.mean(results)
 
     pool = ProcessPool(processes=3)
     output = pool.map(foo, range(len(indices)))

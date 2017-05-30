@@ -54,21 +54,6 @@ class LSTDAgent(Agent):
         self.prev_done = True
         self.prev_reward = None
 
-        self.min_x1 = 0
-        self.min_x3 = 0
-        self.max_x1 = 0
-        self.max_x3 = 0
-
-    def update_min_max(self, obs):
-        if self.min_x1 > obs[1]:
-            self.min_x1 = obs[1]
-        if self.max_x1 < obs[1]:
-            self.max_x1 = obs[1]
-        if self.min_x3 > obs[3]:
-            self.min_x3 = obs[3]
-        if self.max_x3 < obs[3]:
-            self.max_x3 = obs[3]
-
     def update_weights(self):
         self.learner.update_weights()
 
@@ -86,7 +71,6 @@ class LSTDAgent(Agent):
             step_count += 1
 
             obs2, reward, done, _ = env.step(action)
-            self.update_min_max(obs2)
             obs2 = self.features(obs2)
             action2 = self.act(obs2)
             reward_sum += reward
