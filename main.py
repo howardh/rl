@@ -1,5 +1,6 @@
 import gym
 import numpy as np
+import pprint
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -246,4 +247,5 @@ if __name__ == "__main__":
     #experiments.run_all()
     a,b = exp1.run()
     print(a)
-    print(b)
+    pprint.pprint(b)
+    a.to_csv("exp1.csv")

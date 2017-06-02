@@ -8,6 +8,7 @@ import csv
 import os
 from tqdm import tqdm
 import time
+import operator
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -42,7 +43,7 @@ def _run_trial(gamma, alpha, op):
             learning_rate=alpha,
             optimizer=op)
 
-    for iters in range(1,1000):
+    for iters in range(1,100000):
         agent.run_episode(e)
         if iters % 500 == 0:
             rewards = agent.test(e, 100, max_steps=1000)
@@ -60,7 +61,7 @@ def _worker(i):
     except KeyboardInterrupt:
         return None
 
-def run(n=3):
+def run(n=10):
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
     print("Parameter space:")
@@ -96,7 +97,8 @@ def run(n=3):
     if len(futures) > 0:
         sorted_data = None # TODO
     else:
-        sorted_data = sorted([(str(i),np.mean(data.loc[i])) for i in indices])
+        sorted_data = sorted([(str(i),np.mean(data.loc[i])) for i in indices], key=operator.itemgetter(1))
+        sorted_data.reverse()
     return data, sorted_data
 
 def run2():
