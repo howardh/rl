@@ -3,6 +3,12 @@ import gym
 import itertools
 import pandas
 from pathos.multiprocessing import ProcessPool
+from pathos.threading import ThreadPool
+import multiprocessing
+import dill
+import csv
+import os
+from tqdm import tqdm
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -50,17 +56,12 @@ def exp1():
                 learning_rate=alpha,
                 optimizer=op)
 
-        iters = 0
-        while True:
-            iters += 1
+        for iters in range(1,10000):
             agent.run_episode(e)
             if iters % 500 == 0:
-                rewards = agent.test(e, 100)
-                print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
+                rewards = agent.test(e, 100, max_steps=1000)
                 if np.mean(rewards) >= 0.78:
                     break
-            if iters >= 100000:
-                break
         return iters
 
     def foo(i):
@@ -69,9 +70,11 @@ def exp1():
         a = float(a)
         o = eval(o)
         results = [run_trial(g,a,o) for _ in range(10)]
+        print(indices[i])
+        print(results)
         return np.mean(results)
-    pool = ProcessPool(processes=3)
-    output = pool.map(foo, range(len(indices)))
+    pool = ProcessPool(3)
+    output = pool.imap(foo, range(len(indices)))
     for i,x in enumerate(output):
         g,a,o = indices[i]
         data.loc[g,a,o] = x
@@ -93,16 +96,24 @@ def exp1_2():
     action_space = np.array([0,1,2,3])
     agent = TabularAgent(action_space=action_space, discount_factor=1, learning_rate=0.1, optimizer=Optimizer.RMS_PROP)
 
-    iters = 0
-    while True:
-        iters += 1
-        agent.run_episode(e)
-        if iters % 500 == 0:
-            rewards = agent.test(e, 100)
-            print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
-            frozenlake.utils.print_policy(agent)
-            if np.mean(rewards) >= 0.78:
-                break
+    file_num = 0
+    while os.path.isfile("data/%d.csv" % file_num):
+        file_num += 1
+    with open('data/%d.csv' % file_num, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+        iters = 0
+        all_rewards = []
+        while iters < 100000:
+            iters += 1
+            agent.run_episode(e)
+            if iters % 500 == 0:
+                print(iters)
+                rewards = agent.test(e, 100, max_steps=1000)
+                all_rewards.append(rewards)
+                csvwriter.writerow(rewards)
+                csvfile.flush()
+                print(rewards)
+    return data
 
 def exp2():
     print("Gridsearch")
@@ -141,18 +152,13 @@ def exp2():
         agent.set_behaviour_policy("%s-epsilon" % eps_b)
         agent.set_target_policy("%s-epsilon" % eps_t)
 
-        iters = 0
-        while True:
-            iters += 1
+        for iters in range(1,1000):
             agent.run_episode(e)
             if iters % upd_freq == 0:
                 agent.update_weights()
                 rewards = agent.test(e, 100)
-                print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
                 if np.mean(rewards) >= 0.78:
                     break
-            if iters > 100000:
-                break
         return iters
 
     def foo(i):
@@ -164,7 +170,7 @@ def exp2():
         results = [run_trial(g,n,eb,et) for _ in range(10)]
         return np.mean(results)
     pool = ProcessPool(processes=3)
-    output = pool.map(foo, range(len(indices)))
+    output = pool.imap(foo, range(len(indices)))
     for i,x in enumerate(output):
         g,n,eb,et = indices[i]
         data.loc[g,n,eb,et] = x
@@ -173,7 +179,9 @@ def exp2():
 
 def run_all():
     #gridsearch_results = exp1()
-    exp2()
+    #gridsearch_results.to_csv("gridsearch.csv")
+    exp1_2()
+    #exp2()
 
 if __name__ == "__main__":
     run_all()
