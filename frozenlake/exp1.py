@@ -18,13 +18,6 @@ import frozenlake
 from frozenlake import features
 from frozenlake import utils
 
-"""
-FrozenLake
-
-Tabular gridsearch
-LSTD gridsearch
-"""
-
 discount_factors = ['1', '0.99', '0.9']
 learning_rates = ['0.1', '0.01', '0.001']
 optimizers = ['Optimizer.RMS_PROP', 'Optimizer.NONE']
@@ -32,7 +25,19 @@ indices = pandas.MultiIndex.from_product(
         [discount_factors, learning_rates, optimizers],
         names=["Discount Factor", "Learning Rate", "Optimizer"])
 
-def _run_trial(gamma, alpha, op):
+def _find_next_free_file(prefix, suffix, directory):
+    import os
+    if not os.path.isdir(directory):
+        os.makedirs(directory)
+    i = 0
+    while True:
+        path=os.path.join(directory,"%s-%d.%s" % (prefix, i, suffix))
+        if os.path.isfile(path):
+            break
+        i += 1
+    return path
+
+def _run_trial(gamma, alpha, op, directory=None):
     env_name = 'FrozenLake-v0'
     e = gym.make(env_name)
 
@@ -43,25 +48,30 @@ def _run_trial(gamma, alpha, op):
             learning_rate=alpha,
             optimizer=op)
 
-    for iters in range(1,100000):
-        agent.run_episode(e)
-        if iters % 500 == 0:
-            rewards = agent.test(e, 100, max_steps=1000)
-            if np.mean(rewards) >= 0.78:
-                break
+    file_name = _find_next_free_file("g%f-a%f-o%s", "csv", directory)
+    with open(file_name, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',')
+        for iters in range(1,1000):
+            agent.run_episode(e)
+            if iters % 500 == 0:
+                rewards = agent.test(e, 100, max_steps=1000)
+                csvwriter.writerow([iters, rewards])
+                csvfile.flush()
+                if np.mean(rewards) >= 0.78:
+                    break
     return iters
 
-def _worker(i):
+def _worker(i, directory=None):
     try:
         g,a,o = indices[i]
         g = float(g)
         a = float(a)
         o = eval(o)
-        return _run_trial(g,a,o)
+        return _run_trial(g,a,o,directory)
     except KeyboardInterrupt:
         return None
 
-def run(n=10):
+def run(n=3, proc=3, directory="temp_data"):
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
     print("Parameter space:")
@@ -78,7 +88,7 @@ def run(n=10):
     try:
         with ProcessPoolExecutor(max_workers=3) as executor:
             for i in tqdm(range(len(indices)), desc="Adding jobs"):
-                future = [executor.submit(_worker, i) for _ in range(n)]
+                future = [executor.submit(_worker, i, directory) for _ in range(n)]
                 data.loc[indices[i]] = future
                 futures += future
             pbar = tqdm(total=len(futures), desc="Job completion")

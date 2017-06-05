@@ -4,7 +4,6 @@ import datetime
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
-from learner.learner import Optimizer
 
 import cartpole
 from cartpole import experiments
@@ -31,21 +30,24 @@ def lstd_control():
             trace_factor=None,
     )
     agent.set_behaviour_policy("0.1-epsilon")
+    #agent.set_behaviour_policy(utils.optimal_policy)
+    #agent.set_behaviour_policy(utils.less_optimal_policy)
     agent.set_target_policy("0-epsilon")
 
     iters = 0
     while True:
         iters += 1
-        agent.run_episode(e)
-        if iters % 500 == 0:
+        r,s = agent.run_episode(e)
+        if iters % 100 == 0:
             agent.update_weights()
             print("Testing...")
             print(agent.learner.weights.transpose())
-            print("%f %f %f %f" % (agent.min_x1, agent.max_x1, agent.min_x3, agent.max_x3))
             rewards = agent.test(e, 100, render=False, processors=3)
             print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
             if np.mean(rewards) >= 190:
                 break
+        if iters > 3000:
+            break
 
 def lstd_control_steps():
     env_name = 'CartPole-v0'
@@ -79,6 +81,6 @@ def lstd_control_steps():
                 break
 
 if __name__ == "__main__":
-    experiments.run_all()
-    #lstd_control()
+    #experiments.run_all()
+    lstd_control()
     #lstd_control_steps()

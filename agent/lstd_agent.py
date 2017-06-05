@@ -98,7 +98,7 @@ class LSTDAgent(Agent):
         self.prev_reward = reward
         self.prev_done = done
 
-    def test_once(self, env, render=False):
+    def test_once(self, env, render=False, max_steps=np.inf):
         """
         Run an episode on the environment by following the target behaviour policy (Probably using a greedy deterministic policy).
 
