@@ -32,7 +32,7 @@ def _find_next_free_file(prefix, suffix, directory):
     i = 0
     while True:
         path=os.path.join(directory,"%s-%d.%s" % (prefix, i, suffix))
-        if os.path.isfile(path):
+        if not os.path.isfile(path):
             break
         i += 1
     return path
@@ -48,10 +48,10 @@ def _run_trial(gamma, alpha, op, directory=None):
             learning_rate=alpha,
             optimizer=op)
 
-    file_name = _find_next_free_file("g%f-a%f-o%s", "csv", directory)
+    file_name = _find_next_free_file("g%f-a%f-o%s" % (gamma, alpha, op), "csv", directory)
     with open(file_name, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
-        for iters in range(1,1000):
+        for iters in range(1,10000):
             agent.run_episode(e)
             if iters % 500 == 0:
                 rewards = agent.test(e, 100, max_steps=1000)
@@ -71,7 +71,7 @@ def _worker(i, directory=None):
     except KeyboardInterrupt:
         return None
 
-def run(n=3, proc=3, directory="temp_data"):
+def run(n=10, proc=10, directory="results/%s/%s"%(__name__, time.strftime("%Y-%m-%d_%H-%M-%S"))):
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
     print("Parameter space:")
@@ -100,7 +100,7 @@ def run(n=3, proc=3, directory="temp_data"):
     except KeyboardInterrupt:
         print("Keyboard Interrupt Detected")
     except Exception:
-        pass
+        print("Something broke")
     for i in tqdm(range(len(indices)), desc="Retrieving results"):
         future = data.loc[indices[i]]
         data.loc[indices[i]] = [f.result() if f.done() else f for f in future]
@@ -109,33 +109,10 @@ def run(n=3, proc=3, directory="temp_data"):
     else:
         sorted_data = sorted([(str(i),np.mean(data.loc[i])) for i in indices], key=operator.itemgetter(1))
         sorted_data.reverse()
+    data.to_csv(os.path.join(directory, "results.csv"))
+    dill.dump(data, open(os.path.join(directory, "results.pkl"),'wb'))
+    dill.dump(sorted_data, open(os.path.join(directory, "sorted_results.pkl"),'wb'))
     return data, sorted_data
-
-def run2():
-    print("Gridsearch")
-    print("Environment: FrozenLake4x4")
-    print("Parameter space:")
-    print("""
-            \tDiscount factor: %s
-            \tLearning rate: %s
-            \tOptimizer: %s
-    """ % (discount_factors, learning_rates, optimizers))
-    print("Determines the best combination of parameters by the number of iterations needed to learn.")
-    data = pandas.DataFrame(
-            -np.ones([len(discount_factors)*len(learning_rates)*len(optimizers),1])*np.inf,
-            index=indices)
-
-    try:
-        pool = multiprocessing.Pool(3)
-        output = pool.imap(_worker, range(len(indices)))
-        for i,x in tqdm(enumerate(output), total=len(indices)):
-            g,a,o = indices[i]
-            data.loc[g,a,o] = x
-        print(data)
-    except KeyboardInterrupt:
-        print(data)
-    finally:
-        return data
 
 if __name__ == "__main__":
     run()
