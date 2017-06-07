@@ -11,6 +11,7 @@ from frozenlake import features
 from frozenlake import utils
 from frozenlake import experiments
 from frozenlake import exp1
+from frozenlake import exp2
 
 import frozenlake8x8
 from frozenlake8x8 import features
@@ -245,7 +246,9 @@ if __name__ == "__main__":
     #lstd_control_8x8()
 
     #experiments.run_all()
-    a,b = exp1.run()
+
+    #a,b = exp1.run()
+    a,b = exp2.run()
     print(a)
     pprint.pprint(b)
     a.to_csv("exp1.csv")
