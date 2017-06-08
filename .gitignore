@@ -1,4 +1,6 @@
 .cs_files
+results
+results/**
 **/*.swp
 **/*.swo
 **/__pycache__

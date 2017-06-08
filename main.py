@@ -248,7 +248,10 @@ if __name__ == "__main__":
     #experiments.run_all()
 
     #a,b = exp1.run()
-    a,b = exp2.run()
-    print(a)
-    pprint.pprint(b)
-    a.to_csv("exp1.csv")
+    #a,b = exp2.run()
+    #print(a)
+    #pprint.pprint(b)
+    #a.to_csv("exp1.csv")
+
+    #exp2.run2()
+    exp2.run_all()
