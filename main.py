@@ -12,10 +12,13 @@ from frozenlake import utils
 from frozenlake import experiments
 from frozenlake import exp1
 from frozenlake import exp2
+from frozenlake import exp3
 
 import frozenlake8x8
-from frozenlake8x8 import features
-from frozenlake8x8 import utils
+import frozenlake8x8.features
+import frozenlake8x8.utils
+
+import utils
 
 # When taking an action, there's an equal probability of moving in any direction that isn't the opposite direction
 # e.g. If you choose up, there's a 1/3 chance of going up, 1/3 of going left, 1/3 of going right
@@ -254,4 +257,13 @@ if __name__ == "__main__":
     #a.to_csv("exp1.csv")
 
     #exp2.run2()
-    exp2.run_all()
+    #exp2.run_all()
+    #exp3.run_all()
+    #d, sd = exp3.parse_results(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")
+
+    #exp3.run2(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-12_11-56-03")
+    #exp3.run2()
+    exp3.parse_results2()
+    #print(d)
+    #print(sd)
