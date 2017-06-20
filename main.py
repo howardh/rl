@@ -262,8 +262,7 @@ if __name__ == "__main__":
     #d, sd = exp3.parse_results(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")
 
     #exp3.run2(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")
-    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-12_11-56-03")
-    #exp3.run2()
-    exp3.parse_results2()
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-12_11-56-03")
+    exp3.run_all()
     #print(d)
     #print(sd)

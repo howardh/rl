@@ -54,6 +54,8 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
             trace_factor=lam,
             sigma=sigma
     )
+    agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
+    agent.set_target_policy("%.3f-epsilon"%eps_t)
 
     file_name = utils.find_next_free_file(
             "g%.3f-u%d-eb%.3f-et%.3f-s%.3f-l%.3f" % (gamma, upd_freq, eps_b, eps_t, sigma, lam),
@@ -97,7 +99,7 @@ def _worker2(params, directory=None):
     except KeyboardInterrupt:
         return None
 
-def run(n=10, proc=10,
+def run(n=10, proc=20,
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")):
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
@@ -259,7 +261,7 @@ def get_best_params(directory, sigma=None):
         best_params[s] = by_sigma[s][1][-1][0]
     return best_params
 
-def run2(n=1000, proc=10, params=None, directory=None):
+def run2(n=1000, proc=20, params=None, directory=None):
 
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part2")
