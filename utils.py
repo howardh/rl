@@ -20,11 +20,15 @@ def set_results_directory(d):
 def find_next_free_file(prefix, suffix, directory):
     if not os.path.isdir(directory):
         os.makedirs(directory, exist_ok=True)
-    i = 0
-    while True:
-        path=os.path.join(directory,"%s-%d.%s" % (prefix, i, suffix))
-        if not os.path.isfile(path):
-            break
-        i += 1
+    with self.lock:
+        i = 0
+        while True:
+            path=os.path.join(directory,"%s-%d.%s" % (prefix, i, suffix))
+            if not os.path.isfile(path):
+                break
+            i += 1
+        # Create the file to avoid a race condition
+        with open(path, "w") as _:
+            pass
     return path
 

@@ -6,9 +6,12 @@ from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
 
 import cartpole
-from cartpole import experiments
-from cartpole import features
-from cartpole import utils
+import cartpole.experiments
+import cartpole.features
+import cartpole.utils
+
+from cartpole import exp2
+import utils
 
 # When taking an action, there's an equal probability of moving in any direction that isn't the opposite direction
 # e.g. If you choose up, there's a 1/3 chance of going up, 1/3 of going left, 1/3 of going right
@@ -82,5 +85,8 @@ def lstd_control_steps():
 
 if __name__ == "__main__":
     #experiments.run_all()
-    lstd_control()
+    #lstd_control()
     #lstd_control_steps()
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-20_20-34-59")
+    #exp2.run_all()
+    exp2.parse_results2()
