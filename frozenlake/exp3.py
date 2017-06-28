@@ -133,18 +133,6 @@ def run(n=10, proc=20,
         print("Keyboard Interrupt Detected")
     except Exception:
         print("Something broke")
-    #for i in tqdm(INDICES, desc="Retrieving results"):
-    #    future = data.loc[i]
-    #    data.loc[i] = [f.result() if f.done() else f for f in future]
-    #if len(futures) > 0:
-    #    sorted_data = None # TODO
-    #else:
-    #    sorted_data = sorted([(str(i),np.mean(data.loc[i])) for i in INDICES], key=operator.itemgetter(1))
-    #    sorted_data.reverse()
-    #data.to_csv(os.path.join(directory, "results.csv"))
-    #dill.dump(data, open(os.path.join(directory, "results.pkl"),'wb'))
-    #dill.dump(sorted_data, open(os.path.join(directory, "sorted_results.pkl"),'wb'))
-    #return data, sorted_data
 
 def parse_results(directory):
     import re
@@ -240,6 +228,22 @@ def parse_results(directory):
         sorted_df = sorted([(i,df.loc[i]["Mean"]) for i in df.index], key=operator.itemgetter(1))
         sorted_df.reverse()
         by_sigma[sigma] = (df, sorted_df)
+
+    # Plot results
+    #for sigma in s:
+    #    u = params[sigma][1]
+    #    """
+    #    gamma, upd_freq, eb, et, lambda
+    #    names=["Discount Factor", "Update Frequency", "Behaviour Epsilon",
+    #        "Target Epsilon", "Sigma", "Lambda"]
+    #    """
+    #    df = data.iloc[data.index.get_level_values('Sigma') == sigma]
+    #    for gamma in g:
+    #        dfg = df.iloc[df.index.get_level_values('Discount Factor') == gamma]
+    #    plt.legend(loc='best')
+    #    plt.xlabel("Episodes")
+    #    plt.ylabel("Reward")
+    #    plt.savefig(os.path.join(directory, "graph-s%s.png" % sigma))
 
     return data, sorted_data
 

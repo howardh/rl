@@ -10,7 +10,7 @@ import cartpole.experiments
 import cartpole.features
 import cartpole.utils
 
-from cartpole import exp2
+from cartpole import exp1
 import utils
 
 # When taking an action, there's an equal probability of moving in any direction that isn't the opposite direction
@@ -88,5 +88,5 @@ if __name__ == "__main__":
     #lstd_control()
     #lstd_control_steps()
     utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-20_20-34-59")
-    #exp2.run_all()
-    exp2.parse_results2()
+    #exp1.run_all()
+    exp1.parse_results2()
