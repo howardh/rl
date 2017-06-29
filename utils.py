@@ -1,8 +1,11 @@
 import os
 import time
+import threading
 
 START_TIME = time.strftime("%Y-%m-%d_%H-%M-%S")
 _results_dir = None
+
+lock = threading.Lock()
 
 def get_results_directory():
     global _results_dir
@@ -18,9 +21,10 @@ def set_results_directory(d):
     _results_dir = d
 
 def find_next_free_file(prefix, suffix, directory):
+    global lock
     if not os.path.isdir(directory):
         os.makedirs(directory, exist_ok=True)
-    with self.lock:
+    with lock:
         i = 0
         while True:
             path=os.path.join(directory,"%s-%d.%s" % (prefix, i, suffix))
