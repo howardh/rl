@@ -90,7 +90,7 @@ if __name__ == "__main__":
     #lstd_control_steps()
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-20_20-34-59")
 
-    import shutil
-    shutil.rmtree("/NOBACKUP/hhuang63/results3/test")
-    utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
+    #import shutil
+    #shutil.rmtree("/NOBACKUP/hhuang63/results3/test")
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
     exp2.run_all()
