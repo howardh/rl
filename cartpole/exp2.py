@@ -26,7 +26,7 @@ discount_factors = ['1', '0.9', '0.8']
 update_frequencies = ['50', '200']
 behaviour_epsilons = ['1', '0.5', '0.1', '0']
 target_epsilons = ['0', '0.01', '0.05']
-sigmas = ['0', '0.5', '1']
+sigmas = ['0', '0.25', '0.5', '0.75', '1']
 trace_factors = ['0.01', '0.5', '0.99']
 INDICES = pandas.MultiIndex.from_product(
         [discount_factors, update_frequencies, behaviour_epsilons,
