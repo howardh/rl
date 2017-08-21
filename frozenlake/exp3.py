@@ -57,7 +57,7 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
     agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
     agent.set_target_policy("%.3f-epsilon"%eps_t)
 
-    file_name = utils.find_next_free_file(
+    file_name,_ = utils.find_next_free_file(
             "g%.3f-u%d-eb%.3f-et%.3f-s%.3f-l%.3f" % (gamma, upd_freq, eps_b, eps_t, sigma, lam),
             "csv", directory)
     with open(file_name, 'w') as csvfile:

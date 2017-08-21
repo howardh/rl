@@ -31,8 +31,9 @@ def find_next_free_file(prefix, suffix, directory):
             if not os.path.isfile(path):
                 break
             i += 1
-        # Create the file to avoid a race condition
-        with open(path, "w") as _:
+        # Create the file to avoid a race condition.
+        # Will give an error if the file already exists.
+        with os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY) as _:
             pass
-    return path
+    return path, i
 

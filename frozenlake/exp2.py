@@ -48,7 +48,7 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, directory=None,
             sigma=1
     )
 
-    file_name = utils.find_next_free_file(
+    file_name,_ = utils.find_next_free_file(
             "g%.3f-u%d-eb%.3f-et%.3f" % (gamma, upd_freq, eps_b, eps_t),
             "csv", directory)
     with open(file_name, 'w') as csvfile:

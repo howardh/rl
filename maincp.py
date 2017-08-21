@@ -93,4 +93,5 @@ if __name__ == "__main__":
     #import shutil
     #shutil.rmtree("/NOBACKUP/hhuang63/results3/test")
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-08-08_16-31-44")
     exp2.run_all()

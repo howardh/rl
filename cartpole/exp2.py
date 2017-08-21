@@ -11,6 +11,7 @@ import time
 import operator
 import pprint
 import sys
+import traceback
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -35,7 +36,7 @@ INDICES = pandas.MultiIndex.from_product(
             "Target Epsilon", "Sigma", "Lambda"])
 
 def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
-        stop_when_learned=True, max_iters=10000):
+        stop_when_learned=True, max_iters=10000, max_trials=None):
     """
     Run the learning algorithm on CartPole and return the number of
     iterations needed to learn the task.
@@ -57,9 +58,13 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
     agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
     agent.set_target_policy("%.3f-epsilon"%eps_t)
 
-    file_name = utils.find_next_free_file(
+    file_name,num = utils.find_next_free_file(
             "g%.3f-u%d-eb%.3f-et%.3f-s%.3f-l%.3f" % (gamma, upd_freq, eps_b, eps_t, sigma, lam),
             "csv", directory)
+    if max_trials is not None and i >= max_trials:
+        # Delete the created file, since we're not using it anymore
+        os.remove(file_name) # TODO: This doesn't seem to be working
+        return None
     with open(file_name, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
         for iters in range(1,max_iters):
@@ -85,19 +90,25 @@ def _worker(i, directory=None):
         return _run_trial(g,u,eb,et,s,l,directory)
     except KeyboardInterrupt:
         return None
+    except Exception as e:
+        traceback.print_exc()
+        raise e
 
 def _worker2(params, directory=None):
     try:
-        g,u,eb,et,s,l = params
+        g,u,eb,et,s,l,m = params
         g = float(g)
         u = int(u)
         eb = float(eb)
         et = float(et)
         s = float(s)
         l = float(l)
-        return _run_trial(g,u,eb,et,s,l,directory,False,5000)
+        return _run_trial(g,u,eb,et,s,l,directory,False,5000,m)
     except KeyboardInterrupt:
         return None
+    #except Exception as e:
+    #    traceback.print_exc()
+    #    raise e
 
 def run(n=10, proc=10,
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")):
@@ -120,7 +131,8 @@ def run(n=10, proc=10,
     try:
         with ProcessPoolExecutor(max_workers=proc) as executor:
             for i in tqdm(INDICES, desc="Adding jobs"):
-                future = [executor.submit(_worker2, i, directory) for _ in range(n)]
+                params = i + (n,)
+                future = [executor.submit(_worker2, params, directory) for _ in range(n)]
                 data.loc[i] = future
                 futures += future
             pbar = tqdm(total=len(futures), desc="Job completion")
@@ -131,10 +143,16 @@ def run(n=10, proc=10,
                 time.sleep(1)
     except KeyboardInterrupt:
         print("Keyboard Interrupt Detected")
-    except Exception:
+    except Exception as e:
         print("Something broke")
+        print(e)
 
 def parse_results(directory):
+    # Check that the experiment has been run and that results are present
+    if not os.path.isdir(directory):
+        print("No results to parse in %s" % directory)
+        return None
+
     import re
     # Check if pickle files are there
     results_file_name = os.path.join(directory, "results.pkl") 
@@ -271,7 +289,7 @@ def run2(n=1000, proc=10, params=None, directory=None):
     try:
         with ProcessPoolExecutor(max_workers=proc) as executor:
             for s in params.keys():
-                future = [executor.submit(_worker2, params[s], directory) for
+                future = [executor.submit(_worker2, params[s]+(n,), directory) for
                         _ in tqdm(range(n), desc="Adding jobs Sigma=%s"%s)]
                 futures += future
             pbar = tqdm(total=len(futures), desc="Job completion")
@@ -300,14 +318,14 @@ def parse_results2(directory=None):
     # Check if pickle files are there
     results_file_name = os.path.join(directory, "results.pkl") 
     sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
-    if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
-        with open(results_file_name, 'rb') as f:
-            data = dill.load(f)
-        with open(sorted_results_file_name, 'rb') as f:
-            sorted_data = dill.load(f)
-        print(data)
-        pprint.pprint(sorted_data)
-        return
+    #if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
+    #    with open(results_file_name, 'rb') as f:
+    #        data = dill.load(f)
+    #    with open(sorted_results_file_name, 'rb') as f:
+    #        sorted_data = dill.load(f)
+    #    print(data)
+    #    pprint.pprint(sorted_data)
+    #    return
 
     # Parse set of parameters
     files = [f for f in os.listdir(directory) if
@@ -334,10 +352,17 @@ def parse_results2(directory=None):
             params[sigma] = (gamma, upd_freq, eps_b, eps_t, sigma, lam)
         if sigma not in data.keys():
             data[sigma] = []
-        with open(os.path.join(directory,file_name), 'r') as csvfile:
-            reader = csv.reader(csvfile, delimiter=',')
-            results = [np.sum(eval(r[1])) for r in reader]
-            data[sigma] += [results]
+        try:
+            full_path = os.path.join(directory,file_name)
+            with open(full_path, 'r') as csvfile:
+                reader = csv.reader(csvfile, delimiter=',')
+                results = [np.sum(eval(r[1])) for r in reader]
+                if len(results) == 0:
+                    os.remove(full_path)
+                    continue
+                data[sigma] += [results]
+        except SyntaxError as e:
+            print("Broken file: %s" % file_name)
 
     # Remove all incomplete series
     for s in data.keys():
@@ -369,8 +394,8 @@ def run_all():
     part1_dir = os.path.join(utils.get_results_directory(),__name__,"part1")
     part2_dir = os.path.join(utils.get_results_directory(),__name__,"part2")
 
-    run(directory=part1_dir)
-    parse_results(directory=part1_dir)
+    #run(directory=part1_dir)
+    #parse_results(directory=part1_dir)
     run2(directory=part2_dir)
     parse_results2(directory=part2_dir)
 
