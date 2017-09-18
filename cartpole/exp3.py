@@ -26,7 +26,7 @@ import utils
 discount_factors = ['1', '0.9', '0.8']
 update_frequencies = ['50', '200']
 behaviour_epsilons = ['1', '0.5', '0.1', '0']
-target_epsilons = ['0', '0.01', '0.05']
+target_epsilons = ['0.1', '0.05', '0']
 sigmas = ['0', '0.25', '0.5', '0.75', '1']
 trace_factors = ['0.01', '0.5', '0.99']
 INDICES = pandas.MultiIndex.from_product(
@@ -54,7 +54,9 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
                 use_importance_sampling=False,
                 use_traces=True,
                 trace_factor=lam,
-                sigma=sigma
+                sigma=sigma,
+                tree_backup_policy=lambda s:
+                cartpole.utils.less_optimal_policy(s,p=0.9)
         )
         agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
         agent.set_target_policy("%.3f-epsilon"%eps_t)
@@ -393,13 +395,13 @@ def parse_results2(directory=None):
     plt.savefig(os.path.join(directory, "graph.png"))
     return data, m, s
 
-def run_all():
+def run_all(proc=10):
     part1_dir = os.path.join(utils.get_results_directory(),__name__,"part1")
     part2_dir = os.path.join(utils.get_results_directory(),__name__,"part2")
 
-    #run(directory=part1_dir)
-    #parse_results(directory=part1_dir)
-    run2(directory=part2_dir)
+    run(directory=part1_dir, proc=proc)
+    parse_results(directory=part1_dir)
+    run2(directory=part2_dir, proc=proc)
     parse_results2(directory=part2_dir)
 
 if __name__ == "__main__":

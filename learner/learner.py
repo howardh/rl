@@ -272,7 +272,8 @@ class LSTDTraceLearner(LSTDLearner):
             self.e_mat *= 0
 
 class LSTDTraceQsLearner(LSTDLearner):
-    def __init__(self, num_features, action_space, discount_factor, trace_factor, sigma):
+    def __init__(self, num_features, action_space, discount_factor,
+            trace_factor, sigma, tree_backup_policy=None):
         LSTDLearner.__init__(self, num_features=num_features, action_space=action_space, discount_factor=discount_factor)
 
         if trace_factor is None:
@@ -282,6 +283,7 @@ class LSTDTraceQsLearner(LSTDLearner):
 
         self.trace_factor = trace_factor
         self.sigma = sigma
+        self.tb_policy = tree_backup_policy
 
         # Trace vector
         self.e_mat = np.matrix(np.zeros([1,self.num_features*len(self.action_space)]))
@@ -310,8 +312,8 @@ class LSTDTraceQsLearner(LSTDLearner):
             x0 = self.combine_state_action(state0, action0)
             x1 = self.combine_state_action(state1, action1)
             x1_all = self.get_all_state_action_pairs(state1)
-            pi0 = self.get_target_policy(state0).reshape([len(self.action_space),1])
-            pi1 = self.get_target_policy(state1).reshape([len(self.action_space),1])
+            pi0 = self.get_tree_backup_policy(state0).reshape([len(self.action_space),1])
+            pi1 = self.get_tree_backup_policy(state1).reshape([len(self.action_space),1])
 
             self.e_mat = lam*gamma*((1-sigma)*pi0.item(action0)+sigma)*self.e_mat + x0.transpose()
             self.a_mat += self.e_mat.transpose()*(x0-gamma*(sigma*x1 + (1-sigma)*(x1_all*pi1))).transpose()
@@ -327,3 +329,10 @@ class LSTDTraceQsLearner(LSTDLearner):
         else:
             self.prev_sars = (state1, action1, reward2, state2)
 
+    def set_tree_backup_policy(self, policy):
+        self.tb_policy = policy
+
+    def get_tree_backup_policy(self, state):
+        if self.tb_policy is not None:
+            return self.tb_policy(state)
+        return self.get_target_policy(state)

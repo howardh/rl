@@ -25,6 +25,7 @@ tiles = [
 def tile_coding(x):
     """
     Return a tile encoding of a FrozenLake 4x4 state.
+    Includes a 1 at the end of the list for the bias term.
 
     >>> tile_encoding(0)
     [[1], [0], [0], [0], [0], [0], [0], [0], [0], [1]]
@@ -33,6 +34,6 @@ def tile_coding(x):
     >>> tile_encoding(5)
     [[.25], [.25], [0], [.25], [.25], [0], [0], [0], [0], [1]]
     """
-    output = np.array([1 if x in tiles[i] else 0 for i in range(9)])
-    output = output/np.sum(output)
+    output = np.array([1 if x in t else 0 for t in tiles])
+    output = output/float(np.sum(output))
     return np.append(output,1).reshape((10,1))

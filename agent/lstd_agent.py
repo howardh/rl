@@ -22,7 +22,8 @@ class LSTDAgent(Agent):
 
     def __init__(self, num_features, action_space, discount_factor,
             use_traces=False, trace_factor=None,
-            use_importance_sampling=False, sigma=1, features=lambda x: x):
+            use_importance_sampling=False, sigma=1, features=lambda x: x,
+            tree_backup_policy = None):
         if use_traces:
             if sigma==1:
                 #print("Initializing LSTD agent with traces")
@@ -39,7 +40,8 @@ class LSTDAgent(Agent):
                         action_space=action_space,
                         discount_factor=discount_factor,
                         trace_factor=trace_factor,
-                        sigma=sigma
+                        sigma=sigma,
+                        tree_backup_policy=tree_backup_policy
                 )
         else:
             #print("Initializing LSTD agent")

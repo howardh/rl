@@ -13,6 +13,7 @@ from frozenlake import experiments
 from frozenlake import exp1
 from frozenlake import exp2
 from frozenlake import exp3
+from frozenlake import exp4
 
 import frozenlake8x8
 import frozenlake8x8.features
@@ -263,6 +264,11 @@ if __name__ == "__main__":
 
     #exp3.run2(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-12_11-56-03")
-    exp3.run_all()
+    #exp3.run_all()
     #print(d)
     #print(sd)
+
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-08-24_22-24-12")
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
+    exp4.parse_results2()
+    #exp4.run_all()
