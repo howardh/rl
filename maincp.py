@@ -94,5 +94,5 @@ if __name__ == "__main__":
     #import shutil
     #shutil.rmtree("/NOBACKUP/hhuang63/results3/test")
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-09-14_15-30-47")
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-09-18_14-13-01")
     exp3.run_all(20)

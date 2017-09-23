@@ -1,6 +1,8 @@
 import collections
 import numpy as np
 from enum import Enum
+import scipy.sparse
+
 #from enum import auto
 
 class Learner(object):
@@ -337,3 +339,49 @@ class LSTDTraceQsLearner(LSTDLearner):
         if self.tb_policy is not None:
             return self.tb_policy(state)
         return self.get_target_policy(state)
+
+class SparseLSTDLearner(LSTDLearner):
+    def __init__(self, num_features, action_space, discount_factor, use_importance_sampling=False):
+        Learner.__init__(self)
+
+        self.use_importance_sampling = use_importance_sampling
+        self.discount_factor = discount_factor
+        self.num_features = num_features
+        self.action_space = action_space
+
+        self.a_mat = scipy.sparse.csc_matrix((self.num_features*len(self.action_space),)*2)
+        self.b_mat = scipy.sparse.csc_matrix((self.num_features*len(self.action_space),1))
+
+        self.weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
+        self.old_weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
+
+    def combine_state_action(self, state, action):
+        sa = LSTDLearner.combine_state_action(self, state, action)
+        return scipy.sparse.csc_matrix(sa)
+
+    def combine_state_target_action(self, state):
+        sa = LSTDLearner.combine_state_target_action(self, state)
+        return scipy.sparse.csc_matrix(sa)
+
+    def update_weights(self):
+        self.weights = scipy.sparse.linalg.inv(self.a_mat)*self.b_mat
+
+    def observe_step(self, state1, action1, reward2, state2, terminal=False):
+        """
+        state1 : numpy.array
+            A column vector representing the starting state
+        """
+        self.validate_state(state1)
+        self.validate_state(state2)
+        if self.use_importance_sampling:
+            rho = self.get_importance_sampling_ratio(state1, action1)
+        else:
+            rho = 1
+        gamma = self.discount_factor
+        x1 = self.combine_state_action(state1, action1)
+        if not terminal:
+            x2 = self.combine_state_target_action(state2)
+            self.a_mat += rho*x1*(x1-gamma*x2).transpose()
+        else:
+            self.a_mat += rho*x1*x1.transpose()
+        self.b_mat += rho*reward2*x1
