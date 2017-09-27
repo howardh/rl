@@ -82,7 +82,7 @@ class LSTDAgent(Agent):
             # Next time step
             obs = obs2
             action = action2
-        return reward, step_count
+        return reward_sum, step_count
 
     def run_step(self, env):
         if self.prev_done:
