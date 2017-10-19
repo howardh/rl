@@ -8,6 +8,7 @@ import csv
 import os
 from tqdm import tqdm
 import time
+import timeit
 import operator
 import pprint
 
@@ -48,6 +49,8 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, directory=None,
             sigma=1,
             sparse=True
     )
+    print("Loading params")
+    agent.learner.load("params.pkl")
     agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
     agent.set_target_policy("%.3f-epsilon"%eps_t)
 
@@ -56,16 +59,17 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, directory=None,
             "csv", directory)
     with open(file_name, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
-        for iters in range(1,max_iters):
-            agent.run_episode(e)
-            if iters % upd_freq == 0:
-                agent.update_weights()
+        for iters in range(0,max_iters):
+            if agent.learner.check_weights():
+                print("Weight update complete")
                 rewards = agent.test(e, 100)
                 csvwriter.writerow([iters, rewards])
                 csvfile.flush()
                 # TODO: Does this apply to Atari?
                 #if stop_when_learned and np.mean(rewards) >= 190:
                 #    break
+            print(iters)
+            agent.run_episode(e)
     return iters
 
 def _worker(i, directory=None):

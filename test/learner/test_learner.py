@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import scipy.sparse
 
 from learner import learner 
 
@@ -98,6 +99,26 @@ class TestLSTDTraceQsLearner(unittest.TestCase):
         state = np.array([[1,2,3]]).transpose()
         expectedOutput = np.array([[1,2,3,0,0,0],[0,0,0,1,2,3]]).transpose()
         actualOutput = self.learner.get_all_state_action_pairs(state)
+        self.assertTrue((actualOutput == expectedOutput).all())
+
+class TestSparseLSTDLearner(unittest.TestCase):
+
+    NUM_FEATURES = 10
+    NUM_ACTIONS = 2
+    DISCOUNT_FACTOR = 0.9
+
+    def setUp(self):
+        self.learner = learner.SparseLSTDLearner(
+                num_features=self.NUM_FEATURES,
+                discount_factor=self.DISCOUNT_FACTOR,
+                action_space=np.array([0,1])
+        )
+
+    def test_combine_state_action(self):
+        state = scipy.sparse.csc_matrix(np.array([[1]+[0]*9]).transpose())
+        action = 0
+        expectedOutput = np.array([[1]+[0]*19]).transpose()
+        actualOutput = self.learner.combine_state_action(state,action).todense()
         self.assertTrue((actualOutput == expectedOutput).all())
 
 if __name__ == "__main__":

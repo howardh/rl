@@ -2,6 +2,11 @@ import os
 import time
 import threading
 import re
+from tqdm import tqdm 
+import scipy.sparse
+import scipy.sparse.linalg
+import timeit
+import numpy as np
 
 START_TIME = time.strftime("%Y-%m-%d_%H-%M-%S")
 _results_dir = None
@@ -46,7 +51,6 @@ def find_next_free_file(prefix, suffix, directory):
     return path, i
 
 def load_data(directory, pattern=re.compile(r'^.+\.csv$')):
-    from tqdm import tqdm 
     import csv
     import numpy as np
     files = [f for f in os.listdir(directory) if
@@ -90,7 +94,6 @@ def load_data(directory, pattern=re.compile(r'^.+\.csv$')):
     return output
 
 def parse_file_name(file_name):
-    from tqdm import tqdm 
     pattern = re.compile(r'((?:(?:^|-)(?:[a-zA-Z]+)(?:\.|\d)+)+)-\d+\.csv')
     regex_result = pattern.match(file_name)
     if regex_result is None:
@@ -111,3 +114,29 @@ def parse_file_name(file_name):
         results[param_name] = param_value
 
     return results
+
+def svd_inv(a):
+    #u,s,vt = scipy.sparse.linalg.svds(a,k=int(min(a.shape)/2))
+    u,s,vt = scipy.sparse.linalg.svds(a,k=2000)
+    sinv = np.matrix(np.diag(1/s))
+    u = np.matrix(u)
+    vt = np.matrix(vt)
+
+    ainv = vt.H*sinv*u.H
+
+    return ainv
+
+_solve_start_time = timeit.default_timer()
+def solve(a,b):
+    global _solve_start_time
+    print("Solve time: %s" % (timeit.default_timer()-_solve_start_time))
+    _solve_start_time = timeit.default_timer()
+    result = scipy.sparse.linalg.lsqr(a, np.array(b.todense()).reshape((b.shape[0],)))
+    return result[0].reshape((b.shape[0],1))
+
+def solve_approx(a,b):
+    print("Starting solve")
+    solve_start_time = timeit.default_timer()
+    result = svd_inv(a)*b
+    print("Solve time: %s" % (timeit.default_timer()-solve_start_time))
+    return result.reshape((b.shape[0],1))

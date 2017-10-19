@@ -79,14 +79,18 @@ class LSTDAgent(Agent):
         reward_sum = 0
         # Run an episode
         while not done:
+            print("Step %d.1\r"%step_count, end='')
             step_count += 1
 
             obs2, reward, done, _ = env.step(action)
+            print("Step %d.2\r"%step_count, end='')
             obs2 = self.features(obs2)
             action2 = self.act(obs2)
             reward_sum += reward
 
+            print("Step %d.3\r"%step_count, end='')
             self.learner.observe_step(obs, action, reward, obs2, terminal=done)
+            print("Step %d.4\r"%step_count, end='')
 
             # Next time step
             obs = obs2

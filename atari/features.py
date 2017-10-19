@@ -15,7 +15,7 @@ def generate_tiles(w,h,tw,th):
 
 TILES = generate_tiles(160,210,10,15)
 BACKGROUND = [0]*IDENTITY_NUM_FEATURES
-BASIC_NUM_FEATURES = 160*210*128
+BASIC_NUM_FEATURES = 16*14*128
 def basic(x, background=BACKGROUND):
     NUM_COLOURS = 128
     results = scipy.sparse.lil_matrix((16*14*NUM_COLOURS,1))
@@ -26,9 +26,10 @@ def basic(x, background=BACKGROUND):
             continue
         index = TILES[i]*NUM_COLOURS+ci
         results[index] = 1
+    return results
 
 def get_basic(env_name):
     bg = atari.utils.compute_background(env_name)
     def foo(x):
-        basic(x, background=bg)
+        return basic(x, background=bg)
     return foo

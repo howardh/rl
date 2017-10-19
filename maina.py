@@ -17,3 +17,8 @@ if __name__ == "__main__":
     atari.utils.compute_background()
     iters = atari.exp1._run_trial(0.9,200,0.2,0.01,os.path.join(utils.get_results_directory(),"atari.exp1","part1"))
     print(iters)
+    #import dill
+    #data = dill.load(open("params.pkl", "rb"))
+    #a_mat = data['a']
+    #b_mat = data['b']
+    #x = utils.solve_approx(a_mat, b_mat)

@@ -2,6 +2,11 @@ import collections
 import numpy as np
 from enum import Enum
 import scipy.sparse
+import scipy.sparse.linalg
+import timeit
+import dill
+import concurrent.futures
+import utils
 
 #from enum import auto
 
@@ -355,22 +360,51 @@ class SparseLSTDLearner(LSTDLearner):
         self.weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
         self.old_weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
 
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self.ls_future = None
+
     def combine_state_action(self, state, action):
-        sa = LSTDLearner.combine_state_action(self, state, action)
-        return scipy.sparse.csc_matrix(sa)
+        self.validate_state(state)
+        # Get index of given action
+        action_index = self.action_space.tolist().index(action)
+        result = scipy.sparse.lil_matrix((self.num_features*len(self.action_space),1))
+        start_index = action_index*self.num_features
+        end_index = start_index+self.num_features
+        result[start_index:end_index,0] = state
+        return result.tocsc()
 
     def combine_state_target_action(self, state):
-        sa = LSTDLearner.combine_state_target_action(self, state)
-        return scipy.sparse.csc_matrix(sa)
+        """Return a state-action pair corresponding to the given state, associated with the action(s) under the target policy"""
+        policy = self.get_target_policy(state)
+        result = scipy.sparse.lil_matrix((self.num_features*len(self.action_space),1))
+        for a in range(len(policy)):
+            start_index = a*self.num_features
+            end_index = start_index+self.num_features
+            result[start_index:end_index,0] = policy[a]*state
+        return result.tocsc()
 
     def update_weights(self):
-        self.weights = scipy.sparse.linalg.inv(self.a_mat)*self.b_mat
+        self.weights = utils.solve_approx(self.a_mat, self.b_mat)
+
+    def check_weights(self):
+        if self.ls_future is None:
+            print("Submitting task")
+            self.ls_future = self.executor.submit(utils.solve_approx, self.a_mat, self.b_mat)
+        elif self.ls_future.done():
+            print("Solution found")
+            self.old_weights = self.weights
+            self.weights = self.ls_future.result()
+            self.ls_future = None
+            return True
+        return False
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         """
         state1 : numpy.array
             A column vector representing the starting state
         """
+        #start_time = timeit.default_timer()
+
         self.validate_state(state1)
         self.validate_state(state2)
         if self.use_importance_sampling:
@@ -385,3 +419,25 @@ class SparseLSTDLearner(LSTDLearner):
         else:
             self.a_mat += rho*x1*x1.transpose()
         self.b_mat += rho*reward2*x1
+
+        #elapsed = timeit.default_timer()-start_time
+        #print(elapsed)
+
+    def validate_state(self, state):
+        if not scipy.sparse.issparse(state):
+            raise TypeError("Invalid state: %s. Received an object of type %s. Expected a scipy.sparse column matrix with %d features." % (state, type(state), self.num_features))
+        if state.shape[0] != self.num_features:
+            raise ValueError("Invalid state: %s. Expected a sparse matrix with %d features. Received a matrix with shape %s" % (state, self.num_features, state.shape))
+        if state.shape[1] != 1:
+            raise ValueError("Invalid state: %s. Expected a column matrix. Received a matrix with shape %s" % (state, self.num_features, state.shape))
+
+    def save(self, file_name):
+        data = {'a': self.a_mat, 'b': self.b_mat}
+        with open(file_name, 'wb')as f:
+            dill.dump(data, f)
+
+    def load(self, file_name):
+        with open(file_name, 'rb')as f:
+            data = dill.load(f)
+            self.a_mat = data['a']
+            self.b_mat = data['b']
