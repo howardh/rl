@@ -7,6 +7,7 @@ from multiprocessing import Pool
 import concurrent.futures
 import operator
 import itertools
+import timeit
 
 import numpy as np
 
@@ -84,13 +85,18 @@ class LSTDAgent(Agent):
 
             obs2, reward, done, _ = env.step(action)
             print("Step %d.2\r"%step_count, end='')
+            time1 = timeit.default_timer()
             obs2 = self.features(obs2)
+            time2 = timeit.default_timer()
             action2 = self.act(obs2)
+            time3 = timeit.default_timer()
             reward_sum += reward
 
-            print("Step %d.3\r"%step_count, end='')
+            print("Step %d.3, %f, %f\r"%(step_count, time2-time1, time3-time2), end='')
+            start_time = time3
             self.learner.observe_step(obs, action, reward, obs2, terminal=done)
-            print("Step %d.4\r"%step_count, end='')
+            end_time = timeit.default_timer()
+            print("Step %d.4, %f\r"%(step_count, end_time-start_time), end='')
 
             # Next time step
             obs = obs2

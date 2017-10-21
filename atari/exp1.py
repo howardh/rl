@@ -60,14 +60,14 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, directory=None,
     with open(file_name, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
         for iters in range(0,max_iters):
-            if agent.learner.check_weights():
-                print("Weight update complete")
-                rewards = agent.test(e, 100)
-                csvwriter.writerow([iters, rewards])
-                csvfile.flush()
-                # TODO: Does this apply to Atari?
-                #if stop_when_learned and np.mean(rewards) >= 190:
-                #    break
+            #if agent.learner.check_weights():
+            #    print("Weight update complete")
+            #    rewards = agent.test(e, 100)
+            #    csvwriter.writerow([iters, rewards])
+            #    csvfile.flush()
+            #    # TODO: Does this apply to Atari?
+            #    #if stop_when_learned and np.mean(rewards) >= 190:
+            #    #    break
             print(iters)
             agent.run_episode(e)
     return iters
