@@ -97,19 +97,21 @@ class Optimizer(Enum):
         
 class TabularLearner(Learner):
 
-    def __init__(self, action_space, discount_factor, learning_rate, optimizer=Optimizer.NONE):
+    def __init__(self, action_space, discount_factor, learning_rate,
+            initial_value=0, optimizer=Optimizer.NONE):
         Learner.__init__(self)
         self.action_space = action_space
         self.discount_factor = discount_factor
         self.learning_rate = learning_rate
         self.optimizer = optimizer
+        self.initial_value = initial_value
         
-        self.q = collections.defaultdict(lambda: 0)
+        self.q = collections.defaultdict(lambda: self.initial_value)
         self.old_q = self.q.copy()
         if self.optimizer == Optimizer.NONE:
             pass
         elif self.optimizer == Optimizer.RMS_PROP:
-            self.v = collections.defaultdict(lambda: 0)
+            self.v = collections.defaultdict(lambda: self.initial_value)
         else:
             raise NotImplementedError
         

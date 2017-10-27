@@ -7,13 +7,13 @@ from learner.learner import Optimizer
 class TabularAgent(Agent):
 
     def __init__(self, action_space, discount_factor, learning_rate,
-            optimizer=Optimizer.NONE,
-            features=lambda x: x):
+            initial_value=0, optimizer=Optimizer.NONE, features=lambda x: x):
         self.learner = TabularLearner(
                 action_space=action_space,
                 discount_factor=discount_factor,
                 learning_rate=learning_rate,
                 optimizer=optimizer,
+                initial_value=initial_value
         )
         self.features = features
 

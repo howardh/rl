@@ -13,22 +13,20 @@ def less_optimal_policy(state, p=0.75):
     else:
         return np.array([q,q,p])
 
-def optimal_policy2(state):
-    n = 16
-    i=([True]*int(n/2)+[False]*int(n/2))*n
-    if any(state[i]):
-        return np.array([1,0,0])
-    else:
-        return np.array([0,0,1])
-
-def less_optimal_policy2(state, p=0.75):
+def get_one_hot_optimal_policy(num_pos, num_vel, prob):
+    p = prob
     q = (1-p)/2
-    n = 16
-    i=([True]*int(n/2)+[False]*int(n/2))*n
-    if any(state[i]):
-        return np.array([p,q,q])
-    else:
-        return np.array([q,q,p])
+    n = 10
+    i=([True]*int(num_vel/2)+[False]*(num_vel-int(n/2)))*num_pos
+    j=([False]*(num_vel-int(num_vel/2))+[True]*int(num_vel/2))*num_pos
+    def policy(state):
+        if any(state[i]):
+            return np.array([p,q,q])
+        elif any(state[j]):
+            return np.array([q,q,p])
+        else:
+            return np.array([q,p,q])
+    return policy
 
 def print_policy(agent, f=lambda x: x):
     pass
