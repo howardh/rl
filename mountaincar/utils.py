@@ -1,4 +1,10 @@
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+from mpl_toolkits.mplot3d import Axes3D
+from learner.rbf_learner import RBFLearner
 
 def optimal_policy(state):
     if state[1] < 0:
@@ -33,3 +39,61 @@ def print_policy(agent, f=lambda x: x):
 
 def print_values(agent, f=lambda x: x):
     pass
+
+def output_rbf_policy(agent, output=None):
+    if not isinstance(agent.learner, RBFLearner):
+        raise TypeError("Agent does not use an RBF learner")
+    w = agent.learner.weights
+    c = agent.learner.centres
+    s = agent.learner.spread
+    x = y = np.arange(0, 1.0, 0.01)
+    X, Y = np.meshgrid(x, y)
+    def diff(x,y):
+        return agent.learner.get_state_action_value(np.array([x,y]),0)-agent.learner.get_state_action_value(np.array([x,y]),2)
+    def av(x,y,a):
+        return agent.learner.get_state_action_value(np.array([x,y]),a)
+    zs0 = np.array([av(x,y,0) for x,y in zip(np.ravel(X), np.ravel(Y))])
+    zs1 = np.array([av(x,y,1) for x,y in zip(np.ravel(X), np.ravel(Y))])
+    zs2 = np.array([av(x,y,2) for x,y in zip(np.ravel(X), np.ravel(Y))])
+    zsd = np.array([diff(x,y) for x,y in zip(np.ravel(X), np.ravel(Y))])
+
+    fig = plt.figure()
+
+    ax = fig.add_subplot(221, projection='3d')
+    Z = zs0.reshape(X.shape)
+    ax.plot_surface(X, Y, Z)
+    ax.set_xlabel('Position')
+    ax.set_ylabel('Velocity')
+    ax.set_zlabel('State-Action Value')
+
+    ax = fig.add_subplot(222, projection='3d')
+    Z = zs2.reshape(X.shape)
+    ax.plot_surface(X, Y, Z)
+    ax.set_xlabel('Position')
+    ax.set_ylabel('Velocity')
+    ax.set_zlabel('State-Action Value')
+
+    ax = fig.add_subplot(223, projection='3d')
+    Z = zs1.reshape(X.shape)
+    ax.plot_surface(X, Y, Z)
+    ax.set_xlabel('Position')
+    ax.set_ylabel('Velocity')
+    ax.set_zlabel('State-Action Value')
+
+    #colours = [(1, 0, 0), (0, 0, 1)]
+    #cm = LinearSegmentedColormap.from_list("Boop", colours, N=2)
+
+    ax = fig.add_subplot(224, projection='3d')
+    Z = zsd.reshape(X.shape)
+    #ax.plot_surface(X, Y, Z, cmap=cm)
+    ax.plot_surface(X, Y, Z)
+    ax.set_xlabel('Position')
+    ax.set_ylabel('Velocity')
+    ax.set_zlabel('State-Action Value Difference')
+
+    if output is None:
+        plt.show()
+    else:
+        fig.savefig(output)
+    fig.clf()
+    plt.close()

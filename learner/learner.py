@@ -114,7 +114,6 @@ class TabularLearner(Learner):
             self.v = collections.defaultdict(lambda: self.initial_value)
         else:
             raise NotImplementedError
-        
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         alpha = self.learning_rate
