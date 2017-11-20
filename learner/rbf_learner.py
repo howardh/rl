@@ -69,6 +69,7 @@ class RBFLearner(Learner):
         self.reset_weight_change()
 
         self.optimizer = torch.optim.SGD(self.weights, lr=self.learning_rate)
+        #self.optimizer = torch.optim.Adam(self.weights, lr=self.learning_rate)
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         alpha = self.learning_rate
