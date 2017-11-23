@@ -120,3 +120,78 @@ class RBFLearner(Learner):
     def reset_weight_change(self):
         for a in self.action_space:
             self.old_weights[a] = self.weights[a].data.clone()
+
+class RBFTracesLearner(RBFLearner):
+
+    def __init__(self, action_space, observation_space, discount_factor, learning_rate,
+            initial_value=0, optimizer=None, trace_factor=0):
+        Learner.__init__(self)
+        self.action_space = action_space
+        self.discount_factor = discount_factor
+        self.learning_rate = learning_rate
+        self.initial_value = initial_value
+        self.observation_space = observation_space
+        self.trace_factor = trace_factor
+        
+        self.rbf = RBFFunction()
+        centres = list(
+                itertools.product(
+                    np.linspace(0,1,8),
+                    np.linspace(0,1,8)
+                )
+        )
+        weights = [[self.initial_value]*len(centres)]*len(self.action_space)
+        traces = [[self.initial_value]*len(centres)]*len(self.action_space)
+        self.spread = Variable(torch.Tensor([100]).float(),
+                requires_grad=False)
+        self.centres = Variable(
+                torch.from_numpy(np.array(centres)).float(),
+                requires_grad=False)
+        self.weights = [Variable(
+                torch.from_numpy(np.array([w]).transpose()).float(),
+                requires_grad=True) for w in weights]
+        self.traces = [Variable(
+                torch.from_numpy(np.array([t]).transpose()).float(),
+                requires_grad=False) for t in traces]
+        self.ones_weights = Variable(
+                torch.ones(len(centres),1),
+                requires_grad=False)
+        self.old_weights = [None]*len(self.weights)
+        self.reset_weight_change()
+
+        if optimizer is None:
+            self.optimizer = torch.optim.SGD(self.weights, lr=self.learning_rate)
+        elif optimizer == "adam":
+            self.optimizer = torch.optim.Adam(self.weights, lr=self.learning_rate)
+
+        self.prev_sars = None
+
+    def observe_step(self, state1, action1, reward2, state2, terminal=False):
+        alpha = self.learning_rate
+        gamma = self.discount_factor
+        lam = self.trace_factor
+
+        if self.prev_sars is not None:
+            state0, action0, reward1, state1 = self.prev_sars
+            # delta
+            sav0 = self.get_state_action_value(state0,action0)
+            sav1 = self.get_state_action_value(state1,action1)
+            delta = reward1+gamma*sav1 - sav0
+            # Traces
+            sav1_graph = self.get_state_action_value_graph(state1,action1)
+            sav1_graph.backward(retain_graph=True)
+            for a in self.action_space:
+                e = self.traces[a].data
+                if self.weights[a].grad is not None:
+                    g = self.weights[a].grad.data
+                else:
+                    g = 0
+                self.traces[a].data = gamma*lam*e + g
+            for a in self.action_space:
+                if self.weights[a].grad is not None:
+                    self.weights[a].grad.data.zero_()
+            # Weights
+            for a in self.action_space:
+                self.weights[a].data += alpha*delta*e[a]
+        self.prev_sars = (state1, action1, reward2, state2)
+
