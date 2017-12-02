@@ -8,7 +8,6 @@ from tqdm import tqdm
 import time
 import traceback
 
-
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
 from agent.rbf_agent import RBFAgent
@@ -69,12 +68,13 @@ def parse_results(directory):
         with open(os.path.join(directory,file_name), 'rb') as f:
             x = dill.load(f)
             diverged = None in x[1]
+            data = x[1]
             if diverged:
-                x[1] = [a for a in x[1] if a is not None]
+                data = [a for a in x[1] if a is not None]
             if x[2] is None:
-                results.append((x[0], file_name, np.mean(x[1]), np.inf, diverged))
+                results.append((x[0], file_name, np.mean(data), np.inf, diverged))
             else:
-                results.append((x[0], file_name, np.mean(x[1]), x[2], diverged))
+                results.append((x[0], file_name, np.mean(data), x[2], diverged))
     print("\nSorting by mean reward...")
     results.sort(key=lambda x: x[2], reverse=True)
     output1 = results[0][0]
@@ -158,7 +158,6 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
         num_vel, behaviour_eps, target_eps, epoch, max_iters, test_iters,
         results_dir):
     args = locals()
-    #print(args)
     env_name = 'MountainCar-v0'
     e = gym.make(env_name)
     start_time = datetime.datetime.now()
@@ -167,7 +166,6 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
     obs_space = np.array([[-1.2, .6], [-0.07, 0.07]])
     def norm(x):
         return np.array([(s-r[0])/(r[1]-r[0]) for s,r in zip(x, obs_space)])
-    global agent
     agent = RBFTracesAgent(
             action_space=action_space,
             observation_space=np.array([[0,1],[0,1]]),
@@ -206,6 +204,7 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
         print("kbi")
 
     while iters < max_iters: # Means it diverged at some point
+        iters += 1
         rewards.append(None)
 
     data = (args, rewards, steps_to_learn)
@@ -216,6 +215,36 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
     return rewards,steps_to_learn
 
 def cc(fn, params, proc=10, keyworded=False):
+    from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
+    plist = list(params)
+    futures = []
+    with ProcessPoolExecutor(max_workers=proc) as executor:
+        for p in tqdm(plist):
+            if keyworded:
+                futures.append(executor.submit(fn, **p))
+            else:
+                futures.append(executor.submit(fn, *p))
+            if len(futures) >= proc:
+                wait(futures,return_when=FIRST_COMPLETED)
+            futures = [f for f in futures if not f.done()]
+        wait(futures)
+
+def cc2(fn, params, proc=10, keyworded=False):
+    from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures import as_completed
+    try:
+        with ProcessPoolExecutor(max_workers=proc) as executor:
+            if keyworded:
+                futures = [executor.submit(fn, **p) for p in tqdm(params, desc="Adding jobs")]
+            else:
+                futures = [executor.submit(fn, *p) for p in tqdm(params, desc="Adding jobs")]
+        for f in tqdm(as_completed(futures), desc="Job completion",
+                total=len(futures), unit='it', unit_scale=True, leave=True):
+            pass
+    except Exception as e:
+        print("Something broke")
+
+def cc3(fn, params, proc=10, keyworded=False):
     futures = []
     from concurrent.futures import ProcessPoolExecutor
     try:
@@ -235,12 +264,11 @@ def cc(fn, params, proc=10, keyworded=False):
     except Exception as e:
         print("Something broke")
 
-def gs_rbf(proc=10, results_directory="./results-rbft"):
+def gs_rbf(proc=10, results_directory="./results-rbf"):
     #def rbf_control(discount_factor, learning_rate, initial_value, num_pos,
     #        num_vel, behaviour_eps, target_eps, epoch, max_iters, test_iters):
     d = [1]
     lr = [2.5, 2, 1.5, 1, 0.7, 0.5, 0.3, 0.1, 0.05, 0.01]
-    #lr = [1, 0.7, 0.5, 0.3, 0.1, 0.05, 0.01]
     iv = [0]
     np = [8]
     nv = [8]
@@ -260,7 +288,6 @@ def gs_rbft(proc=10, results_directory="./results-rbft"):
     d = [1]
     lr = [2.5, 2, 1.5, 1, 0.7, 0.5, 0.3, 0.1, 0.05, 0.01]
     l = [0,0.2,0.5,0.7,0.9,1]
-    #lr = [1, 0.7, 0.5, 0.3, 0.1, 0.05, 0.01]
     iv = [0]
     np = [8]
     nv = [8]
@@ -451,9 +478,9 @@ if __name__ == "__main__":
     parser.add_argument("--initial-value",
             type=float, default=0, help="")
     parser.add_argument("--num-pos",
-            type=int, default=10, help="")
+            type=int, default=8, help="")
     parser.add_argument("--num-vel",
-            type=int, default=10, help="")
+            type=int, default=8, help="")
     parser.add_argument("--epoch",
             type=int, default=None, help="Number of episodes to complete before testing")
     parser.add_argument("--max-iters",

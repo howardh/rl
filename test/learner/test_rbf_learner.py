@@ -114,7 +114,11 @@ class TestRBFFunction(unittest.TestCase):
 #
 #    def setUp(self):
 #        self.learner = RBFLearner(
-#                np.array([0]),
+#                action_space=np.array([0]),
+#                observation_space=np.array([0,1]),
+#                discount_factor=0.9,
+#                learning_rate=0.05,
+#                dimensions=[2]
 #        )
 
 if __name__ == "__main__":
