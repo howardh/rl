@@ -7,6 +7,7 @@ import itertools
 from tqdm import tqdm
 import time
 import traceback
+import threading
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -158,14 +159,17 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
         num_vel, behaviour_eps, target_eps, epoch, max_iters, test_iters,
         results_dir):
     args = locals()
+    #print('a %s' % threading.current_thread())
     env_name = 'MountainCar-v0'
     e = gym.make(env_name)
     start_time = datetime.datetime.now()
 
+    #print('b %s' % threading.current_thread())
     action_space = np.array([0,1,2])
     obs_space = np.array([[-1.2, .6], [-0.07, 0.07]])
     def norm(x):
         return np.array([(s-r[0])/(r[1]-r[0]) for s,r in zip(x, obs_space)])
+    #print('c %s' % threading.current_thread())
     agent = RBFTracesAgent(
             action_space=action_space,
             observation_space=np.array([[0,1],[0,1]]),
@@ -175,12 +179,14 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
             features=norm,
             trace_factor=trace_factor
     )
+    #print('d %s' % threading.current_thread())
     agent.set_behaviour_policy("%f-epsilon" % behaviour_eps)
     agent.set_target_policy("%f-epsilon" % target_eps)
 
     rewards = []
     steps_to_learn = None
     iters = 0
+    #print('e %s' % threading.current_thread())
     try:
         while iters < max_iters:
             iters += 1
@@ -203,18 +209,24 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
     except KeyboardInterrupt:
         print("kbi")
 
+    #print('f %s' % threading.current_thread())
     while iters < max_iters: # Means it diverged at some point
         iters += 1
         rewards.append(None)
 
+    #print('g %s' % threading.current_thread())
     data = (args, rewards, steps_to_learn)
     file_name, file_num = utils.find_next_free_file("results", "pkl", results_dir)
     with open(file_name, "wb") as f:
         dill.dump(data, f)
 
-    return rewards,steps_to_learn
+    del agent
+    del rewards
 
-def cc(fn, params, proc=10, keyworded=False):
+    #print('h %s' % threading.current_thread())
+    #return rewards,steps_to_learn
+
+def cc2(fn, params, proc=10, keyworded=False):
     from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
     plist = list(params)
     futures = []
@@ -229,7 +241,7 @@ def cc(fn, params, proc=10, keyworded=False):
             futures = [f for f in futures if not f.done()]
         wait(futures)
 
-def cc2(fn, params, proc=10, keyworded=False):
+def cc(fn, params, proc=10, keyworded=False):
     from concurrent.futures import ProcessPoolExecutor
     from concurrent.futures import as_completed
     try:
@@ -238,9 +250,16 @@ def cc2(fn, params, proc=10, keyworded=False):
                 futures = [executor.submit(fn, **p) for p in tqdm(params, desc="Adding jobs")]
             else:
                 futures = [executor.submit(fn, *p) for p in tqdm(params, desc="Adding jobs")]
-        for f in tqdm(as_completed(futures), desc="Job completion",
-                total=len(futures), unit='it', unit_scale=True, leave=True):
-            pass
+            pbar = tqdm(total=len(futures), desc="Job completion")
+            while len(futures) > 0:
+                count = [f.done() for f in futures].count(True)
+                pbar.update(count)
+                futures = [f for f in futures if not f.done()]
+                #wait(futures,return_when=FIRST_COMPLETED)
+                time.sleep(1)
+        #for f in tqdm(as_completed(futures), desc="Job completion",
+        #        total=len(futures), unit='it', unit_scale=True, leave=True):
+        #    pass
     except Exception as e:
         print("Something broke")
 
@@ -301,9 +320,10 @@ def gs_rbft(proc=10, results_directory="./results-rbft"):
 
     cc(rbft_control, indices, proc)
 
-def lstd_rbf_control(discount_factor, initial_value, num_pos,
-        num_vel, behaviour_eps, target_eps, update_freq, epoch, max_iters, test_iters,
+def lstd_rbft_control(discount_factor, initial_value, num_pos,
+        num_vel, behaviour_eps, target_eps, trace_factor, update_freq, epoch, max_iters, test_iters,
         results_dir):
+    args=locals()
     try:
         env_name = 'MountainCar-v0'
         e = gym.make(env_name)
@@ -320,13 +340,14 @@ def lstd_rbf_control(discount_factor, initial_value, num_pos,
             x = norm(x)
             dist = np.power(centres-x, 2).sum(axis=1,keepdims=True)
             return np.exp(-100*dist)
-        global agent
         agent = LSTDAgent(
                 action_space=action_space,
                 discount_factor=discount_factor,
                 #initial_value=initial_value,
                 features=rbf,
-                num_features=num_pos*num_vel
+                num_features=num_pos*num_vel,
+                use_traces=True,
+                trace_factor=trace_factor
         )
         agent.set_behaviour_policy("%f-epsilon" % behaviour_eps)
         agent.set_target_policy("%f-epsilon" % target_eps)
@@ -355,6 +376,7 @@ def lstd_rbf_control(discount_factor, initial_value, num_pos,
                 agent.update_weights()
 
         while iters < max_iters: # Means it diverged at some point
+            iters += 1
             rewards.append(None)
 
         data = (args, rewards, steps_to_learn)
@@ -366,6 +388,14 @@ def lstd_rbf_control(discount_factor, initial_value, num_pos,
     except Exception as e:
         #print(e)
         traceback.print_exc()
+
+def lstd_rbf_control(discount_factor, initial_value, num_pos,
+        num_vel, behaviour_eps, target_eps, update_freq, epoch, max_iters, test_iters,
+        results_dir):
+    trace_factor=0
+    lstd_rbft_control(discount_factor, initial_value, num_pos,
+        num_vel, behaviour_eps, target_eps, trace_factor, update_freq, epoch, max_iters, test_iters,
+        results_dir)
 
 def gs_lstd_rbf(proc=10, results_directory="./results-lstd-rbf"):
     #def lstd_rbf_control(discount_factor, initial_value, num_pos,
@@ -397,6 +427,40 @@ def gs_lstd_rbf(proc=10, results_directory="./results-lstd-rbf"):
             pbar.update(count)
             futures = [f for f in futures if not f.done()]
             time.sleep(1)
+
+def gs_lstd_rbft(proc=10, results_directory="./results-lstd-rbft"):
+    #def lstd_rbft_control(discount_factor, initial_value, num_pos,
+    #        num_vel, behaviour_eps, target_eps, trace_factor, update_freq, epoch, max_iters, test_iters,
+    #        results_dir):
+    d = [1]
+    iv = [0]
+    np = [8]
+    nv = [8]
+    be = [0, 0.1, 0.2, 0.3, 0.5, 0.7]
+    te = [0]
+    tf = [0,0.25,0.5,0.75,1]
+    uf = [1,5,10,20,50,100]
+    e = [None]
+    mi = [3000]
+    ti = [0]
+    rd = [results_directory]
+    indices = itertools.product(d,iv,np,nv,be,te,tf,uf,e,mi,ti,rd)
+
+    cc(lstd_rbft_control, indices, proc=proc, keyworded=False)
+
+    #futures = []
+    #from concurrent.futures import ProcessPoolExecutor
+    #with ProcessPoolExecutor(max_workers=proc) as executor:
+    #    for i in tqdm(indices, desc="Adding jobs"):
+    #        print(i)
+    #        future = [executor.submit(lstd_rbft_control, *i)]
+    #        futures += future
+    #    pbar = tqdm(total=len(futures), desc="Job completion")
+    #    while len(futures) > 0:
+    #        count = [f.done() for f in futures].count(True)
+    #        pbar.update(count)
+    #        futures = [f for f in futures if not f.done()]
+    #        time.sleep(1)
 
 def graph(file_names):
     import matplotlib
@@ -462,7 +526,8 @@ if __name__ == "__main__":
             type=str, default="graph.png",
             help="Name of the file in which to store the graph")
     parser.add_argument("--model",
-            type=str, default="rbf", help="Model to use (tabular|rbf)")
+            type=str, default="rbf",
+            help="Model to use (tabular|rbf|rbft|lstd-rbf|lstd-rbft)")
     parser.add_argument("--learning-rate",
             type=float, default=0.5, help="Learning rate")
     parser.add_argument("--discount",
@@ -513,6 +578,8 @@ if __name__ == "__main__":
             gs_rbft(results_directory=args.results_dir)
         elif args.model == "lstd-rbf":
             gs_lstd_rbf(results_directory=args.results_dir)
+        elif args.model == "lstd-rbft":
+            gs_lstd_rbft(results_directory=args.results_dir)
     elif args.graph:
         #graph(["./results-lstd-rbf/results-8.pkl",
         #    "./results-lstd-rbf/results-0.pkl"])
@@ -574,11 +641,26 @@ if __name__ == "__main__":
                     "max_iters":args.max_iters,
                     "results_dir":args.results_dir}
             fn = lstd_rbf_control
+        elif args.model == "lstd-rbft":
+            params={"discount_factor":args.discount,
+                    "initial_value":args.initial_value,
+                    "num_pos":args.num_pos,
+                    "num_vel":args.num_vel,
+                    "behaviour_eps":args.behaviour_epsilon,
+                    "target_eps":args.target_epsilon,
+                    "trace_factor":args.trace_factor,
+                    "update_freq":args.update_freq,
+                    "epoch":args.epoch,
+                    "test_iters":args.test_iters,
+                    "max_iters":args.max_iters,
+                    "results_dir":args.results_dir}
+            fn = lstd_rbft_control
         else:
             print("Invalid model")
         if args.best_params_from is not None:
             p1, p2 = parse_results(args.best_params_from)
             params = p1
+            params['results_dir'] = args.results_dir
         if args.trials == 1:
             fn(**params)
         else:
