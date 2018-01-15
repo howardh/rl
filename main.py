@@ -3,6 +3,7 @@ import numpy as np
 import pprint
 
 from agent.discrete_agent import TabularAgent
+from agent.linear_agent import LinearAgent
 from agent.lstd_agent import LSTDAgent
 from learner.learner import Optimizer
 
@@ -38,7 +39,7 @@ def control():
         if iters % 500 == 0:
             rewards = agent.test(e, 100)
             print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
-            frozenlake.utils.print_policy(agent)
+            #frozenlake.utils.print_policy(agent)
             if np.mean(rewards) >= 0.78:
                 break
 
@@ -62,6 +63,29 @@ def policy_evaluation():
                 break
             agent.reset_weight_change()
             print("Iteration %d\t Weight Change: %f" % (iters, weight_diff))
+
+def linear_control():
+    env_name = 'FrozenLake-v0'
+    e = gym.make(env_name)
+
+    def features(x):
+        output = np.zeros(16)
+        output[x] = 1
+        return output
+
+    action_space = np.array([0,1,2,3])
+    agent = LinearAgent(action_space=action_space, discount_factor=0.99,
+            learning_rate=0.1, num_features=16, features=features)
+
+    iters = 0
+    while True:
+        iters += 1
+        agent.run_episode(e)
+        if iters % 500 == 0:
+            rewards = agent.test(e, 100)
+            print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
+            if np.mean(rewards) >= 0.78:
+                break
 
 def lstd_control():
     env_name = 'FrozenLake-v0'
@@ -238,7 +262,7 @@ def lstd_control_8x8():
                 break
 
 if __name__ == "__main__":
-    #control()
+    control()
     #policy_evaluation()
 
     #lstd_policy_evaluation()
@@ -269,6 +293,8 @@ if __name__ == "__main__":
     #print(sd)
 
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-08-24_22-24-12")
-    utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
-    exp4.parse_results2()
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
+    #exp4.parse_results2()
     #exp4.run_all()
+
+    #linear_control()

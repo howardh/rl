@@ -15,7 +15,7 @@ import gym
 from gym import spaces
 
 from agent.agent import Agent
-from learner.learner import LSTDLearner
+from learner.lstd_learner import LSTDLearner
 from learner.learner import LSTDTraceLearner
 from learner.learner import LSTDTraceQsLearner
 from learner.learner import SparseLSTDLearner
@@ -80,11 +80,9 @@ class LSTDAgent(Agent):
         reward_sum = 0
         # Run an episode
         while not done:
-            print("Step %d.1\r"%step_count, end='')
             step_count += 1
 
             obs2, reward, done, _ = env.step(action)
-            print("Step %d.2\r"%step_count, end='')
             time1 = timeit.default_timer()
             obs2 = self.features(obs2)
             time2 = timeit.default_timer()
@@ -92,11 +90,9 @@ class LSTDAgent(Agent):
             time3 = timeit.default_timer()
             reward_sum += reward
 
-            print("Step %d.3, %f, %f\r"%(step_count, time2-time1, time3-time2), end='')
             start_time = time3
             self.learner.observe_step(obs, action, reward, obs2, terminal=done)
             end_time = timeit.default_timer()
-            print("Step %d.4, %f\r"%(step_count, end_time-start_time), end='')
 
             # Next time step
             obs = obs2

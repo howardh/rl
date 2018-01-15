@@ -244,6 +244,9 @@ def cc2(fn, params, proc=10, keyworded=False):
 def cc(fn, params, proc=10, keyworded=False):
     from concurrent.futures import ProcessPoolExecutor
     from concurrent.futures import as_completed
+    if proc == 1:
+        futures = [fn(**p) for p in tqdm(list(params), desc="Executing jobs")]
+        return
     try:
         with ProcessPoolExecutor(max_workers=proc) as executor:
             if keyworded:
@@ -297,7 +300,7 @@ def gs_rbf(proc=10, results_directory="./results-rbf"):
     mi = [3000]
     ti = [0]
     rd = [results_directory]
-    indices = itertools.product(d,lr,l,iv,np,nv,be,te,e,mi,ti,rd)
+    indices = itertools.product(d,lr,iv,np,nv,be,te,e,mi,ti,rd)
 
     cc(rbf_control, indices, proc)
 
@@ -391,8 +394,7 @@ def lstd_rbft_control(discount_factor, initial_value, num_pos,
 
 def lstd_rbf_control(discount_factor, initial_value, num_pos,
         num_vel, behaviour_eps, target_eps, update_freq, epoch, max_iters, test_iters,
-        results_dir):
-    trace_factor=0
+        results_dir, trace_factor=0):
     lstd_rbft_control(discount_factor, initial_value, num_pos,
         num_vel, behaviour_eps, target_eps, trace_factor, update_freq, epoch, max_iters, test_iters,
         results_dir)
@@ -483,37 +485,64 @@ def graph(file_names):
         plt.plot(x[2])
     plt.savefig("mf.png")
 
-def graph_dirs(directory, output="graph.png"):
+def graph_dirs(directory, labels=None, output="graph.png"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     if type(directory) is str:
         directory = [directory]
+    if labels is None:
+        labels = directory
 
-    fig = plt.figure()
+    # Load data
+    data_dict = dict()
     for d in directory:
         file_names = [f for f in tqdm(os.listdir(d)) if os.path.isfile(os.path.join(d,f))]
         data = []
         for file_name in tqdm(file_names):
             with open(os.path.join(d,file_name), 'rb') as f:
-                x = dill.load(f)
+                try:
+                    x = dill.load(f)
+                except Exception:
+                    print(file_name)
+                    return
                 diverged = None in x[1]
                 if diverged:
-                    print("Diverged")
-                    raise NotImplementedError("Did not implement handling of data of different lengths")
+                    print("Diverged %s" % file_name)
+                    #raise NotImplementedError("Did not implement handling of data of different lengths")
+                    continue
                 else:
                     data.append(x[1])
         data = np.array(data)
         mean = np.mean(data,0)
         std = np.std(data,0)
-        plt.fill_between(range(len(mean)), mean-std, mean+std, alpha=0.5)
-        plt.plot(mean)
+        data_dict[d] = (mean,std)
+
+    # Plot figure
+    fig = plt.figure()
+    for d,l in zip(directory,labels):
+        mean = data_dict[d][0]
+        std = data_dict[d][1]
+        plt.fill_between(range(len(mean)), mean-std/2, mean+std/2, alpha=0.5)
+        plt.plot(mean, label=l)
     plt.xlabel("Episodes")
     plt.ylabel("Cumulative Reward")
+    plt.legend()
     plt.savefig(output)
 
-if __name__ == "__main__":
+    fig = plt.figure()
+    for d,l in zip(directory,labels):
+        mean = data_dict[d][0][:500]
+        std = data_dict[d][1][:500]
+        plt.fill_between(range(len(mean)), mean-std/2, mean+std/2, alpha=0.5)
+        plt.plot(mean, label=l)
+    plt.xlabel("Episodes")
+    plt.ylabel("Cumulative Reward")
+    plt.legend()
+    plt.savefig("2"+output)
+
+def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description="Boo")
     parser.add_argument("--parse-results",
@@ -568,7 +597,10 @@ if __name__ == "__main__":
             type=int, default=10,
             help="Maximum number of threads to use")
     args = parser.parse_args()
+    return args
 
+if __name__ == "__main__":
+    args = parse_args()
     if args.parse_results:
         parse_results(args.results_dir)
     elif args.grid_search:

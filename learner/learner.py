@@ -101,7 +101,7 @@ class Optimizer(Enum):
     RMS_PROP = 4
     ADAM = 5
     KSGD = 6
-        
+
 class TabularLearner(Learner):
 
     def __init__(self, action_space, discount_factor, learning_rate,
