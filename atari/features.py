@@ -1,6 +1,7 @@
 import numpy as np
 import itertools
 import scipy.sparse
+from tqdm import tqdm
 
 import atari
 from atari import utils
@@ -18,7 +19,7 @@ BACKGROUND = [0]*IDENTITY_NUM_FEATURES
 BASIC_NUM_FEATURES = 16*14*128
 def basic(x, background=BACKGROUND):
     NUM_COLOURS = 128
-    results = scipy.sparse.lil_matrix((16*14*NUM_COLOURS,1))
+    results = np.zeros(16*14*NUM_COLOURS)
     x = x.reshape((160*210,3))
     for i,c in enumerate(x):
         ci = atari.utils.rgb_to_index(c)

@@ -13,7 +13,7 @@ import operator
 import pprint
 
 from agent.discrete_agent import TabularAgent
-from agent.lstd_agent import LSTDAgent
+from agent.linear_agent import LinearAgent
 from learner.learner import Optimizer
 
 import atari
@@ -30,7 +30,7 @@ INDICES = pandas.MultiIndex.from_product(
         [discount_factors, update_frequencies, behaviour_epsilons, target_epsilons],
         names=["Discount Factor", "Update Frequencies", "Behaviour Epsilon", "Target Epsilon"])
 
-def _run_trial(gamma, upd_freq, eps_b, eps_t, directory=None,
+def _run_trial(gamma, alpha, eps_b, eps_t, directory=None,
         stop_when_learned=True, max_iters=10000):
     """
     Run the learning algorithm on Atari and return the number of
@@ -40,36 +40,24 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, directory=None,
     e = gym.make(env_name)
 
     action_space = np.array(range(e.action_space.n))
-    agent = LSTDAgent(
+    agent = LinearAgent(
             action_space=action_space,
             num_features=atari.features.BASIC_NUM_FEATURES,
             discount_factor=gamma,
-            features=atari.features.get_basic(env_name),
-            use_importance_sampling=False,
-            sigma=1,
-            sparse=True
+            learning_rate=alpha,
+            features=atari.features.get_basic(env_name)
     )
-    print("Loading params")
-    agent.learner.load("params.pkl")
     agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
     agent.set_target_policy("%.3f-epsilon"%eps_t)
 
     file_name,_ = utils.find_next_free_file(
-            "g%.3f-u%d-eb%.3f-et%.3f" % (gamma, upd_freq, eps_b, eps_t),
+            "g%.3f-a%d-eb%.3f-et%.3f" % (gamma, alpha, eps_b, eps_t),
             "csv", directory)
     with open(file_name, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
         for iters in range(0,max_iters):
-            #if agent.learner.check_weights():
-            #    print("Weight update complete")
-            #    rewards = agent.test(e, 100)
-            #    csvwriter.writerow([iters, rewards])
-            #    csvfile.flush()
-            #    # TODO: Does this apply to Atari?
-            #    #if stop_when_learned and np.mean(rewards) >= 190:
-            #    #    break
-            print(iters)
-            agent.run_episode(e)
+            r,s = agent.run_episode(e)
+            print("Iterations: %d\t Reward: %d\t Steps: %d" % (iters,r,s))
     return iters
 
 def _worker(i, directory=None):

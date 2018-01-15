@@ -17,7 +17,7 @@ class LinearLearner(Learner):
         self.behaviour_policy = self.get_epsilon_greedy(0.1)
 
         self.weights = Variable(
-                torch.from_numpy(np.random.rand(len(self.action_space), self.num_features)).float(),
+                torch.from_numpy(np.random.rand(len(self.action_space), self.num_features)).float().cuda(),
                 requires_grad=True)
         self.opt = torch.optim.SGD([self.weights], lr=self.learning_rate)
 
@@ -37,9 +37,11 @@ class LinearLearner(Learner):
         """
         gamma = self.discount_factor
         target = reward2 + gamma * self.get_state_value(state2)
-        target = Variable(torch.from_numpy(np.array([target])).float(), requires_grad=False)
+        target = Variable(torch.from_numpy(np.array([target])).float().cuda(),
+                requires_grad=False)
 
-        state_var = Variable(torch.from_numpy(state1).float(), requires_grad=False)
+        state_var = Variable(torch.from_numpy(state1).float().cuda(),
+                requires_grad=False)
         output = torch.dot(self.weights[action1,:],state_var)
 
         loss = (target-output).pow(2)
@@ -49,6 +51,6 @@ class LinearLearner(Learner):
 
     def get_state_action_value(self, state, action):
         """Return the value of the given state-action pair"""
-        state_var = torch.from_numpy(state).float()
+        state_var = torch.from_numpy(state).float().cuda()
         output = torch.dot(self.weights[action,:].data,state_var)
         return output

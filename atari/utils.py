@@ -41,12 +41,20 @@ COLOURS = [0x000000, 0x4a4a4a, 0x6f6f6f, 0x8e8e8e,
   0xbb9f47, 0xd2b656, 0xe8cc63,0xfce070]
 
 COLOUR_MAP = dict((v,k) for (k,v) in enumerate(COLOURS))
+COLOUR_MAP_LIST = np.zeros((64,64,64),dtype=np.uint8)
+for i,c in enumerate(COLOURS):
+    r = c>>16 & 0xFF
+    g = c>>8 & 0xFF
+    b = c & 0xFF
+    COLOUR_MAP_LIST[r>>2][g>>2][b>>2] = i
+COLOUR_MAP_LIST = COLOUR_MAP_LIST.tolist()
 
 def rgb_to_hex(rgb):
     return (rgb[0]<<16)+(rgb[1]<<8)+rgb[2]
 
 def rgb_to_index(rgb):
-    return COLOUR_MAP[rgb_to_hex(rgb)]
+    return COLOUR_MAP[rgb_to_hex(rgb)] # This seems to be faster
+    #return COLOUR_MAP_LIST[rgb[0]>>2][rgb[1]>>2][rgb[2]>>2]
 
 def compute_background(env_name='Atlantis-v0', file_name=None):
     if file_name is None:

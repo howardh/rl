@@ -1,4 +1,5 @@
 import numpy as np
+from tqdm import tqdm
 
 from agent.agent import Agent
 from learner.linear_learner import LinearLearner
@@ -54,8 +55,10 @@ class LinearAgent(Agent):
         step_count = 0
         reward_sum = 0
         # Run an episode
+        pbar = tqdm()
         while not done:
             step_count += 1
+            pbar.update(1)
 
             obs2, reward, done, _ = env.step(action)
             obs2 = self.features(obs2)
@@ -67,4 +70,7 @@ class LinearAgent(Agent):
             # Next time step
             obs = obs2
             action = action2
+
+            print("\rStep: %d" % step_count, end="\r")
+        print("")
         return reward_sum, step_count
