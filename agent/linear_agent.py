@@ -55,22 +55,19 @@ class LinearAgent(Agent):
         step_count = 0
         reward_sum = 0
         # Run an episode
-        pbar = tqdm()
-        while not done:
-            step_count += 1
-            pbar.update(1)
+        with tqdm() as pbar:
+            while not done:
+                step_count += 1
+                pbar.update(1)
 
-            obs2, reward, done, _ = env.step(action)
-            obs2 = self.features(obs2)
-            action2 = self.act(obs2)
-            reward_sum += reward
+                obs2, reward, done, _ = env.step(action)
+                obs2 = self.features(obs2)
+                action2 = self.act(obs2)
+                reward_sum += reward
 
-            self.learner.observe_step(obs, action, reward, obs2, terminal=done)
+                self.learner.observe_step(obs, action, reward, obs2, terminal=done)
 
-            # Next time step
-            obs = obs2
-            action = action2
-
-            print("\rStep: %d" % step_count, end="\r")
-        print("")
+                # Next time step
+                obs = obs2
+                action = action2
         return reward_sum, step_count
