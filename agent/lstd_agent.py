@@ -16,16 +16,16 @@ from gym import spaces
 
 from agent.agent import Agent
 from learner.lstd_learner import LSTDLearner
-from learner.learner import LSTDTraceLearner
-from learner.learner import LSTDTraceQsLearner
-from learner.learner import SparseLSTDLearner
+from learner.lstd_learner import LSTDTraceLearner
+from learner.lstd_learner import LSTDTraceQsLearner
+from learner.lstd_learner import SparseLSTDLearner
 
 class LSTDAgent(Agent):
 
     def __init__(self, num_features, action_space, discount_factor,
             use_traces=False, trace_factor=None,
             use_importance_sampling=False, sigma=1, features=lambda x: x,
-            tree_backup_policy = None, sparse=False):
+            tree_backup_policy = None, sparse=False, cuda=False):
         if use_traces:
             if sigma==1:
                 #print("Initializing LSTD agent with traces")
@@ -59,7 +59,8 @@ class LSTDAgent(Agent):
                         num_features=num_features,
                         action_space=action_space,
                         discount_factor=discount_factor,
-                        use_importance_sampling=use_importance_sampling
+                        use_importance_sampling=use_importance_sampling,
+                        cuda=cuda
                 )
         self.features = features
         self.prev_obs = None

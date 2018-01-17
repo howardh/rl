@@ -262,7 +262,7 @@ def lstd_control_8x8():
                 break
 
 if __name__ == "__main__":
-    control()
+    #control()
     #policy_evaluation()
 
     #lstd_policy_evaluation()
@@ -283,7 +283,8 @@ if __name__ == "__main__":
 
     #exp2.run2()
     #exp2.run_all()
-    #exp3.run_all()
+    exp3.run_all(proc=5)
+    #exp3._run_trial(0.99, 50, 0.1, 0.01, 1, 0.9)
     #d, sd = exp3.parse_results(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")
 
     #exp3.run2(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")

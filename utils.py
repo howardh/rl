@@ -7,6 +7,7 @@ import scipy.sparse
 import scipy.sparse.linalg
 import timeit
 import numpy as np
+import torch
 
 START_TIME = time.strftime("%Y-%m-%d_%H-%M-%S")
 _results_dir = None
@@ -125,6 +126,12 @@ def svd_inv(a):
     ainv = vt.H*sinv*u.H
 
     return ainv
+
+def torch_svd_inv(a):
+    u, s, v = torch.svd(a)
+    #x = torch.mm(torch.mm(u, torch.diag(s)), v.t())
+    y = torch.mm(torch.mm(v, torch.diag(1/s)), u.t())
+    return y
 
 _solve_start_time = timeit.default_timer()
 def solve(a,b):

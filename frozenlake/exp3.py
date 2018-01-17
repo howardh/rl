@@ -34,7 +34,8 @@ INDICES = pandas.MultiIndex.from_product(
         names=["Discount Factor", "Update Frequency", "Behaviour Epsilon",
             "Target Epsilon", "Sigma", "Lambda"])
 
-def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
+def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
+        directory=os.path.join(utils.get_results_directory(),"temp",__name__,"part1"),
         stop_when_learned=True, max_iters=10000):
     """
     Run the learning algorithm on FrozenLake and return the number of
@@ -52,7 +53,8 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
             use_importance_sampling=False,
             use_traces=True,
             trace_factor=lam,
-            sigma=sigma
+            sigma=sigma,
+            cuda=False
     )
     agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
     agent.set_target_policy("%.3f-epsilon"%eps_t)
@@ -103,6 +105,7 @@ def run(n=10, proc=20,
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")):
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
+    print("Directory: %s" % directory)
     print("Parameter space:")
     print("""
             \tDiscount factor: %s
@@ -386,13 +389,13 @@ def parse_results2(directory=None):
     plt.savefig(os.path.join(directory, "graph.png"))
     return data, m, s
 
-def run_all():
+def run_all(proc=10):
     part1_dir = os.path.join(utils.get_results_directory(),__name__,"part1")
     part2_dir = os.path.join(utils.get_results_directory(),__name__,"part2")
 
-    run(directory=part1_dir)
+    run(directory=part1_dir, proc=proc)
     parse_results(directory=part1_dir)
-    run2(directory=part2_dir)
+    run2(directory=part2_dir, proc=proc)
     parse_results2(directory=part2_dir)
 
 if __name__ == "__main__":
