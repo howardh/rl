@@ -379,10 +379,13 @@ def parse_results2(directory=None):
 
     # Plot
     for sigma in data.keys():
+        mean = m[sigma]
+        std = s[sigma]
         u = params[sigma][1]
-        plt.errorbar([i*int(u) for i in
-            range(len(m[sigma]))],m[sigma],xerr=0,yerr=s[sigma],
-            label=("sigma-%s"%sigma))
+        x = [i*int(u) for i in range(len(mean))]
+        label = "sigma-%s"%sigma
+        plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.5)
+        plt.plot(x, mean, label=label)
     plt.legend(loc='best')
     plt.xlabel("Episodes")
     plt.ylabel("Reward")
