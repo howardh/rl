@@ -15,8 +15,7 @@ from agent.lstd_agent import LSTDAgent
 from learner.learner import Optimizer
 
 import frozenlake
-from frozenlake import features
-from frozenlake import utils
+import utils
 
 discount_factors = ['1', '0.99', '0.9']
 learning_rates = ['0.1', '0.01', '0.001']
@@ -71,7 +70,9 @@ def _worker(i, directory=None):
     except KeyboardInterrupt:
         return None
 
-def run(n=10, proc=10, directory="results/%s/%s"%(__name__, time.strftime("%Y-%m-%d_%H-%M-%S"))):
+def run(n=10, proc=10, directory=None):
+    if directory is None:
+        directory = os.path.join(utils.get_results_directory(),__name__)
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
     print("Parameter space:")
@@ -86,7 +87,7 @@ def run(n=10, proc=10, directory="results/%s/%s"%(__name__, time.strftime("%Y-%m
     futures = []
     from concurrent.futures import ProcessPoolExecutor
     try:
-        with ProcessPoolExecutor(max_workers=3) as executor:
+        with ProcessPoolExecutor(max_workers=proc) as executor:
             for i in tqdm(range(len(indices)), desc="Adding jobs"):
                 future = [executor.submit(_worker, i, directory) for _ in range(n)]
                 data.loc[indices[i]] = future

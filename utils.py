@@ -21,7 +21,7 @@ def get_results_directory():
     host_name = os.uname()[1]
     if host_name == "agent-server-1" or host_name == "agent-server-2":
         return os.path.join("/NOBACKUP/hhuang63/results3",START_TIME)
-    raise NotImplementedError()
+    raise NotImplementedError("No default path defined for %s" % host_name)
 
 def set_results_directory(d):
     global _results_dir
@@ -147,3 +147,64 @@ def solve_approx(a,b):
     result = svd_inv(a)*b
     print("Solve time: %s" % (timeit.default_timer()-solve_start_time))
     return result.reshape((b.shape[0],1))
+
+def cc2(fn, params, proc=10, keyworded=False):
+    from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
+    plist = list(params)
+    futures = []
+    with ProcessPoolExecutor(max_workers=proc) as executor:
+        for p in tqdm(plist):
+            if keyworded:
+                futures.append(executor.submit(fn, **p))
+            else:
+                futures.append(executor.submit(fn, *p))
+            if len(futures) >= proc:
+                wait(futures,return_when=FIRST_COMPLETED)
+            futures = [f for f in futures if not f.done()]
+        wait(futures)
+
+def cc(fn, params, proc=10, keyworded=False):
+    from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures import as_completed
+    if proc == 1:
+        futures = [fn(**p) for p in tqdm(list(params), desc="Executing jobs")]
+        return
+    try:
+        with ProcessPoolExecutor(max_workers=proc) as executor:
+            if keyworded:
+                futures = [executor.submit(fn, **p) for p in tqdm(params, desc="Adding jobs")]
+            else:
+                futures = [executor.submit(fn, *p) for p in tqdm(params, desc="Adding jobs")]
+            pbar = tqdm(total=len(futures), desc="Job completion")
+            while len(futures) > 0:
+                count = [f.done() for f in futures].count(True)
+                pbar.update(count)
+                futures = [f for f in futures if not f.done()]
+                #wait(futures,return_when=FIRST_COMPLETED)
+                time.sleep(1)
+        #for f in tqdm(as_completed(futures), desc="Job completion",
+        #        total=len(futures), unit='it', unit_scale=True, leave=True):
+        #    pass
+    except Exception as e:
+        print("Something broke")
+
+def cc3(fn, params, proc=10, keyworded=False):
+    futures = []
+    from concurrent.futures import ProcessPoolExecutor
+    try:
+        with ProcessPoolExecutor(max_workers=proc) as executor:
+            for i in tqdm(params, desc="Adding jobs"):
+                if keyworded:
+                    future = [executor.submit(fn, **i)]
+                else:
+                    future = [executor.submit(fn, *i)]
+                futures += future
+            pbar = tqdm(total=len(futures), desc="Job completion")
+            while len(futures) > 0:
+                count = [f.done() for f in futures].count(True)
+                pbar.update(count)
+                futures = [f for f in futures if not f.done()]
+                time.sleep(1)
+    except Exception as e:
+        print("Something broke")
+

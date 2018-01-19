@@ -192,15 +192,12 @@ def get_best_params(directory):
     d, sd = parse_results(directory)
     return eval(sd[-1][0])
 
-def run2(n=1000, proc=10, params=None,
-        directory=os.path.join(utils.get_results_directory(),__name__,"part2")):
-
+def run2(n=1000, proc=10, params=None, directory=None):
+    if directory is None:
+        directory = os.path.join(utils.get_results_directory(),__name__,"part2")
     if params is None:
         params = get_best_params(os.path.join(utils.get_results_directory(),__name__,"part1"))
 
-    print(type(params))
-
-    print("Gridsearch")
     print("Environment: FrozenLake4x4")
     print("Parameter space:")
     print("""

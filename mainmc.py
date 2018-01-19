@@ -226,66 +226,6 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
     #print('h %s' % threading.current_thread())
     #return rewards,steps_to_learn
 
-def cc2(fn, params, proc=10, keyworded=False):
-    from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
-    plist = list(params)
-    futures = []
-    with ProcessPoolExecutor(max_workers=proc) as executor:
-        for p in tqdm(plist):
-            if keyworded:
-                futures.append(executor.submit(fn, **p))
-            else:
-                futures.append(executor.submit(fn, *p))
-            if len(futures) >= proc:
-                wait(futures,return_when=FIRST_COMPLETED)
-            futures = [f for f in futures if not f.done()]
-        wait(futures)
-
-def cc(fn, params, proc=10, keyworded=False):
-    from concurrent.futures import ProcessPoolExecutor
-    from concurrent.futures import as_completed
-    if proc == 1:
-        futures = [fn(**p) for p in tqdm(list(params), desc="Executing jobs")]
-        return
-    try:
-        with ProcessPoolExecutor(max_workers=proc) as executor:
-            if keyworded:
-                futures = [executor.submit(fn, **p) for p in tqdm(params, desc="Adding jobs")]
-            else:
-                futures = [executor.submit(fn, *p) for p in tqdm(params, desc="Adding jobs")]
-            pbar = tqdm(total=len(futures), desc="Job completion")
-            while len(futures) > 0:
-                count = [f.done() for f in futures].count(True)
-                pbar.update(count)
-                futures = [f for f in futures if not f.done()]
-                #wait(futures,return_when=FIRST_COMPLETED)
-                time.sleep(1)
-        #for f in tqdm(as_completed(futures), desc="Job completion",
-        #        total=len(futures), unit='it', unit_scale=True, leave=True):
-        #    pass
-    except Exception as e:
-        print("Something broke")
-
-def cc3(fn, params, proc=10, keyworded=False):
-    futures = []
-    from concurrent.futures import ProcessPoolExecutor
-    try:
-        with ProcessPoolExecutor(max_workers=proc) as executor:
-            for i in tqdm(params, desc="Adding jobs"):
-                if keyworded:
-                    future = [executor.submit(fn, **i)]
-                else:
-                    future = [executor.submit(fn, *i)]
-                futures += future
-            pbar = tqdm(total=len(futures), desc="Job completion")
-            while len(futures) > 0:
-                count = [f.done() for f in futures].count(True)
-                pbar.update(count)
-                futures = [f for f in futures if not f.done()]
-                time.sleep(1)
-    except Exception as e:
-        print("Something broke")
-
 def gs_rbf(proc=10, results_directory="./results-rbf"):
     #def rbf_control(discount_factor, learning_rate, initial_value, num_pos,
     #        num_vel, behaviour_eps, target_eps, epoch, max_iters, test_iters):
@@ -302,7 +242,7 @@ def gs_rbf(proc=10, results_directory="./results-rbf"):
     rd = [results_directory]
     indices = itertools.product(d,lr,iv,np,nv,be,te,e,mi,ti,rd)
 
-    cc(rbf_control, indices, proc)
+    utils.cc(rbf_control, indices, proc)
 
 def gs_rbft(proc=10, results_directory="./results-rbft"):
     #def rbf_control(discount_factor, learning_rate, initial_value, num_pos,
@@ -321,7 +261,7 @@ def gs_rbft(proc=10, results_directory="./results-rbft"):
     rd = [results_directory]
     indices = itertools.product(d,lr,l,iv,np,nv,be,te,e,mi,ti,rd)
 
-    cc(rbft_control, indices, proc)
+    utils.cc(rbft_control, indices, proc)
 
 def lstd_rbft_control(discount_factor, initial_value, num_pos,
         num_vel, behaviour_eps, target_eps, trace_factor, update_freq, epoch, max_iters, test_iters,
@@ -448,7 +388,7 @@ def gs_lstd_rbft(proc=10, results_directory="./results-lstd-rbft"):
     rd = [results_directory]
     indices = itertools.product(d,iv,np,nv,be,te,tf,uf,e,mi,ti,rd)
 
-    cc(lstd_rbft_control, indices, proc=proc, keyworded=False)
+    utils.cc(lstd_rbft_control, indices, proc=proc, keyworded=False)
 
     #futures = []
     #from concurrent.futures import ProcessPoolExecutor
@@ -696,4 +636,4 @@ if __name__ == "__main__":
         if args.trials == 1:
             fn(**params)
         else:
-            cc(fn, itertools.repeat(params, args.trials), proc=args.threads, keyworded=True)
+            utils.cc(fn, itertools.repeat(params, args.trials), proc=args.threads, keyworded=True)
