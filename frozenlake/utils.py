@@ -40,9 +40,11 @@ def print_policy(agent, f=lambda x: x):
         else:
             x = x+dirs[np.argmax(agent.learner.get_target_policy(f(i)))]
     print(x)
+    return x
 
 def print_values(agent, f=lambda x: x):
     vals = [agent.learner.get_state_value(f(s)) for s in range(16)]
     vals = np.reshape(vals, (4,4))
     np.set_printoptions(precision=5, suppress=True)
     print(vals)
+    return vals

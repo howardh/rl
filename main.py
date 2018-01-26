@@ -15,6 +15,7 @@ from frozenlake import exp1
 from frozenlake import exp2
 from frozenlake import exp3
 from frozenlake import exp4
+from frozenlake import graph
 
 import frozenlake8x8
 import frozenlake8x8.features
@@ -262,43 +263,12 @@ def lstd_control_8x8():
                 break
 
 if __name__ == "__main__":
-    #control()
-    #policy_evaluation()
-
-    #lstd_policy_evaluation()
-    #lstd_control()
-    #lstd_tile_coding_control()
-    #lstd_trace_control()
-
-    #lstd_policy_evaluation_8x8()
-    #lstd_control_8x8()
-
-    #experiments.run_all()
-
-    #a,b = exp1.run()
-    #a,b = exp2.run()
-    #print(a)
-    #pprint.pprint(b)
-    #a.to_csv("exp1.csv")
-
-    #exp2.run2()
+    #exp2.run_all()
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-01-23_15-37-35")
+    #data, sdata1, sdata2 = exp2.parse_results("/NOBACKUP/hhuang63/results3/2018-01-23_15-37-35/frozenlake.exp2/part1",0.78)
+    #p = exp2.get_best_params("/NOBACKUP/hhuang63/results3/2018-01-23_15-37-35/frozenlake.exp2/part1")
+    exp2.run2()
     #exp2.run_all()
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-01-15_17-00-51")
-    exp1.run()
-    #exp3.run_all(proc=5)
-    #exp3.parse_results2()
-    #exp3._run_trial(0.99, 50, 0.1, 0.01, 1, 0.9)
-    #d, sd = exp3.parse_results(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-01-18_17-21-38")
 
-    #exp3.run2(directory="/NOBACKUP/hhuang63/results3/2017-06-09_17-45-03/frozenlake.exp3/part1")
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-12_11-56-03")
-    #exp3.run_all()
-    #print(d)
-    #print(sd)
-
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-08-24_22-24-12")
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
-    #exp4.parse_results2()
-    #exp4.run_all()
-
-    #linear_control()

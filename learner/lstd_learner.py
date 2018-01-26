@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import itertools
 
 import utils
 
@@ -47,6 +48,8 @@ class LSTDLearner(Learner):
             self.weights = self.weights.cuda()
             self.old_weights = self.old_weights.cuda()
 
+        self.prev_sars = None
+
     def combine_state_action(self, state, action):
         self.validate_state(state)
         # Get index of given action
@@ -71,9 +74,7 @@ class LSTDLearner(Learner):
             result = result.cuda()
         return result
 
-    def update_weights(self): # TODO: This is not necessarily invertible
-        #self.weights = np.linalg.pinv(self.a_mat)*self.b_mat
-        #self.weights = self.a_mat.inverse()*self.b_mat
+    def update_weights(self):
         self.weights = torch.mm(utils.torch_svd_inv(self.a_mat), self.b_mat)
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
@@ -83,23 +84,26 @@ class LSTDLearner(Learner):
         """
         self.validate_state(state1)
         self.validate_state(state2)
-        if self.use_importance_sampling:
-            rho = self.get_importance_sampling_ratio(state1, action1)
-        else:
-            rho = 1
+        
         gamma = self.discount_factor
+        
         x1 = self.combine_state_action(state1, action1)
-        if not terminal:
-            x2 = self.combine_state_target_action(state2)
-            self.a_mat += rho*x1*(x1-gamma*x2).t()
-        else:
-            self.a_mat += rho*x1*x1.t()
-        self.b_mat += rho*reward2*x1
 
-    def get_importance_sampling_ratio(self, state, action):
-        mu = self.get_behaviour_policy(state)
-        pi = self.get_target_policy(state)
-        return pi[action]/mu[action]
+        if self.prev_sars is not None:
+            if any(state1 != self.prev_sars[3]):
+                raise ValueError("States from the last two state-action pairs don't match up. Expected %s, but received %s." % (self.prev_sars[3], state1))
+            state0,action0,reward1,_ = self.prev_sars
+
+            x0 = self.combine_state_action(state0, action0)
+            self.a_mat += x0*(x0-gamma*x1).t()
+            self.b_mat += reward1*x0
+
+        if terminal:
+            self.a_mat += x1*x1.t()
+            self.b_mat += reward2*x1
+            self.prev_sars = None
+        else:
+            self.prev_sars = (state1, action1, reward2, state2)
 
     def get_state_action_value(self, state, action):
         self.validate_state(state)
@@ -119,9 +123,50 @@ class LSTDLearner(Learner):
         if state.size != self.num_features:
             raise ValueError("Invalid state: %s. Expected an np.array with %d features." % (state, self.num_features))
 
+
+class LSPILearner(LSTDLearner):
+    def __init__(self, num_features, action_space, discount_factor, cuda=False):
+        LSTDLearner.__init__(self, num_features=num_features,
+                action_space=action_space, discount_factor=discount_factor,
+                cuda=cuda)
+        self.data = []
+
+    def update_weights(self): 
+        gamma = self.discount_factor
+        self.b_mat *= 0
+        for sa0,r1,s1,t in self.data:
+            self.b_mat += r1*sa0
+        old_a = None
+        for i in itertools.count():
+            old_a = self.a_mat
+            self.a_mat *= 0
+            for sa0,r1,s1,t in self.data:
+                sa1 = self.combine_state_target_action(s1)
+                if not t:
+                    self.a_mat += sa0 @ (sa0-gamma*sa1).t()
+                else:
+                    self.a_mat += sa0 @ sa0.t()
+            self.old_weights = self.weights
+            self.weights = torch.mm(utils.torch_svd_inv(self.a_mat), self.b_mat)
+            w1 = torch.mm(utils.torch_svd_inv(self.a_mat), self.b_mat)
+            w2 = torch.mm(utils.torch_svd_inv(self.a_mat), self.b_mat)
+            diff = (self.old_weights-self.weights).pow(2).mean()
+            diff2 = (w1-w2).pow(2).mean()
+            print(self.old_weights-self.weights)
+            print("Diff: %f" % diff2)
+            if diff < 0.001:
+                break
+
+    def observe_step(self, state1, action1, reward2, state2, terminal=False):
+        self.validate_state(state1)
+        self.validate_state(state2)
+        x1 = self.combine_state_action(state1, action1)
+        self.data.append((x1, reward2, state2, terminal))
+
+
 class LSTDTraceLearner(LSTDLearner):
     def __init__(self, num_features, action_space, discount_factor,
-            trace_factor, cuda=True):
+            trace_factor, cuda=False):
         LSTDLearner.__init__(self, num_features=num_features,
                 action_space=action_space, discount_factor=discount_factor,
                 cuda=cuda)
@@ -129,7 +174,7 @@ class LSTDTraceLearner(LSTDLearner):
         self.trace_factor = trace_factor
 
         # Trace vector
-        self.e_mat = torch.from_numpy(np.zeros([1,self.num_features*len(self.action_space)])).float()
+        self.e_mat = torch.zeros([1,self.num_features*len(self.action_space)]).float()
 
         if self.cuda:
             self.e_mat = self.e_mat.cuda()
@@ -142,18 +187,19 @@ class LSTDTraceLearner(LSTDLearner):
 
         x1 = self.combine_state_action(state1, action1)
 
-        self.e_mat = lam*gamma*self.e_mat + torch.t(x1)
+        self.e_mat = lam*gamma*self.e_mat + x1.t()
 
         if not terminal:
             x2 = self.combine_state_target_action(state2)
-            self.a_mat += torch.t(self.e_mat)*torch.t(x1-gamma*x2)
+            self.a_mat += self.e_mat.t()*torch.t(x1-gamma*x2)
         else:
-            self.a_mat += torch.t(self.e_mat)*torch.t(x1)
+            self.a_mat += self.e_mat.t()*x1.t()
 
-        self.b_mat += reward2*torch.t(self.e_mat)
+        self.b_mat += reward2*self.e_mat.t()
 
         if terminal:
             self.e_mat *= 0
+
 
 class LSTDTraceQsLearner(LSTDLearner):
     def __init__(self, num_features, action_space, discount_factor,
@@ -170,13 +216,13 @@ class LSTDTraceQsLearner(LSTDLearner):
         self.tb_policy = tree_backup_policy
 
         # Trace vector
-        self.e_mat = np.matrix(np.zeros([1,self.num_features*len(self.action_space)]))
+        self.e_mat = torch.zeros([1,self.num_features*len(self.action_space)])
 
         self.prev_sars = None
 
     def get_all_state_action_pairs(self, state):
         num_actions = len(self.action_space)
-        results = np.matrix(np.zeros([self.num_features*num_actions,num_actions]))
+        results = torch.zeros([self.num_features*num_actions,num_actions])
         for a in range(num_actions):
             results[:,a:(a+1)] = self.combine_state_action(state, self.action_space.item(a))
         return results
@@ -196,17 +242,17 @@ class LSTDTraceQsLearner(LSTDLearner):
             x0 = self.combine_state_action(state0, action0)
             x1 = self.combine_state_action(state1, action1)
             x1_all = self.get_all_state_action_pairs(state1)
-            pi0 = self.get_tree_backup_policy(state0).reshape([len(self.action_space),1])
-            pi1 = self.get_tree_backup_policy(state1).reshape([len(self.action_space),1])
+            pi0 = torch.from_numpy(self.get_tree_backup_policy(state0)).float().view(len(self.action_space),1)
+            pi1 = torch.from_numpy(self.get_tree_backup_policy(state1)).float().view(len(self.action_space),1)
 
-            self.e_mat = lam*gamma*((1-sigma)*pi0.item(action0)+sigma)*self.e_mat + x0.transpose()
-            self.a_mat += self.e_mat.transpose()*(x0-gamma*(sigma*x1 + (1-sigma)*(x1_all*pi1))).transpose()
-            self.b_mat += reward1*self.e_mat.transpose()
+            self.e_mat = lam*gamma*((1-sigma)*pi0.view(-1)[action0]+sigma)*self.e_mat + x0.t()
+            self.a_mat += self.e_mat.t() @ (x0-gamma*(sigma*x1 + (1-sigma)*(x1_all @ pi1))).t()
+            self.b_mat += reward1*self.e_mat.t()
 
         if terminal:
-            self.e_mat = lam*gamma*((1-sigma)*pi1[action1]+sigma)*self.e_mat + x1.transpose()
-            self.a_mat += self.e_mat.transpose()*x1.transpose()
-            self.b_mat += reward2*self.e_mat.transpose()
+            self.e_mat = lam*gamma*((1-sigma)*pi1.view(-1)[action1]+sigma)*self.e_mat + x1.t()
+            self.a_mat += self.e_mat.t() @ x1.t()
+            self.b_mat += reward2*self.e_mat.t()
 
             self.e_mat *= 0
             self.prev_sars = None
@@ -220,6 +266,7 @@ class LSTDTraceQsLearner(LSTDLearner):
         if self.tb_policy is not None:
             return self.tb_policy(state)
         return self.get_target_policy(state)
+
 
 class SparseLSTDLearner(LSTDLearner):
     def __init__(self, num_features, action_space, discount_factor, use_importance_sampling=False):

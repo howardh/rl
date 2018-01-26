@@ -6,6 +6,7 @@ from tqdm import tqdm
 import scipy.sparse
 import scipy.sparse.linalg
 import timeit
+import csv
 import numpy as np
 import torch
 
@@ -116,6 +117,42 @@ def parse_file_name(file_name):
 
     return results
 
+def collect_file_params(file_names):
+    results = dict()
+    for file_name in file_names:
+        file_params = parse_file_name(file_name)
+        if file_params is None:
+            continue
+        for k,v in file_params.items():
+            if k not in results:
+                results[k] = set()
+            results[k].add(v)
+    return results
+
+def parse_file(file_name, threshold=None):
+    """
+    Process the contents of a file with data from a trial, and return the sum
+    of rewards.
+    """
+    threshold_met = None
+    with open(file_name, 'r') as csvfile:
+        reader = csv.reader(csvfile, delimiter=',')
+        results = [(int(r[0]), np.mean(eval(r[1]))) for r in reader]
+        # Check if we have data to return
+        if len(results) == 0:
+            return None
+        # Compute time to learn
+        if threshold is not None:
+            for r in results:
+                if threshold_met is None and r[1] >= threshold:
+                    threshold_met = r[0]
+            if threshold_met is None:
+                threshold_met = results[-1][0]
+        # Compute mean reward over time
+        means = [r[1] for r in results]
+
+        return np.mean(means), threshold_met
+
 def svd_inv(a):
     #u,s,vt = scipy.sparse.linalg.svds(a,k=int(min(a.shape)/2))
     u,s,vt = scipy.sparse.linalg.svds(a,k=2000)
@@ -130,7 +167,10 @@ def svd_inv(a):
 def torch_svd_inv(a):
     u, s, v = torch.svd(a)
     #x = torch.mm(torch.mm(u, torch.diag(s)), v.t())
-    y = torch.mm(torch.mm(v, torch.diag(1/s)), u.t())
+    sinv = torch.FloatTensor([1/x if x != 0 else 0 for x in s])
+    if s.is_cuda:
+        sinv = sinv.cuda()
+    y = torch.mm(torch.mm(v, torch.diag(sinv)), u.t())
     return y
 
 _solve_start_time = timeit.default_timer()
@@ -167,7 +207,10 @@ def cc(fn, params, proc=10, keyworded=False):
     from concurrent.futures import ProcessPoolExecutor
     from concurrent.futures import as_completed
     if proc == 1:
-        futures = [fn(**p) for p in tqdm(list(params), desc="Executing jobs")]
+        if keyworded:
+            futures = [fn(**p) for p in tqdm(list(params), desc="Executing jobs")]
+        else:
+            futures = [fn(*p) for p in tqdm(list(params), desc="Executing jobs")]
         return
     try:
         with ProcessPoolExecutor(max_workers=proc) as executor:

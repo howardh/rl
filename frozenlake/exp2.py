@@ -85,9 +85,13 @@ def _worker2(params, directory=None):
         return _run_trial(g,u,eb,et,directory,False,5000)
     except KeyboardInterrupt:
         return None
+    except Exception as e:
+        #print(e)
+        pass
 
-def run(n=10, proc=10,
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")):
+def run(n=10, proc=10, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
     print("Parameter space:")
@@ -98,6 +102,8 @@ def run(n=10, proc=10,
             \tTarget Epsilons: %s
     """ % (discount_factors, update_frequencies, behaviour_epsilons, target_epsilons))
     print("Determines the best combination of parameters by the number of iterations needed to learn.")
+    print("Directory: %s" % directory)
+
     data = pandas.DataFrame(index=INDICES, columns=range(n))
 
     futures = []
@@ -131,8 +137,40 @@ def run(n=10, proc=10,
     dill.dump(sorted_data, open(os.path.join(directory, "sorted_results.pkl"),'wb'))
     return data, sorted_data
 
-def parse_results(directory):
-    import re
+def parse_results(directory, learned_threshold=None):
+    """
+    Given a directory containing the results of experiments as CSV files,
+    compute statistics on the data, and return it as a Pandas dataframe.
+
+    CSV format:
+        Two columns:
+        * Time
+            An integer value, which could represent episode count, step count,
+            or clock time
+        * Rewards
+            A list of floating point values, where each value represents the
+            total reward obtained from each test run. This list may be of any
+            length, and must be wrapped in double quotes.
+    e.g.
+        0,"[0,0,0]"
+        10,"[1,0,0,0,0]"
+        20,"[0,1,0,1,0]"
+        30,"[0,1,1,0,1,0,1]"
+
+    Pandas Dataframe format:
+        Columns:
+        * MRS - Mean Reward Sum
+            Given the graph of the mean testing reward over time, the MRS is
+            the average of these testing rewards over time.
+        * TTLS - Time to Learn Sum
+            The first time step at which the testing reward matches/surpasses the given
+            threshold. Units may be in episodes, steps, or clock time,
+            depending on the units used in the CSV data.
+        * Count
+            Number of trials that were run with the given parameters.
+        Indices:
+            Obtained from the parameters in the file names.
+    """
     # Check if pickle files are there
     results_file_name = os.path.join(directory, "results.pkl") 
     sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
@@ -146,51 +184,52 @@ def parse_results(directory):
     # Parse set of parameters
     files = [f for f in os.listdir(directory) if
             os.path.isfile(os.path.join(directory,f))]
-    pattern = re.compile(r'^g((0|[1-9]\d*)(\.\d+)?)-u((0|[1-9]\d*)(\.\d+)?)-eb((0|[1-9]\d*)(\.\d+)?)-et((0|[1-9]\d*)(\.\d+)?)-(0|[1-9]\d*)\.csv$')
-    g = set()
-    u = set()
-    eb = set()
-    et = set()
-    for file_name in tqdm(files, desc="Parsing File Names"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            continue
-        g.add(regex_result.group(1))
-        u.add(regex_result.group(4))
-        eb.add(regex_result.group(7))
-        et.add(regex_result.group(10))
+    params = utils.collect_file_params(files)
+    param_names = list(params.keys())
+    param_vals = [params[k] for k in param_names]
 
-    indices = pandas.MultiIndex.from_product([g, u, eb, et],
-            names=["Discount Factor", "Update Frequencies", "Behaviour Epsilon", "Target Epsilon"])
     # A place to store our results
-    data = pandas.DataFrame(0, index=indices, columns=["Sum", "Count", "Mean"])
+    indices = pandas.MultiIndex.from_product(param_vals, names=param_names)
+    data = pandas.DataFrame(0, index=indices, columns=["MRS", "TTLS", "Count"])
+    data['MRS'] = data.MRS.astype(float)
+    data.sortlevel(inplace=True)
 
     # Load results from all csv files
     for file_name in tqdm(files, desc="Parsing File Contents"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
+        file_params = utils.parse_file_name(file_name)
+        if file_params is None:
             print("Invalid file. Skipping.")
             continue
-        gamma = regex_result.group(1)
-        upd_freq = regex_result.group(4)
-        eps_b = regex_result.group(7)
-        eps_t = regex_result.group(10)
-        with open(os.path.join(directory,file_name), 'r') as csvfile:
-            reader = csv.reader(csvfile, delimiter=',')
-            results = [(int(r[0]), np.sum(eval(r[1]))) for r in reader]
-            row = data.loc[(gamma, upd_freq, eps_b, eps_t)]
-            row['Sum'] += results[-1][0]
-            row['Count'] += 1
-            row['Mean'] = row['Sum']/row['Count']
+        output = utils.parse_file(os.path.join(directory,file_name),
+                learned_threshold)
+        if output is None:
+            tqdm.write("Skipping empty file: %s" % file_name)
+            continue
+        mr,ttl = output
+        key = tuple([file_params[k] for k in param_names])
+        data.loc[key,'MRS'] += mr
+        if ttl is None:
+            data.loc[key,'TTLS'] = None
+        else:
+            data.loc[key,'TTLS'] += ttl
+        data.loc[key,'Count'] += 1
 
     # Display results
-    sorted_data = sorted([(i,np.mean(data.loc[i])) for i in indices], key=operator.itemgetter(1))
-    sorted_data.reverse()
-    return data, sorted_data
+    print("Sorting by MR")
+    sorted_by_mr = [(i,data.loc[i,'MRS']/data.loc[i,'Count']) for i in data.index]
+    sorted_by_mr = sorted(sorted_by_mr, key=operator.itemgetter(1))
+    sorted_by_mr.reverse()
+    print("Sorting by TTL")
+    sorted_by_ttl = [(i,data.loc[i,'TTLS']/data.loc[i,'Count']) for i in data.index]
+    sorted_by_ttl = sorted(sorted_by_ttl, key=operator.itemgetter(1))
+    return data, sorted_by_mr, sorted_by_ttl
 
 def get_best_params(directory):
-    d, sd = parse_results(directory)
-    return eval(sd[-1][0])
+    d, sd_mr, sd_ttl = parse_results(directory, 0.78)
+    names = list(d.index.names)
+    vals = [eval(x) for x in sd_ttl[0][0]]
+    params = dict(zip(names, vals))
+    return params['g'], params['u'], params['eb'], params['et']
 
 def run2(n=1000, proc=10, params=None, directory=None):
     if directory is None:
@@ -298,9 +337,9 @@ def parse_results2(directory):
     plt.savefig(os.path.join(directory, "graph.png"))
     return data, m, v
 
-def run_all():
-    run(directory=os.path.join(utils.get_results_directory(),__name__,"part1"))
-    run2(directory=os.path.join(utils.get_results_directory(),__name__,"part2"))
+def run_all(proc=10):
+    run(proc=proc,directory=os.path.join(utils.get_results_directory(),__name__,"part1"))
+    run2(proc=proc,directory=os.path.join(utils.get_results_directory(),__name__,"part2"))
     parse_results2(directory=os.path.join(utils.get_results_directory(),__name__,"part2"))
 
 if __name__ == "__main__":

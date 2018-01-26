@@ -372,17 +372,18 @@ def parse_results2(directory=None):
     m = dict()
     v = dict()
     s = dict()
+    u = dict()
     for sigma in data.keys():
         m[sigma] = np.mean(data[sigma], axis=0)
         v[sigma] = np.var(data[sigma], axis=0)
         s[sigma] = np.std(data[sigma], axis=0)
+        u[sigma] = params[sigma][1]
 
     # Plot
     for sigma in data.keys():
         mean = m[sigma]
         std = s[sigma]
-        u = params[sigma][1]
-        x = [i*int(u) for i in range(len(mean))]
+        x = [i*int(u[sigma]) for i in range(len(mean))]
         label = "sigma-%s"%sigma
         plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.5)
         plt.plot(x, mean, label=label)
@@ -390,7 +391,7 @@ def parse_results2(directory=None):
     plt.xlabel("Episodes")
     plt.ylabel("Reward")
     plt.savefig(os.path.join(directory, "graph.png"))
-    return data, m, s
+    return data, m, s, u
 
 def run_all(proc=10):
     part1_dir = os.path.join(utils.get_results_directory(),__name__,"part1")

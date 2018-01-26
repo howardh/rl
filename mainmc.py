@@ -482,6 +482,8 @@ def graph_dirs(directory, labels=None, output="graph.png"):
     plt.legend()
     plt.savefig("2"+output)
 
+    return data_dict
+
 def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description="Boo")

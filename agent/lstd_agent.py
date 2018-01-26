@@ -16,6 +16,7 @@ from gym import spaces
 
 from agent.agent import Agent
 from learner.lstd_learner import LSTDLearner
+from learner.lstd_learner import LSPILearner
 from learner.lstd_learner import LSTDTraceLearner
 from learner.lstd_learner import LSTDTraceQsLearner
 from learner.lstd_learner import SparseLSTDLearner
@@ -25,43 +26,50 @@ class LSTDAgent(Agent):
     def __init__(self, num_features, action_space, discount_factor,
             use_traces=False, trace_factor=None,
             use_importance_sampling=False, sigma=1, features=lambda x: x,
-            tree_backup_policy = None, sparse=False, cuda=False):
-        if use_traces:
-            if sigma==1:
-                #print("Initializing LSTD agent with traces")
-                self.learner = LSTDTraceLearner(
-                        num_features=num_features,
-                        action_space=action_space,
-                        discount_factor=discount_factor,
-                        trace_factor=trace_factor
-                )
-            else:
-                #print("Initializing LSTD agent with Q(sigma=%f)" % sigma)
-                self.learner = LSTDTraceQsLearner(
-                        num_features=num_features,
-                        action_space=action_space,
-                        discount_factor=discount_factor,
-                        trace_factor=trace_factor,
-                        sigma=sigma,
-                        tree_backup_policy=tree_backup_policy
-                )
+            tree_backup_policy = None, sparse=False, cuda=False, lspi=False):
+        if lspi:
+            self.learner = LSPILearner(
+                    num_features=num_features,
+                    action_space=action_space,
+                    discount_factor=discount_factor,
+            )
         else:
-            #print("Initializing LSTD agent")
-            if sparse:
-                self.learner = SparseLSTDLearner(
-                        num_features=num_features,
-                        action_space=action_space,
-                        discount_factor=discount_factor,
-                        use_importance_sampling=use_importance_sampling
-                )
+            if use_traces:
+                if sigma==1:
+                    #print("Initializing LSTD agent with traces")
+                    self.learner = LSTDTraceLearner(
+                            num_features=num_features,
+                            action_space=action_space,
+                            discount_factor=discount_factor,
+                            trace_factor=trace_factor
+                    )
+                else:
+                    #print("Initializing LSTD agent with Q(sigma=%f)" % sigma)
+                    self.learner = LSTDTraceQsLearner(
+                            num_features=num_features,
+                            action_space=action_space,
+                            discount_factor=discount_factor,
+                            trace_factor=trace_factor,
+                            sigma=sigma,
+                            tree_backup_policy=tree_backup_policy
+                    )
             else:
-                self.learner = LSTDLearner(
-                        num_features=num_features,
-                        action_space=action_space,
-                        discount_factor=discount_factor,
-                        use_importance_sampling=use_importance_sampling,
-                        cuda=cuda
-                )
+                #print("Initializing LSTD agent")
+                if sparse:
+                    self.learner = SparseLSTDLearner(
+                            num_features=num_features,
+                            action_space=action_space,
+                            discount_factor=discount_factor,
+                            use_importance_sampling=use_importance_sampling
+                    )
+                else:
+                    self.learner = LSTDLearner(
+                            num_features=num_features,
+                            action_space=action_space,
+                            discount_factor=discount_factor,
+                            use_importance_sampling=use_importance_sampling,
+                            cuda=cuda
+                    )
         self.features = features
         self.prev_obs = None
         self.prev_done = True
