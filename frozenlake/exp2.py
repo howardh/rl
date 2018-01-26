@@ -53,8 +53,7 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, directory=None,
             "csv", directory)
     with open(file_name, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
-        for iters in range(1,max_iters):
-            agent.run_episode(e)
+        for iters in range(0,max_iters+1):
             if iters % upd_freq == 0:
                 agent.update_weights()
                 rewards = agent.test(e, 100)
@@ -62,6 +61,7 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, directory=None,
                 csvfile.flush()
                 if stop_when_learned and np.mean(rewards) >= 0.78:
                     break
+            agent.run_episode(e)
     return iters
 
 def _worker(i, directory=None):
@@ -265,10 +265,13 @@ def run2(n=1000, proc=10, params=None, directory=None):
     except Exception:
         print("Something broke")
 
-def parse_results2(directory):
+def parse_results2(directory=None):
     """
     Parse the CSV files produced by run2, and generates a graph.
     """
+    if directory is None:
+        directory = os.path.join(utils.get_results_directory(),__name__,"part2")
+
     import re
     import matplotlib
     matplotlib.use("Agg")
@@ -289,33 +292,18 @@ def parse_results2(directory):
     # Parse set of parameters
     files = [f for f in os.listdir(directory) if
             os.path.isfile(os.path.join(directory,f))]
-    pattern = re.compile(r'^g((0|[1-9]\d*)(\.\d+)?)-u((0|[1-9]\d*)(\.\d+)?)-eb((0|[1-9]\d*)(\.\d+)?)-et((0|[1-9]\d*)(\.\d+)?)-(0|[1-9]\d*)\.csv$')
-    g = set()
-    u = set()
-    eb = set()
-    et = set()
-    for file_name in tqdm(files, desc="Parsing File Names"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            continue
-        g.add(regex_result.group(1))
-        u.add(regex_result.group(4))
-        eb.add(regex_result.group(7))
-        et.add(regex_result.group(10))
+    params = utils.collect_file_params(files)
+    param_names = list(params.keys())
+    param_vals = [params[k] for k in param_names]
 
     # A place to store our results
     data = []
 
     # Load results from all csv files
     for file_name in tqdm(files, desc="Parsing File Contents"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
+        if utils.parse_file_name(file_name) is None:
             print("Invalid file. Skipping.")
             continue
-        gamma = regex_result.group(1)
-        upd_freq = regex_result.group(4)
-        eps_b = regex_result.group(7)
-        eps_t = regex_result.group(10)
         with open(os.path.join(directory,file_name), 'r') as csvfile:
             reader = csv.reader(csvfile, delimiter=',')
             results = [np.sum(eval(r[1])) for r in reader]
@@ -329,13 +317,14 @@ def parse_results2(directory):
     m = np.mean(data, axis=0)
     v = np.var(data, axis=0)
     s = np.std(data, axis=0)
+    u = int(list(params['u'])[0])
 
     # Plot
     print(len(m))
-    print(len([i*int(next(iter(u))) for i in range(len(m))]))
-    plt.errorbar([i*int(next(iter(u))) for i in range(len(m))],m,xerr=0,yerr=s)
+    print(len([i*u for i in range(len(m))]))
+    plt.errorbar([i*u for i in range(len(m))],m,xerr=0,yerr=s)
     plt.savefig(os.path.join(directory, "graph.png"))
-    return data, m, v
+    return data, m, s, u
 
 def run_all(proc=10):
     run(proc=proc,directory=os.path.join(utils.get_results_directory(),__name__,"part1"))

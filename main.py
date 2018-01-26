@@ -264,11 +264,16 @@ def lstd_control_8x8():
 
 if __name__ == "__main__":
     #exp2.run_all()
-    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-01-23_15-37-35")
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-01-23_15-37-35")
     #data, sdata1, sdata2 = exp2.parse_results("/NOBACKUP/hhuang63/results3/2018-01-23_15-37-35/frozenlake.exp2/part1",0.78)
     #p = exp2.get_best_params("/NOBACKUP/hhuang63/results3/2018-01-23_15-37-35/frozenlake.exp2/part1")
-    exp2.run2()
+    #exp2.run2()
+    #exp2.parse_results2()
+
     #exp2.run_all()
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-01-15_17-00-51")
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-01-18_17-21-38")
+
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/final")
+    graph.graph_all()
 
