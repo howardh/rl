@@ -17,8 +17,8 @@ from agent.lstd_agent import LSTDAgent
 from learner.learner import Optimizer
 
 import frozenlake
-from frozenlake import features
-from frozenlake import utils
+import frozenlake.features
+import frozenlake.utils
 
 import utils
 
@@ -101,8 +101,9 @@ def _worker2(params, directory=None):
     except KeyboardInterrupt:
         return None
 
-def run(n=10, proc=20,
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")):
+def run(n=10, proc=20, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
     print("Directory: %s" % directory)
@@ -137,135 +138,30 @@ def run(n=10, proc=20,
     except Exception:
         print("Something broke")
 
-def parse_results(directory):
-    import re
-    # Check if pickle files are there
-    results_file_name = os.path.join(directory, "results.pkl") 
-    sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
-    if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
-        with open(results_file_name, 'rb') as f:
-            data = dill.load(f)
-        with open(sorted_results_file_name, 'rb') as f:
-            sorted_data = dill.load(f)
-        return data, sorted_data
+def parse_results(directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
 
-    # Parse set of parameters
-    files = [f for f in os.listdir(directory) if
-            os.path.isfile(os.path.join(directory,f))]
-    pattern = re.compile(r'^g((0|[1-9]\d*)(\.\d+)?)-u((0|[1-9]\d*)(\.\d+)?)-eb((0|[1-9]\d*)(\.\d+)?)-et((0|[1-9]\d*)(\.\d+)?)-s((0|[1-9]\d*)(\.\d+)?)-l((0|[1-9]\d*)(\.\d+)?)-(0|[1-9]\d*)\.csv$')
-    g = set()
-    u = set()
-    eb = set()
-    et = set()
-    s = set()
-    l = set()
-    for file_name in tqdm(files, desc="Parsing File Names"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            continue
-        g.add(regex_result.group(1))
-        u.add(regex_result.group(4))
-        eb.add(regex_result.group(7))
-        et.add(regex_result.group(10))
-        s.add(regex_result.group(13))
-        l.add(regex_result.group(16))
-
-    indices = pandas.MultiIndex.from_product([g, u, eb, et, s, l],
-            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon", "Target Epsilon", "Sigma", "Trace Factor"])
-    # A place to store our results
-    data = pandas.DataFrame(0, index=indices, columns=["Sum", "Count", "Mean"]) # Average sum of rewards
-    data2 = pandas.DataFrame(0, index=indices, columns=["Sum", "Count", "Mean"]) # Average time to learn
-    for i in data.index:
-        data.loc[i]['Mean'] = sys.maxsize # FIXME: Hack. Can't use np.inf here.
-
-    # Load results from all csv files
-    for file_name in tqdm(files, desc="Parsing File Contents"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            print("Invalid file. Skipping.")
-            continue
-        gamma = regex_result.group(1)
-        upd_freq = regex_result.group(4)
-        eps_b = regex_result.group(7)
-        eps_t = regex_result.group(10)
-        sigma = regex_result.group(13)
-        lam = regex_result.group(16)
-        with open(os.path.join(directory,file_name), 'r') as csvfile:
-            try:
-                reader = csv.reader(csvfile, delimiter=',')
-                results = [(int(r[0]), np.sum(eval(r[1]))) for r in reader]
-                time_to_learn = None
-                for a,b in results:
-                    if b >= 0.78:
-                        time_to_learn = a
-                        break
-                if time_to_learn is None:
-                    time_to_learn = results[-1][0]
-
-                # Sum of rewards
-                row = data.loc[(gamma, upd_freq, eps_b, eps_t, sigma, lam)]
-                row['Sum'] += results[-1][1]
-                row['Count'] += 1
-                row['Mean'] = row['Sum']/row['Count']
-
-                # Sum of learning time
-                row2 = data.loc[(gamma, upd_freq, eps_b, eps_t, sigma, lam)]
-                row['Sum'] += time_to_learn
-                row['Count'] += 1
-                row['Mean'] = row['Sum']/row['Count']
-            except Exception:
-                pass
-
-    # Save results
-    sorted_data = sorted([(i,data.loc[i]["Mean"]) for i in indices], key=operator.itemgetter(1))
-    sorted_data.reverse()
-    with open(results_file_name, 'wb') as f:
-        dill.dump(data, f)
-    with open(sorted_results_file_name, 'wb') as f:
-        dill.dump(sorted_data, f)
+    data = utils.parse_results(directory, 0.78)
 
     # Split by sigma value
+    sigmas = list(data.index.get_level_values('s').unique())
     by_sigma = dict()
-    for sigma in s:
-        df = data.iloc[data.index.get_level_values('Sigma') == sigma]
-        sorted_df = sorted([(i,df.loc[i]["Mean"]) for i in df.index], key=operator.itemgetter(1))
-        sorted_df.reverse()
-        by_sigma[sigma] = (df, sorted_df)
+    for sigma in sigmas:
+        df = data.iloc[data.index.get_level_values('s') == sigma]
+        sorted_df = utils.sort_data(df)
+        by_sigma[sigma] = (df, sorted_df[0], sorted_df[1])
 
-    # Plot results
-    #for sigma in s:
-    #    u = params[sigma][1]
-    #    """
-    #    gamma, upd_freq, eb, et, lambda
-    #    names=["Discount Factor", "Update Frequency", "Behaviour Epsilon",
-    #        "Target Epsilon", "Sigma", "Lambda"]
-    #    """
-    #    df = data.iloc[data.index.get_level_values('Sigma') == sigma]
-    #    for gamma in g:
-    #        dfg = df.iloc[df.index.get_level_values('Discount Factor') == gamma]
-    #    plt.legend(loc='best')
-    #    plt.xlabel("Episodes")
-    #    plt.ylabel("Reward")
-    #    plt.savefig(os.path.join(directory, "graph-s%s.png" % sigma))
-
-    return data, sorted_data
+    return data, by_sigma
 
 def get_best_params(directory, sigma=None):
     d, sd = parse_results(directory)
-    sigmas = d.index.get_level_values('Sigma').unique()
     by_sigma = dict()
-    for s in sigmas:
-        df = d.iloc[d.index.get_level_values('Sigma') == s]
-        sorted_df = sorted([(i,df.loc[i]["Mean"]) for i in df.index], key=operator.itemgetter(1))
-        #sorted_df.reverse()
-        #pprint.pprint(sorted_df)
-        by_sigma[s] = (df, sorted_df)
-        #for x,y in sorted_df:
-        #    if y == sorted_df[-1][1]:
-        #        print(x)
     best_params = dict()
-    for s in sigmas:
-        best_params[s] = by_sigma[s][1][-1][0]
+    for s,d in sd.items():
+        df, by_mr, by_ttl = d
+        by_sigma[s] = (df, by_mr, by_ttl)
+        best_params[s] = dict(zip(df.index.names,by_sigma[s][2][0][0]))
     return best_params
 
 def run2(n=1000, proc=20, params=None, directory=None):
@@ -274,6 +170,14 @@ def run2(n=1000, proc=20, params=None, directory=None):
         directory=os.path.join(utils.get_results_directory(),__name__,"part2")
     if params is None:
         params = get_best_params(os.path.join(utils.get_results_directory(),__name__,"part1"))
+
+    for k,v in params.items():
+        if type(v) is dict:
+            params[k] = (v['g'], v['u'], v['eb'], v['et'], v['s'], v['l'])
+        elif type(v) is tuple:
+            pass
+        else:
+            raise Exception("Invalid Parameters")
 
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
@@ -394,13 +298,10 @@ def parse_results2(directory=None):
     return data, m, s, u
 
 def run_all(proc=10):
-    part1_dir = os.path.join(utils.get_results_directory(),__name__,"part1")
-    part2_dir = os.path.join(utils.get_results_directory(),__name__,"part2")
-
-    run(directory=part1_dir, proc=proc)
-    parse_results(directory=part1_dir)
-    run2(directory=part2_dir, proc=proc)
-    parse_results2(directory=part2_dir)
+    run(proc=proc)
+    parse_results()
+    run2(proc=proc)
+    parse_results2()
 
 if __name__ == "__main__":
     run_all()

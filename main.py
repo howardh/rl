@@ -275,5 +275,7 @@ if __name__ == "__main__":
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-01-18_17-21-38")
 
     utils.set_results_directory("/NOBACKUP/hhuang63/results3/final")
-    graph.graph_all()
+    #data = exp3.parse_results()
+    exp3.run2()
+    #graph.graph_all()
 

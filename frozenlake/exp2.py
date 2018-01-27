@@ -137,95 +137,12 @@ def run(n=10, proc=10, directory=None):
     dill.dump(sorted_data, open(os.path.join(directory, "sorted_results.pkl"),'wb'))
     return data, sorted_data
 
-def parse_results(directory, learned_threshold=None):
-    """
-    Given a directory containing the results of experiments as CSV files,
-    compute statistics on the data, and return it as a Pandas dataframe.
-
-    CSV format:
-        Two columns:
-        * Time
-            An integer value, which could represent episode count, step count,
-            or clock time
-        * Rewards
-            A list of floating point values, where each value represents the
-            total reward obtained from each test run. This list may be of any
-            length, and must be wrapped in double quotes.
-    e.g.
-        0,"[0,0,0]"
-        10,"[1,0,0,0,0]"
-        20,"[0,1,0,1,0]"
-        30,"[0,1,1,0,1,0,1]"
-
-    Pandas Dataframe format:
-        Columns:
-        * MRS - Mean Reward Sum
-            Given the graph of the mean testing reward over time, the MRS is
-            the average of these testing rewards over time.
-        * TTLS - Time to Learn Sum
-            The first time step at which the testing reward matches/surpasses the given
-            threshold. Units may be in episodes, steps, or clock time,
-            depending on the units used in the CSV data.
-        * Count
-            Number of trials that were run with the given parameters.
-        Indices:
-            Obtained from the parameters in the file names.
-    """
-    # Check if pickle files are there
-    results_file_name = os.path.join(directory, "results.pkl") 
-    sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
-    if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
-        with open(results_file_name, 'rb') as f:
-            data = dill.load(f)
-        with open(sorted_results_file_name, 'rb') as f:
-            sorted_data = dill.load(f)
-        return data, sorted_data
-
-    # Parse set of parameters
-    files = [f for f in os.listdir(directory) if
-            os.path.isfile(os.path.join(directory,f))]
-    params = utils.collect_file_params(files)
-    param_names = list(params.keys())
-    param_vals = [params[k] for k in param_names]
-
-    # A place to store our results
-    indices = pandas.MultiIndex.from_product(param_vals, names=param_names)
-    data = pandas.DataFrame(0, index=indices, columns=["MRS", "TTLS", "Count"])
-    data['MRS'] = data.MRS.astype(float)
-    data.sortlevel(inplace=True)
-
-    # Load results from all csv files
-    for file_name in tqdm(files, desc="Parsing File Contents"):
-        file_params = utils.parse_file_name(file_name)
-        if file_params is None:
-            print("Invalid file. Skipping.")
-            continue
-        output = utils.parse_file(os.path.join(directory,file_name),
-                learned_threshold)
-        if output is None:
-            tqdm.write("Skipping empty file: %s" % file_name)
-            continue
-        mr,ttl = output
-        key = tuple([file_params[k] for k in param_names])
-        data.loc[key,'MRS'] += mr
-        if ttl is None:
-            data.loc[key,'TTLS'] = None
-        else:
-            data.loc[key,'TTLS'] += ttl
-        data.loc[key,'Count'] += 1
-
-    # Display results
-    print("Sorting by MR")
-    sorted_by_mr = [(i,data.loc[i,'MRS']/data.loc[i,'Count']) for i in data.index]
-    sorted_by_mr = sorted(sorted_by_mr, key=operator.itemgetter(1))
-    sorted_by_mr.reverse()
-    print("Sorting by TTL")
-    sorted_by_ttl = [(i,data.loc[i,'TTLS']/data.loc[i,'Count']) for i in data.index]
-    sorted_by_ttl = sorted(sorted_by_ttl, key=operator.itemgetter(1))
-    return data, sorted_by_mr, sorted_by_ttl
+def parse_results(directory):
+    return utils.parse_results(directory, learned_threshold=0.78)
 
 def get_best_params(directory):
-    d, sd_mr, sd_ttl = parse_results(directory, 0.78)
+    d = parse_results(directory)
+    sd_mr, sd_ttl = utils.sort_data(d)
     names = list(d.index.names)
     vals = [eval(x) for x in sd_ttl[0][0]]
     params = dict(zip(names, vals))
