@@ -26,7 +26,7 @@ class LSTDAgent(Agent):
     def __init__(self, num_features, action_space, discount_factor,
             use_traces=False, trace_factor=None,
             use_importance_sampling=False, sigma=1, features=lambda x: x,
-            tree_backup_policy = None, sparse=False, cuda=False, lspi=False):
+            sparse=False, cuda=False, lspi=False):
         if lspi:
             self.learner = LSPILearner(
                     num_features=num_features,
@@ -50,8 +50,7 @@ class LSTDAgent(Agent):
                             action_space=action_space,
                             discount_factor=discount_factor,
                             trace_factor=trace_factor,
-                            sigma=sigma,
-                            tree_backup_policy=tree_backup_policy
+                            sigma=sigma
                     )
             else:
                 #print("Initializing LSTD agent")

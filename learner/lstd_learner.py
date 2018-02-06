@@ -203,7 +203,7 @@ class LSTDTraceLearner(LSTDLearner):
 
 class LSTDTraceQsLearner(LSTDLearner):
     def __init__(self, num_features, action_space, discount_factor,
-            trace_factor, sigma, tree_backup_policy=None):
+            trace_factor, sigma):
         LSTDLearner.__init__(self, num_features=num_features, action_space=action_space, discount_factor=discount_factor)
 
         if trace_factor is None:
@@ -213,7 +213,6 @@ class LSTDTraceQsLearner(LSTDLearner):
 
         self.trace_factor = trace_factor
         self.sigma = sigma
-        self.tb_policy = tree_backup_policy
 
         # Trace vector
         self.e_mat = torch.zeros([1,self.num_features*len(self.action_space)])
@@ -242,8 +241,8 @@ class LSTDTraceQsLearner(LSTDLearner):
             x0 = self.combine_state_action(state0, action0)
             x1 = self.combine_state_action(state1, action1)
             x1_all = self.get_all_state_action_pairs(state1)
-            pi0 = torch.from_numpy(self.get_tree_backup_policy(state0)).float().view(len(self.action_space),1)
-            pi1 = torch.from_numpy(self.get_tree_backup_policy(state1)).float().view(len(self.action_space),1)
+            pi0 = torch.from_numpy(self.get_target_policy(state0)).float().view(len(self.action_space),1)
+            pi1 = torch.from_numpy(self.get_target_policy(state1)).float().view(len(self.action_space),1)
 
             self.e_mat = lam*gamma*((1-sigma)*pi0.view(-1)[action0]+sigma)*self.e_mat + x0.t()
             self.a_mat += self.e_mat.t() @ (x0-gamma*(sigma*x1 + (1-sigma)*(x1_all @ pi1))).t()
@@ -258,14 +257,6 @@ class LSTDTraceQsLearner(LSTDLearner):
             self.prev_sars = None
         else:
             self.prev_sars = (state1, action1, reward2, state2)
-
-    def set_tree_backup_policy(self, policy):
-        self.tb_policy = policy
-
-    def get_tree_backup_policy(self, state):
-        if self.tb_policy is not None:
-            return self.tb_policy(state)
-        return self.get_target_policy(state)
 
 
 class SparseLSTDLearner(LSTDLearner):
