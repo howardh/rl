@@ -191,14 +191,15 @@ def parse_results(directory, learned_threshold=None):
             Obtained from the parameters in the file names.
     """
     # Check if pickle files are there
-    #results_file_name = os.path.join(directory, "results.pkl") 
-    #sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
-    #if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
-    #    with open(results_file_name, 'rb') as f:
-    #        data = dill.load(f)
-    #    with open(sorted_results_file_name, 'rb') as f:
-    #        sorted_data = dill.load(f)
-    #    return data, sorted_data
+    results_file_name = os.path.join(directory, "results.pkl") 
+    sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
+    if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
+        print("Data already computed. Loading pickle files.")
+        with open(results_file_name, 'rb') as f:
+            data = dill.load(f)
+        with open(sorted_results_file_name, 'rb') as f:
+            sorted_data = dill.load(f)
+        return data, sorted_data
 
     # Parse set of parameters
     files = [f for f in os.listdir(directory) if
@@ -236,7 +237,38 @@ def parse_results(directory, learned_threshold=None):
     # Return results
     return data
 
+def parse_results_for_graphing(directory):
+    files = [f for f in os.listdir(directory) if
+            os.path.isfile(os.path.join(directory,f))]
+    data = []
+    for file_name in tqdm(files, desc="Parsing File Contents"):
+        try:
+            full_path = os.path.join(directory,file_name)
+            with open(full_path, 'r') as csvfile:
+                reader = csv.reader(csvfile, delimiter=',')
+                results = [np.sum(eval(r[1])) for r in reader]
+                if len(results) == 0:
+                    os.remove(full_path)
+                    continue
+                data.append(results)
+        except SyntaxError as e:
+            print("Broken file: %s" % file_name)
+        except Exception as e:
+            print("Broken file: %s" % file_name)
+
+    mean = np.mean(data, axis=0)
+    std = np.std(data, axis=0)
+
+    return mean, std
+
 def sort_data(data):
+    """
+    Return the data sorted by performance using two measures:
+    - Mean reward
+    - Time to learn
+    The best results (i.e. highest mean reward, or lowest time to learn) is
+    found at index 0, and the worst at index -1.
+    """
     print("Sorting by MR")
     sorted_by_mr = [(i,data.loc[i,'MRS']/data.loc[i,'Count']) for i in data.index]
     sorted_by_mr = sorted(sorted_by_mr, key=operator.itemgetter(1))
@@ -246,6 +278,18 @@ def sort_data(data):
     sorted_by_ttl = sorted(sorted_by_ttl, key=operator.itemgetter(1))
     return sorted_by_mr, sorted_by_ttl
 
+def combine_params_with_names(data, params):
+    """
+    Return a dictionary of keyworded parameters.
+
+    data: Pandas dataframe
+    params: An iterable of unlabelled parameters in the same order as the
+    dataframe indices
+    """
+    names = data.index.names
+    if len(names) != len(params):
+        raise Exception("Dataframe indices (%s) and length of parameters (%s) do not match." % (names, params))
+    return dict(zip(names, params))
 
 def svd_inv(a):
     #u,s,vt = scipy.sparse.linalg.svds(a,k=int(min(a.shape)/2))
