@@ -7,12 +7,14 @@ from learner.linear_learner import LinearLearner
 class LinearAgent(Agent):
 
     def __init__(self, action_space, discount_factor, learning_rate,
-            num_features, features=lambda x: x):
-        self.learner = LinearLearner(
+            num_features, features=lambda x: x, trace_factor=0, sigma=0):
+        self.learner = LinearQsLearner(
                 action_space=action_space,
                 discount_factor=discount_factor,
                 learning_rate=learning_rate,
-                num_features=num_features
+                num_features=num_features,
+                trace_factor=trace_factor,
+                sigma=sigma
         )
         self.features = features
 

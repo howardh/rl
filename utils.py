@@ -132,29 +132,33 @@ def collect_file_params(file_names):
             results[k].add(v)
     return results
 
-def parse_file(file_name, threshold=None):
+def parse_file(file_name, threshold=None, delete_invalid=False):
     """
-    Process the contents of a file with data from a trial, and return the sum
-    of rewards.
+    Process the contents of a file with data from a trial, and return
+    the rewards as time series data, the sum of rewards, and when the threshold
+    was met.
     """
     threshold_met = None
     with open(file_name, 'r') as csvfile:
         reader = csv.reader(csvfile, delimiter=',')
-        results = [(int(r[0]), np.mean(eval(r[1]))) for r in reader]
+        series = [(int(r[0]), np.mean(eval(r[1]))) for r in reader]
         # Check if we have data to return
-        if len(results) == 0:
+        if len(series) == 0:
+            if delete_invalid:
+                os.remove(file_name)
             return None
         # Compute time to learn
         if threshold is not None:
-            for r in results:
+            for r in series:
                 if threshold_met is None and r[1] >= threshold:
                     threshold_met = r[0]
             if threshold_met is None:
-                threshold_met = results[-1][0]
+                threshold_met = series[-1][0]
         # Compute mean reward over time
-        means = [r[1] for r in results]
+        means = [r[1] for r in series]
+        times = [r[0] for r in series]
 
-        return np.mean(means), threshold_met
+        return (times,means), np.mean(means), threshold_met
 
 def parse_results(directory, learned_threshold=None):
     """
@@ -212,7 +216,8 @@ def parse_results(directory, learned_threshold=None):
     indices = pandas.MultiIndex.from_product(param_vals, names=param_names)
     data = pandas.DataFrame(0, index=indices, columns=["MRS", "TTLS", "Count"])
     data['MRS'] = data.MRS.astype(float)
-    data.sortlevel(inplace=True)
+    data.sortlevel(inplace=True) # Why am I doing this again? Can I replace it with sort_index?
+    #data.sort_index(inplace=True)
 
     # Load results from all csv files
     for file_name in tqdm(files, desc="Parsing File Contents"):
@@ -225,7 +230,7 @@ def parse_results(directory, learned_threshold=None):
         if output is None:
             tqdm.write("Skipping empty file: %s" % file_name)
             continue
-        mr,ttl = output
+        _,mr,ttl = output
         key = tuple([file_params[k] for k in param_names])
         data.loc[key,'MRS'] += mr
         if ttl is None:
@@ -237,29 +242,53 @@ def parse_results(directory, learned_threshold=None):
     # Return results
     return data
 
-def parse_results_for_graphing(directory):
+def parse_graphing_results(directory):
+    # TODO: Remove incomplete series
     files = [f for f in os.listdir(directory) if
             os.path.isfile(os.path.join(directory,f))]
-    data = []
+    params = collect_file_params(files)
+    if 's' in set(params.keys()):
+        sigmas = params['s']
+        data = dict()
+        times = dict()
+        for s in sigmas:
+            data[s] = []
+            times[s] = None
+    else:
+        sigmas = None
+        data = []
+        times = None
     for file_name in tqdm(files, desc="Parsing File Contents"):
         try:
             full_path = os.path.join(directory,file_name)
-            with open(full_path, 'r') as csvfile:
-                reader = csv.reader(csvfile, delimiter=',')
-                results = [np.sum(eval(r[1])) for r in reader]
-                if len(results) == 0:
-                    os.remove(full_path)
-                    continue
-                data.append(results)
+            series,_,_ = parse_file(full_path)
+            if series is not None:
+                if sigmas is not None:
+                    s = parse_file_name(file_name)['s']
+                    data[s].append(series[1])
+                    if times[s] is None:
+                        times[s] = series[0]
+                else:
+                    data.append(series[1])
+                    if times is None:
+                        times = series[0]
         except SyntaxError as e:
             print("Broken file: %s" % file_name)
         except Exception as e:
             print("Broken file: %s" % file_name)
 
-    mean = np.mean(data, axis=0)
-    std = np.std(data, axis=0)
-
-    return mean, std
+    if sigmas is None:
+        mean = np.mean(data, axis=0)
+        std = np.std(data, axis=0)
+        return times, mean, std
+    else:
+        results = dict()
+        for s in data.keys():
+            mean = np.mean(data[s], axis=0)
+            std = np.std(data[s], axis=0)
+            t = times[s]
+            results[s] = (t,mean,std)
+        return results
 
 def sort_data(data):
     """

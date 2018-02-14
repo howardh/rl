@@ -12,7 +12,6 @@ from tqdm import tqdm
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
-from learner.learner import Optimizer
 
 import frozenlake
 from frozenlake import features

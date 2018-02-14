@@ -63,9 +63,9 @@ class TestUtilsFile(unittest.TestCase):
 
     def test_parse_file(self):
         output = utils.parse_file(self.path, 1/5)
-        self.assertAlmostEqual(output[0], 6/(4*5))
-        self.assertAlmostEqual(output[1], 10)
+        self.assertAlmostEqual(output[1], 6/(4*5))
+        self.assertAlmostEqual(output[2], 10)
 
         output = utils.parse_file(self.path, 2/5)
-        self.assertAlmostEqual(output[1], 20)
+        self.assertAlmostEqual(output[2], 20)
 

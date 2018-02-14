@@ -94,50 +94,25 @@ class Learner(object):
             return dist
         return f
 
-class Optimizer(Enum):
-    NONE = 1
-    MOMENTUM = 2
-    ADA_GRAD = 3
-    RMS_PROP = 4
-    ADAM = 5
-    KSGD = 6
-
 class TabularLearner(Learner):
 
     def __init__(self, action_space, discount_factor, learning_rate,
-            initial_value=0, optimizer=Optimizer.NONE):
+            initial_value=0):
         Learner.__init__(self)
         self.action_space = action_space
         self.discount_factor = discount_factor
         self.learning_rate = learning_rate
-        self.optimizer = optimizer
         self.initial_value = initial_value
         
         self.q = collections.defaultdict(lambda: self.initial_value)
         self.old_q = self.q.copy()
-        if self.optimizer == Optimizer.NONE:
-            pass
-        elif self.optimizer == Optimizer.RMS_PROP:
-            self.v = collections.defaultdict(lambda: self.initial_value)
-        else:
-            raise NotImplementedError
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         alpha = self.learning_rate
         gamma = self.discount_factor
         delta = reward2 + gamma * self.get_state_value(state2) - self.get_state_action_value(state1, action1)
         index = str((state1,action1))
-        if self.optimizer == Optimizer.NONE:
-            self.q[index] += alpha * delta
-        elif self.optimizer == Optimizer.RMS_PROP:
-            forget = 0.1 # TODO: Forgetting Factor
-            self.v[index] = forget*self.v[index] + (1-forget)*(delta*delta)
-            if delta != 0:
-                self.q[index] += alpha/np.sqrt(self.v[index])*delta
-                if self.v[index] == 0:
-                    print("ERROR AND SHIT")
-        else:
-            raise NotImplementedError
+        self.q[index] += alpha * delta
 
     def get_state_action_value(self, state, action):
         return self.q[str((state,action))]
@@ -154,3 +129,87 @@ class TabularLearner(Learner):
     def reset_weight_change(self):
         self.old_q = self.q.copy()
 
+class TabularQsLearner(Learner):
+
+    def __init__(self, action_space, discount_factor, learning_rate,
+            trace_factor=0, sigma=0, initial_value=0):
+        Learner.__init__(self)
+        self.action_space = action_space
+        self.discount_factor = discount_factor
+        self.learning_rate = learning_rate
+        self.initial_value = initial_value
+        self.trace_factor = trace_factor
+        self.sigma = sigma
+        
+        self.q = collections.defaultdict(lambda: self.initial_value)
+        self.old_q = self.q.copy()
+        self.e = collections.defaultdict(lambda: 0)
+
+        self.prev_sars = None
+
+    def observe_step(self, state1, action1, reward2, state2, terminal=False):
+        alpha = self.learning_rate
+        gamma = self.discount_factor
+        lam = self.trace_factor
+        sigma = self.sigma
+        if self.prev_sars is not None:
+            state0, action0, reward1, _ = self.prev_sars
+
+            # delta
+            v = self.get_state_value(state1)
+            q = self.get_state_action_value(state1,action1)
+            delta = reward1 + gamma*(sigma*q+(1-sigma)*v) - self.get_state_action_value(state0, action0)
+
+            # Trace
+            p = self.get_target_policy(state0)[action0] # TODO: Should this be state0 or state1?
+            decay = gamma*lam*((1-sigma)*p+sigma)
+            for k in self.e.keys():
+                self.e[k] *= decay
+
+            index = str((state0,action0))
+            self.e[index] += 1
+
+            # Weights
+            for k in self.q.keys():
+                self.q[k] += alpha * delta * self.e[k]
+
+        self.prev_sars = (state1,action1,reward2,state2)
+
+        if terminal:
+            state0, action0, reward1, _ = self.prev_sars
+
+            # delta
+            delta = reward1 - self.get_state_action_value(state0, action0)
+
+            # Trace
+            p = self.get_target_policy(state0)[action0] # TODO: Should this be state0 or state1?
+            decay = gamma*lam*((1-sigma)*p+sigma)
+            for k in self.e.keys():
+                self.e[k] *= decay
+
+            index = str((state0,action0))
+            self.e[index] += 1
+
+            # Weights
+            for k in self.q.keys():
+                self.q[k] += alpha * delta * self.e[k]
+
+            # Reset everything
+            for k in self.e.keys():
+                self.e[k] = 0
+            self.prev_sars = None
+
+    def get_state_action_value(self, state, action):
+        return self.q[str((state,action))]
+        
+    def get_weight_change(self):
+        change_sum = 0
+        val_count = 0
+        for key, val in self.q.items():
+            val_count += 1
+            diff = abs(self.q[key] - self.old_q[key])
+            change_sum += diff
+        return change_sum/val_count
+    
+    def reset_weight_change(self):
+        self.old_q = self.q.copy()
