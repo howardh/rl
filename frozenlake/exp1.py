@@ -166,17 +166,7 @@ def run3(n=10, proc=10, directory=None):
 def get_best_params3(directory=None):
     if directory is None:
         directory = os.path.join(utils.get_results_directory(),__name__,"part3")
-    data = utils.parse_results(directory, learned_threshold=0.78)
-    sigmas = set(data.index.get_level_values('s'))
-    results = dict()
-    for s in sigmas:
-        df = data.xs(s,level='s')
-        mr, ttl = utils.sort_data(df)
-        params = [eval(x) for x in ttl[0][0]]
-        params = utils.combine_params_with_names(df,params)
-        params['s'] = eval(s)
-        results[s] = params
-    return results
+    return utils.get_best_params_by_sigma(directory,0.78)
 
 def run4(n=100, proc=10, directory=None):
     if directory is None:

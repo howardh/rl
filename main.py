@@ -11,7 +11,7 @@ from frozenlake import features
 from frozenlake import utils
 from frozenlake import exp1
 #from frozenlake import exp2
-#from frozenlake import exp3
+from frozenlake import exp3
 #from frozenlake import exp4
 from frozenlake import graph
 
@@ -263,12 +263,11 @@ def lstd_control_8x8():
 if __name__ == "__main__":
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/final")
     utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
-    #exp1.run1(n=2,proc=10)
-    #exp1.run2(n=100,proc=10)
-    #exp1.run3(n=2,proc=10)
-    #data = exp1.parse_results2()
-    #data = exp1.get_best_params3()
-    #params = exp1.run4(n=2,proc=1)
-    exp1.run_all()
+    #exp1.run_all()
+    #exp3.run(n=2)
+    #x = exp3.parse_results()
+    #exp3.run2(n=500, proc=10)
+    #exp3.parse_results2()
+    exp3.run_all()
     #graph.graph_all()
 

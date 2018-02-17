@@ -266,16 +266,29 @@ def parse_graphing_results(directory):
                 if sigmas is not None:
                     s = parse_file_name(file_name)['s']
                     data[s].append(series[1])
-                    if times[s] is None:
+                    if times[s] is None or len(times[s]) < len(series[0]):
                         times[s] = series[0]
                 else:
                     data.append(series[1])
-                    if times is None:
+                    if times is None or len(times) < len(series[0]):
                         times = series[0]
         except SyntaxError as e:
-            print("Broken file: %s" % file_name)
+            tqdm.write("Broken file: %s" % file_name)
         except Exception as e:
-            print("Broken file: %s" % file_name)
+            tqdm.write("Broken file: %s" % file_name)
+
+    if sigmas is None:
+        max_len = 0
+        for row in data:
+            max_len = max(max_len, len(row))
+        data = [d for d in data if len(d) == max_len]
+    else:
+        results = dict()
+        for s in data.keys():
+            max_len = 0
+            for row in data[s]:
+                max_len = max(max_len, len(row))
+            data[s] = [d for d in data[s] if len(d) == max_len]
 
     if sigmas is None:
         mean = np.mean(data, axis=0)
@@ -319,6 +332,19 @@ def combine_params_with_names(data, params):
     if len(names) != len(params):
         raise Exception("Dataframe indices (%s) and length of parameters (%s) do not match." % (names, params))
     return dict(zip(names, params))
+
+def get_best_params_by_sigma(directory, learned_threshold):
+    data = parse_results(directory, learned_threshold=learned_threshold)
+    sigmas = set(data.index.get_level_values('s'))
+    results = dict()
+    for s in sigmas:
+        df = data.xs(s,level='s')
+        mr, ttl = sort_data(df)
+        params = [eval(x) for x in ttl[0][0]]
+        params = combine_params_with_names(df,params)
+        params['s'] = eval(s)
+        results[s] = params
+    return results
 
 def svd_inv(a):
     #u,s,vt = scipy.sparse.linalg.svds(a,k=int(min(a.shape)/2))
