@@ -38,14 +38,14 @@ def _run_trial(gamma, alpha, lam, sigma, directory=None, break_when_learned=Fals
     with open(file_name[0], 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
         csvwriter.writerow([0, 0])
-        for iters in range(1,n_episodes):
-            agent.run_episode(e)
+        for iters in range(0,n_episodes+1):
             if iters % 500 == 0:
-                rewards = agent.test(e, 100, max_steps=1000)
+                rewards = agent.test(e, 100)
                 csvwriter.writerow([iters, rewards])
                 csvfile.flush()
                 if break_when_learned and np.mean(rewards) >= 0.78:
                     break
+            agent.run_episode(e)
     return iters
 
 def _worker(i, directory=None):

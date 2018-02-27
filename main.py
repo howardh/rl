@@ -262,12 +262,16 @@ def lstd_control_8x8():
 
 if __name__ == "__main__":
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/final")
-    utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/test3")
     #exp1.run_all()
     #exp3.run(n=2)
     #x = exp3.parse_results()
     #exp3.run2(n=500, proc=10)
     #exp3.parse_results2()
-    exp3.run_all()
+    #exp3.run_all(proc=10)
+    #exp3.run1(proc=5)
+    exp3.run3(proc=5)
+    exp3.parse_results3()
+    #p = exp3.get_best_params1()
     #graph.graph_all()
 

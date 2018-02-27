@@ -21,12 +21,14 @@ import frozenlake.utils
 
 import utils
 
-discount_factors = ['1', '0.9', '0.5']
-update_frequencies = ['50', '200']
-behaviour_epsilons = ['1', '0.5', '0.1', '0']
+#discount_factors = ['1', '0.9', '0.5']
+discount_factors = ['1']
+update_frequencies = ['50', '200', '500']
+behaviour_epsilons = ['1', '0.5', '0']
 target_epsilons = ['0', '0.01', '0.05']
 sigmas = ['0', '0.5', '1']
-trace_factors = ['0.01', '0.5', '0.99']
+#trace_factors = ['0.01', '0.25', '0.5', '0.75', '0.99']
+trace_factors = ['0.25', '0.75']
 
 def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
         directory=os.path.join(utils.get_results_directory(),"temp",__name__,"part1"),
@@ -57,20 +59,24 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
             "g%.3f-u%d-eb%.3f-et%.3f-s%.3f-l%.3f" % (gamma, upd_freq, eps_b, eps_t, sigma, lam),
             "csv", directory)
     with open(file_name, 'w') as csvfile:
-        csvwriter = csv.writer(csvfile, delimiter=',')
-        for iters in range(1,max_iters):
-            agent.run_episode(e)
-            if iters % upd_freq == 0:
-                agent.update_weights()
-            if iters % 500 == 0:
-                rewards = agent.test(e, 100)
-                csvwriter.writerow([iters, rewards])
-                csvfile.flush()
-                if stop_when_learned and np.mean(rewards) >= 0.78:
-                    break
+        try:
+            csvwriter = csv.writer(csvfile, delimiter=',')
+            for iters in range(0,max_iters+1):
+                if iters % upd_freq == 0:
+                    agent.update_weights()
+                if iters % 50 == 0:
+                    rewards = agent.test(e, 100)
+                    csvwriter.writerow([iters, rewards])
+                    csvfile.flush()
+                    if stop_when_learned and np.mean(rewards) >= 0.78:
+                        tqdm.write("Done learning.")
+                        break
+                agent.run_episode(e)
+        except Exception as e:
+            traceback.print_exc()
     return iters
 
-def _worker(g,u,eb,et,s,l, directory=None):
+def _worker(g,u,eb,et,s,l, directory=None,i=5000):
     try:
         g = float(g)
         u = int(u)
@@ -78,7 +84,7 @@ def _worker(g,u,eb,et,s,l, directory=None):
         et = float(et)
         s = float(s)
         l = float(l)
-        return _run_trial(g,u,eb,et,s,l,directory, False,5000)
+        return _run_trial(g,u,eb,et,s,l,directory, False,i)
     except KeyboardInterrupt:
         return None
 
@@ -124,7 +130,7 @@ def run1(n=10, proc=10, directory=None):
     params = zip(params, itertools.repeat(directory))
     utils.cc(_worker2, params, proc=proc, keyworded=False)
 
-def get_best_params1(directory, sigma=None):
+def get_best_params1(directory=None, sigma=None):
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")
     return utils.get_best_params_by_sigma(directory, learned_threshold=0.78)
@@ -175,11 +181,78 @@ def parse_results2(directory=None):
     plt.savefig(os.path.join(directory, "graph.png"))
     return data
 
+def run3(n=100, proc=10, params=None, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),__name__,"part3")
+
+    discount_factors = ['1']
+    update_frequencies = ['50']
+    behaviour_epsilons = ['0.50']
+    target_epsilons = ['0']
+    sigmas = ['0', '0.25', '0.5', '0.75', '1']
+    trace_factors = ['0', '0.25', '0.5', '0.75', '1']
+
+    keys = ["g","u","eb","et","s","l"]
+    params = []
+    for vals in itertools.product(discount_factors, update_frequencies,
+            behaviour_epsilons, target_epsilons, sigmas, trace_factors):
+        d = dict(zip(keys,vals))
+        d["directory"] = os.path.join(directory, "l%f"%float(d['l']))
+        d["i"] = 2000
+        params.append(d)
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    utils.cc(_worker, params, proc=proc, keyworded=True)
+
+def parse_results3(directory=None):
+    """
+    Parse the CSV files produced by run2, and generates a graph.
+    """
+    import re
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    if directory is None:
+        directory = os.path.join(utils.get_results_directory(),__name__,"part3")
+
+    subdirs = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory,f))]
+    for d in subdirs:
+        data = utils.parse_graphing_results(os.path.join(directory,d))
+
+        # Plot
+        for sigma in data.keys():
+            mean = data[sigma][1]
+            std = data[sigma][2]
+            x = data[sigma][0]
+            label = "sigma-%s"%sigma
+            plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.5)
+            plt.plot(x, mean, label=label)
+        plt.legend(loc='best')
+        plt.title("Lambda: %s" % d[1:])
+        plt.xlabel("Episodes")
+        plt.ylabel("Reward")
+        plt.savefig(os.path.join(directory, d, "graph.eps"), format='eps')
+        plt.close()
+
+        for sigma in data.keys():
+            mean = data[sigma][1]
+            x = data[sigma][0]
+            label = "sigma-%s"%sigma
+            plt.plot(x, mean, label=label)
+        plt.legend(loc='best')
+        plt.title("Lambda: %s" % d[1:])
+        plt.xlabel("Episodes")
+        plt.ylabel("Reward")
+        plt.savefig(os.path.join(directory, d, "graph2.eps"), format='eps')
+        plt.close()
+
 def run_all(proc=10):
     run1(proc=proc)
-    parse_results1()
     run2(proc=proc)
     parse_results2()
+    run3(proc=proc)
+    parse_results3()
 
 if __name__ == "__main__":
     run_all()

@@ -6,7 +6,7 @@ from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
 
 import cartpole
-import cartpole.experiments
+#import cartpole.experiments
 import cartpole.features
 import cartpole.utils
 
@@ -93,6 +93,10 @@ if __name__ == "__main__":
 
     #import shutil
     #shutil.rmtree("/NOBACKUP/hhuang63/results3/test")
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
-    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-09-18_14-13-01")
-    exp3.run_all(20)
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
+    #exp3.run_all(20)
+    #exp3.run(n=10,proc=10)
+    #exp3.run2(n=100,proc=10)
+    #exp3.parse_results2()
+    exp3.run3(n=100,proc=10)
+    exp3.parse_results3()

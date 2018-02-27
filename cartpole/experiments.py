@@ -6,7 +6,6 @@ from pathos.multiprocessing import ProcessPool
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
-from learner.learner import Optimizer
 
 import cartpole 
 from cartpole import features
