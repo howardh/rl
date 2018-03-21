@@ -12,16 +12,16 @@
 #parallel python3 mainmc.py --learning-rate {1} --discount {2} --behaviour-epsilon 0 --target-epsilon 0 --num-pos {3} --num-vel {3} --initial-value {4} --model rbf --results-dir ./results-rbf ::: ${lr[*]} ::: ${d[*]} ::: ${n[*]} ::: ${iv[*]}
 
 
-python3 mainmc.py --model rbf --grid-search --results-dir ./results/rbf-gs
-python3 mainmc.py --model rbf --best-params-from ./results/rbf-gs --results-dir ./results/rbf-best-mean --trials 500
+#python3 mainmc.py --model rbf --grid-search --results-dir ./results/rbf-gs
+#python3 mainmc.py --model rbf --best-params-from ./results/rbf-gs --results-dir ./results/rbf-best-mean --trials 500
 
-python3 mainmc.py --model rbft --grid-search --results-dir ./results/rbft-gs
-python3 mainmc.py --model rbft --best-params-from ./results/rbft-gs --results-dir ./results/rbft-best-mean --trials 500
+#python3 mainmc.py --threads 10 --model rbft --grid-search --results-dir ./results/rbft-gs
+#python3 mainmc.py --threads 10 --model rbft --best-params-from ./results/rbft-gs --results-dir ./results/rbft-best-mean --trials 500
 
 #python3 mainmc.py --model lstd-rbf --grid-search --results-dir ./results/lstd-rbf-gs
 #python3 mainmc.py --model lstd-rbf --best-params-from ./results/lstd-rbf-gs --results-dir ./results/lstd-rbf-best-mean --trials 500
-#
-#python3 mainmc.py --model lstd-rbft --grid-search --results-dir ./results/lstd-rbft-gs
-#python3 mainmc.py --model lstd-rbft --best-params-from ./results/lstd-rbft-gs --results-dir ./results/lstd-rbft-best-mean --trials 500
-#
-#python3 mainmc.py --graph --results-dirs ./results/rbf-best-mean ./results/rbft-best-mean ./results/lstd-rbf-best-mean ./results/lstd-rbft-best-mean
+
+python3 mainmc.py --model lstd-rbft --grid-search --results-dir ./results/lstd-rbft-gs
+python3 mainmc.py --model lstd-rbft --best-params-from ./results/lstd-rbft-gs --results-dir ./results/lstd-rbft-best-mean --trials 500
+
+python3 mainmc.py --graph --results-dirs ./results/rbf-best-mean ./results/rbft-best-mean ./results/lstd-rbf-best-mean ./results/lstd-rbft-best-mean

@@ -93,7 +93,7 @@ if __name__ == "__main__":
 
     #import shutil
     #shutil.rmtree("/NOBACKUP/hhuang63/results3/test")
-    utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test2")
     #exp3.run_all(20)
     #exp3.run(n=10,proc=10)
     #exp3.run2(n=100,proc=10)

@@ -2,7 +2,7 @@ import numpy as np
 from tqdm import tqdm
 
 from agent.agent import Agent
-from learner.linear_learner import LinearLearner
+from learner.linear_learner import LinearQsLearner
 
 class LinearAgent(Agent):
 
@@ -57,19 +57,17 @@ class LinearAgent(Agent):
         step_count = 0
         reward_sum = 0
         # Run an episode
-        with tqdm() as pbar:
-            while not done:
-                step_count += 1
-                pbar.update(1)
+        while not done:
+            step_count += 1
 
-                obs2, reward, done, _ = env.step(action)
-                obs2 = self.features(obs2)
-                action2 = self.act(obs2)
-                reward_sum += reward
+            obs2, reward, done, _ = env.step(action)
+            obs2 = self.features(obs2)
+            action2 = self.act(obs2)
+            reward_sum += reward
 
-                self.learner.observe_step(obs, action, reward, obs2, terminal=done)
+            self.learner.observe_step(obs, action, reward, obs2, terminal=done)
 
-                # Next time step
-                obs = obs2
-                action = action2
+            # Next time step
+            obs = obs2
+            action = action2
         return reward_sum, step_count

@@ -12,13 +12,14 @@ import operator
 import pprint
 import sys
 import traceback
+import datetime
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
 
-import cartpole 
-from cartpole import features
-from cartpole import utils
+import mountaincar 
+import mountaincar.features
+import mountaincar.utils
 
 import utils
 
@@ -30,84 +31,73 @@ target_epsilons = ['0.1', '0.05', '0']
 sigmas = ['0', '0.5', '1']
 trace_factors = ['0.01', '0.25', '0.5', '0.75', '0.99']
 
-def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
-        stop_when_learned=False, max_iters=5000, max_trials=None):
-    """
-    Run the learning algorithm on CartPole and return the number of
-    iterations needed to learn the task.
-    """
-    env_name = 'CartPole-v0'
-    e = gym.make(env_name)
+def lstd_rbft_control(discount_factor, initial_value, num_pos,
+        num_vel, behaviour_eps, target_eps, trace_factor, sigma, update_freq, epoch, max_iters, test_iters,
+        directory):
+    args=locals()
+    try:
+        env_name = 'MountainCar-v0'
+        e = gym.make(env_name)
+        start_time = datetime.datetime.now()
 
-    action_space = np.array([0,1])
-    agent = LSTDAgent(
-            action_space=action_space,
-            num_features=cartpole.features.IDENTITY_NUM_FEATURES,
-            discount_factor=gamma,
-            features=cartpole.features.identity2,
-            use_importance_sampling=False,
-            use_traces=True,
-            trace_factor=lam,
-            sigma=sigma
-    )
-    agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
-    agent.set_target_policy("%.3f-epsilon"%eps_t)
+        action_space = np.array([0,1,2])
+        obs_space = np.array([[-1.2, .6], [-0.07, 0.07]])
+        centres = np.array(list(itertools.product(
+                np.linspace(0,1,num_pos),
+                np.linspace(0,1,num_vel))))
+        def norm(x):
+            return np.array([(s-r[0])/(r[1]-r[0]) for s,r in zip(x, obs_space)])
+        def rbf(x):
+            x = norm(x)
+            dist = np.power(centres-x, 2).sum(axis=1,keepdims=True)
+            return np.exp(-100*dist)
+        agent = LSTDAgent(
+                action_space=action_space,
+                discount_factor=discount_factor,
+                #initial_value=initial_value,
+                features=rbf,
+                num_features=num_pos*num_vel,
+                use_traces=True,
+                trace_factor=trace_factor,
+                sigma=sigma
+        )
+        agent.set_behaviour_policy("%f-epsilon" % behaviour_eps)
+        agent.set_target_policy("%f-epsilon" % target_eps)
 
-    file_name,num = utils.find_next_free_file(
-            "g%.3f-u%d-eb%.3f-et%.3f-s%.3f-l%.3f" % (gamma, upd_freq, eps_b, eps_t, sigma, lam),
-            "csv", directory)
-    if max_trials is not None and num >= max_trials:
-        # Delete the created file, since we're not using it anymore
-        os.remove(file_name) # TODO: This doesn't seem to be working
-        return None
-    with open(file_name, 'w') as csvfile:
-        csvwriter = csv.writer(csvfile, delimiter=',')
+        rewards = []
+        steps_to_learn = None
         for iters in range(0,max_iters+1):
-            if iters % upd_freq == 0:
+            if iters % update_freq == 0:
                 agent.update_weights()
-            if iters % 50 == 0:
-                agent.set_target_policy("0-epsilon")
-                rewards = agent.test(e, 100)
-                agent.set_target_policy("%.3f-epsilon"%eps_t)
-                csvwriter.writerow([iters, rewards])
-                csvfile.flush()
-                if stop_when_learned and np.mean(rewards) >= 190:
-                    break
+            if epoch is not None:
+                if iters % epoch == 0:
+                    r = agent.test(e, test_iters, render=False, processors=1)
+                    rewards.append(r)
+                    if np.mean(r) >= -110:
+                        if steps_to_learn is None:
+                            steps_to_learn = iters
+            else:
+                if r >= -110:
+                    if steps_to_learn is None:
+                        steps_to_learn = iters
             agent.run_episode(e)
-    return iters
 
-def _worker(g,u,eb,et,s,l, directory=None):
-    try:
-        g = float(g)
-        u = int(u)
-        eb = float(eb)
-        et = float(et)
-        s = float(s)
-        l = float(l)
-        m = None
-        return _run_trial(g,u,eb,et,s,l,directory,False,5000,m)
-    except KeyboardInterrupt:
-        return None
+        while iters < max_iters: # Means it diverged at some point
+            iters += 1
+            rewards.append(None)
+
+        data = (args, rewards, steps_to_learn)
+        file_name, file_num = utils.find_next_free_file("results", "pkl",
+                directory)
+        with open(file_name, "wb") as f:
+            dill.dump(data, f)
+
+        return rewards,steps_to_learn
     except Exception as e:
+        #print(e)
         traceback.print_exc()
-        raise e
-
-def _worker2(params, directory=None):
-    try:
-        g,u,eb,et,s,l = params
-        g = float(g)
-        u = int(u)
-        eb = float(eb)
-        et = float(et)
-        s = float(s)
-        l = float(l)
-        m = None
-        return _run_trial(g,u,eb,et,s,l,directory,False,5000,m)
-    except KeyboardInterrupt:
-        return None
-    #except Exception as e:
-    #    traceback.print_exc()
-    #    raise e
+        print("Iterations:`",iters)
+        #print(utils.torch_svd_inv(agent.learner.a_mat).numpy())
 
 def run(n=10, proc=10, directory=None):
     if directory is None:
@@ -293,27 +283,32 @@ def parse_results2(directory=None):
 def run3(n=100, proc=10, params=None, directory=None):
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part3")
-
-    print("Running Cartpole with a range of lambdas and sigmas.")
+    print("Running MountainCar with a range of lambdas and sigmas.")
     print("Saving results in %s" % directory)
+    #def lstd_rbft_control(discount_factor, initial_value, num_pos, num_vel,behaviour_eps, target_eps, trace_factor, sigma, update_freq, epoch, max_iters, test_iters, results_dir): 
 
-    discount_factors = ['0.9']
-    update_frequencies = ['50']
-    behaviour_epsilons = ['0.05']
-    target_epsilons = ['0.5']
-    sigmas = ['0', '0.25', '0.5', '0.75', '1']
-    trace_factors = ['0', '0.25', '0.5', '0.75', '1']
+    trace_factors = [0, 0.25, 0.5, 0.75, 1]
+    sigmas = [0, 0.25, 0.5, 0.75, 1]
 
-    keys = ["g","u","eb","et","s","l"]
+    keys = ['sigma','trace_factor']
     params = []
-    for vals in itertools.product(discount_factors, update_frequencies,
-            behaviour_epsilons, target_epsilons, sigmas, trace_factors):
+    for vals in itertools.product(sigmas, trace_factors):
         d = dict(zip(keys,vals))
-        d["directory"] = os.path.join(directory, "l%f"%float(d['l']))
+        d['discount_factor'] = 0.9
+        d['initial_value'] = 0
+        d['num_pos'] = 8
+        d['num_vel'] = 8
+        d['behaviour_eps'] = 0.1
+        d['target_eps'] = 0
+        d['update_freq'] = 50
+        d['epoch'] = 50
+        d['max_iters'] = 500
+        d['test_iters'] = 10
+        d["directory"] = os.path.join(directory, "l%f"%d['trace_factor'])
         params.append(d)
     params = itertools.repeat(params, n)
     params = itertools.chain(*list(params))
-    utils.cc(_worker, params, proc=proc, keyworded=True)
+    utils.cc(lstd_rbft_control, params, proc=proc, keyworded=True)
 
 def parse_results3(directory=None):
     """
@@ -329,7 +324,7 @@ def parse_results3(directory=None):
 
     subdirs = [os.path.join(directory,f) for f in os.listdir(directory) if os.path.isdir(os.path.join(directory,f))]
     for d in subdirs:
-        data = utils.parse_graphing_results(d)
+        data = utils.parse_graphing_results_pkl(d)
 
         # Plot
         for sigma in data.keys():

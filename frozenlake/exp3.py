@@ -185,9 +185,12 @@ def run3(n=100, proc=10, params=None, directory=None):
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part3")
 
+    print("Running FrozenLake with a range of lambdas and sigmas.")
+    print("Saving results in %s" % directory)
+
     discount_factors = ['1']
     update_frequencies = ['50']
-    behaviour_epsilons = ['0.50']
+    behaviour_epsilons = ['0.3']
     target_epsilons = ['0']
     sigmas = ['0', '0.25', '0.5', '0.75', '1']
     trace_factors = ['0', '0.25', '0.5', '0.75', '1']

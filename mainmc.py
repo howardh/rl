@@ -18,7 +18,7 @@ import mountaincar
 import mountaincar.features
 import mountaincar.utils
 
-#from mountaincar import exp1
+from mountaincar import exp3
 import utils
 
 def tabular_control(discount_factor, learning_rate, initial_value, num_pos,
@@ -47,14 +47,14 @@ def tabular_control(discount_factor, learning_rate, initial_value, num_pos,
         iters += 1
         r,s = agent.run_episode(e)
         rewards.append(r)
-        print("... %d\r" % iters, end='')
+        tqdm.write("... %d\r" % iters, end='')
         if r != -200:
-            print("Iteration: %d\t Reward: %d"%(iters, r))
+            tqdm.write("Iteration: %d\t Reward: %d"%(iters, r))
         if epoch is not None and iters % epoch == 0:
-            print("Testing...")
+            tqdm.write("Testing...")
             #print(agent.learner.weights.transpose())
             rewards = agent.test(e, test_iters, render=False, processors=1)
-            print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
+            tqdm.write("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
             if np.mean(rewards) >= -110:
                 if steps_to_learn is None:
                     steps_to_learn = iters
@@ -132,7 +132,7 @@ def rbf_control(discount_factor, learning_rate, initial_value, num_pos,
             rewards.append(r)
             if epoch is not None:
                 if iters % epoch == 0:
-                    print("Testing...")
+                    tqdm.write("Testing...")
                     rewards = agent.test(e, test_iters, render=False, processors=1)
                     if np.mean(rewards) >= -110:
                         if steps_to_learn is None:
@@ -142,7 +142,7 @@ def rbf_control(discount_factor, learning_rate, initial_value, num_pos,
                     if steps_to_learn is None:
                         steps_to_learn = iters
     except ValueError:
-        print("Diverged")
+        tqdm.write("Diverged")
         pass # Diverged weights
 
     while iters < max_iters: # Means it diverged at some point
@@ -194,7 +194,7 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
             rewards.append(r)
             if epoch is not None:
                 if iters % epoch == 0:
-                    print("Testing...")
+                    tqdm.write("Testing...")
                     rewards = agent.test(e, test_iters, render=False, processors=1)
                     if np.mean(rewards) >= -110:
                         if steps_to_learn is None:
@@ -204,7 +204,7 @@ def rbft_control(discount_factor, learning_rate, trace_factor, initial_value, nu
                     if steps_to_learn is None:
                         steps_to_learn = iters
     except ValueError:
-        print("Diverged")
+        tqdm.write("Diverged")
         pass # Diverged weights
     except KeyboardInterrupt:
         print("kbi")
@@ -305,7 +305,7 @@ def lstd_rbft_control(discount_factor, initial_value, num_pos,
             rewards.append(r)
             if epoch is not None:
                 if iters % epoch == 0:
-                    print("Testing...")
+                    tqdm.write("Testing...")
                     rewards = agent.test(e, test_iters, render=False, processors=1)
                     if np.mean(rewards) >= -110:
                         if steps_to_learn is None:
@@ -360,7 +360,7 @@ def gs_lstd_rbf(proc=10, results_directory="./results-lstd-rbf"):
     from concurrent.futures import ProcessPoolExecutor
     with ProcessPoolExecutor(max_workers=proc) as executor:
         for i in tqdm(indices, desc="Adding jobs"):
-            print(i)
+            tqdm.write(i)
             future = [executor.submit(lstd_rbf_control, *i)]
             futures += future
         pbar = tqdm(total=len(futures), desc="Job completion")
@@ -389,20 +389,6 @@ def gs_lstd_rbft(proc=10, results_directory="./results-lstd-rbft"):
     indices = itertools.product(d,iv,np,nv,be,te,tf,uf,e,mi,ti,rd)
 
     utils.cc(lstd_rbft_control, indices, proc=proc, keyworded=False)
-
-    #futures = []
-    #from concurrent.futures import ProcessPoolExecutor
-    #with ProcessPoolExecutor(max_workers=proc) as executor:
-    #    for i in tqdm(indices, desc="Adding jobs"):
-    #        print(i)
-    #        future = [executor.submit(lstd_rbft_control, *i)]
-    #        futures += future
-    #    pbar = tqdm(total=len(futures), desc="Job completion")
-    #    while len(futures) > 0:
-    #        count = [f.done() for f in futures].count(True)
-    #        pbar.update(count)
-    #        futures = [f for f in futures if not f.done()]
-    #        time.sleep(1)
 
 def graph(file_names):
     import matplotlib
@@ -445,11 +431,11 @@ def graph_dirs(directory, labels=None, output="graph.png"):
                 try:
                     x = dill.load(f)
                 except Exception:
-                    print(file_name)
+                    tqdm.write(file_name)
                     return
                 diverged = None in x[1]
                 if diverged:
-                    print("Diverged %s" % file_name)
+                    tqdm.write("Diverged %s" % file_name)
                     #raise NotImplementedError("Did not implement handling of data of different lengths")
                     continue
                 else:
@@ -492,6 +478,8 @@ def parse_args():
     parser.add_argument("--grid-search",
             action="store_true")
     parser.add_argument("--graph",
+            action="store_true")
+    parser.add_argument("--exps",
             action="store_true")
     parser.add_argument("--output-file",
             type=str, default="graph.png",
@@ -561,6 +549,10 @@ if __name__ == "__main__":
         #    "./results-lstd-rbf/results-0.pkl"])
         print(args.results_dirs)
         graph_dirs(args.results_dirs,output=args.output_file)
+    elif args.exps:
+        # The old school way
+        #exp3.run3(proc=3)
+        exp3.parse_results3('/NOBACKUP/hhuang63/results3/2018-03-20_19-17-32/mountaincar.exp3/part3')
     else:
         if args.model == "tabular":
             params={"discount_factor":args.discount,

@@ -25,6 +25,8 @@ def get_results_directory():
     host_name = os.uname()[1]
     if host_name == "agent-server-1" or host_name == "agent-server-2":
         return os.path.join("/NOBACKUP/hhuang63/results3",START_TIME)
+    if host_name == "garden-path" or host_name == "ppl-3":
+        return os.path.join("/home/ml/hhuang63/results",START_TIME)
     raise NotImplementedError("No default path defined for %s" % host_name)
 
 def set_results_directory(d):
@@ -124,6 +126,24 @@ def collect_file_params(file_names):
     results = dict()
     for file_name in file_names:
         file_params = parse_file_name(file_name)
+        if file_params is None:
+            continue
+        for k,v in file_params.items():
+            if k not in results:
+                results[k] = set()
+            results[k].add(v)
+    return results
+
+def collect_file_params_pkl(file_names):
+    results = dict()
+    for file_name in file_names:
+        with open(file_name, 'rb') as f:
+            try:
+                x = dill.load(f)
+            except Exception as e:
+                tqdm.write("Skipping %s" % file_name)
+                continue
+        file_params = x[0]
         if file_params is None:
             continue
         for k,v in file_params.items():
@@ -303,6 +323,47 @@ def parse_graphing_results(directory):
             results[s] = (t,mean,std)
         return results
 
+def parse_graphing_results_pkl(directory):
+    # Load data
+    file_names = [os.path.join(directory,f) for f in tqdm(os.listdir(directory)) if os.path.isfile(os.path.join(directory,f))]
+    params = collect_file_params_pkl(file_names)
+    print(params)
+    sigmas = params['sigma']
+    data = dict()
+    times = dict()
+    for s in sigmas:
+        data[s] = []
+        times[s] = None
+    for file_name in tqdm(file_names, desc="Parsing File Contents"):
+        with open(os.path.join(directory,file_name), 'rb') as f:
+            try:
+                x = dill.load(f)
+            except Exception:
+                tqdm.write(file_name)
+                continue
+        diverged = None in x[1]
+        if diverged:
+            tqdm.write("Diverged %s" % file_name)
+            continue
+        else:
+            s = x[0]['sigma']
+            data[s].append(x[1])
+            if times[s] is None or len(times[s]) < len(x[1]):
+                times[s] = np.arange(len(x[1]))*x[0]['epoch']
+    for s in data.keys():
+        max_len = 0
+        for row in data[s]:
+            max_len = max(max_len, len(row))
+        data[s] = [d for d in data[s] if len(d) == max_len]
+    results = dict()
+    for s in data.keys():
+        x = np.mean(data[s], axis=2)
+        mean = np.mean(x, axis=0)
+        std = np.std(x, axis=0)
+        t = times[s]
+        results[s] = (t,mean,std)
+    return results
+
 def sort_data(data):
     """
     Return the data sorted by performance using two measures:
@@ -360,7 +421,7 @@ def svd_inv(a):
 def torch_svd_inv(a):
     u, s, v = torch.svd(a)
     #x = torch.mm(torch.mm(u, torch.diag(s)), v.t())
-    sinv = torch.FloatTensor([1/x if x != 0 else 0 for x in s])
+    sinv = torch.FloatTensor([1/x if abs(x) > 0.000000001 else 0 for x in s])
     if s.is_cuda:
         sinv = sinv.cuda()
     y = torch.mm(torch.mm(v, torch.diag(sinv)), u.t())
