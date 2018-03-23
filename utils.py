@@ -27,7 +27,7 @@ def get_results_directory():
         return os.path.join("/NOBACKUP/hhuang63/results3",START_TIME)
     if host_name == "garden-path" or host_name == "ppl-3":
         return os.path.join("/home/ml/hhuang63/results",START_TIME)
-    if host_name.find('gra') == 0:
+    if host_name.find('gra') == 0 or host_name.find('cdr') == 0:
         return os.path.join("/home/hhuang63/scratch/results",START_TIME)
     raise NotImplementedError("No default path defined for %s" % host_name)
 
