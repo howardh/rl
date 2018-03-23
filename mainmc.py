@@ -523,13 +523,13 @@ if __name__ == "__main__":
         parse_results(args.results_dir)
     elif args.grid_search:
         if args.model == "rbf":
-            gs_rbf(results_directory=args.results_dir)
+            gs_rbf(results_directory=args.results_dir, proc=args.threads)
         elif args.model == "rbft":
-            gs_rbft(results_directory=args.results_dir)
+            gs_rbft(results_directory=args.results_dir, proc=args.threads)
         elif args.model == "lstd-rbf":
-            gs_lstd_rbf(results_directory=args.results_dir)
+            gs_lstd_rbf(results_directory=args.results_dir, proc=args.threads)
         elif args.model == "lstd-rbft":
-            gs_lstd_rbft(results_directory=args.results_dir)
+            gs_lstd_rbft(results_directory=args.results_dir, proc=args.threads)
     elif args.graph:
         #graph(["./results-lstd-rbf/results-8.pkl",
         #    "./results-lstd-rbf/results-0.pkl"])

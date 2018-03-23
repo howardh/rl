@@ -18,11 +18,11 @@
 #python3 mainmc.py --threads 10 --model rbft --grid-search --results-dir ./results/rbft-gs
 #python3 mainmc.py --threads 10 --model rbft --best-params-from ./results/rbft-gs --results-dir ./results/rbft-best-mean --trials 500
 
-python3 mainmc.py --threads 1 --model lstd-rbf --grid-search --results-dir ./results/lstd-rbf-gs
-python3 mainmc.py --threads 1 --model lstd-rbf --best-params-from ./results/lstd-rbf-gs --results-dir ./results/lstd-rbf-best-mean --trials 500
+#python3 mainmc.py --threads 1 --model lstd-rbf --grid-search --results-dir ./results/lstd-rbf-gs
+#python3 mainmc.py --threads 1 --model lstd-rbf --best-params-from ./results/lstd-rbf-gs --results-dir ./results/lstd-rbf-best-mean --trials 500
 
 python3 mainmc.py --threads 1 --model lstd-rbft --grid-search --results-dir ./results/lstd-rbft-gs
-python3 mainmc.py --threads 1 --model lstd-rbft --best-params-from ./results/lstd-rbft-gs --results-dir ./results/lstd-rbft-best-mean --trials 500
+#python3 mainmc.py --threads 10 --model lstd-rbft --best-params-from ./results/lstd-rbft-gs --results-dir ./results/lstd-rbft-best-mean --trials 500
 
 #python3 mainmc.py --graph --results-dirs ./results/rbf-best-mean ./results/rbft-best-mean ./results/lstd-rbf-best-mean ./results/lstd-rbft-best-mean
-python3 mainmc.py --graph --results-dirs ./results/rbft-best-mean ./results/lstd-rbf-best-mean ./results/lstd-rbft-best-mean
+#python3 mainmc.py --graph --results-dirs ./results/rbft-best-mean ./results/lstd-rbf-best-mean ./results/lstd-rbft-best-mean
