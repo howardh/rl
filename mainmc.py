@@ -354,21 +354,9 @@ def gs_lstd_rbf(proc=10, results_directory="./results-lstd-rbf"):
     mi = [3000]
     ti = [0]
     rd = [results_directory]
-    indices = itertools.product(d,iv,np,nv,be,te,uf,e,mi,ti,rd)
 
-    futures = []
-    from concurrent.futures import ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=proc) as executor:
-        for i in tqdm(indices, desc="Adding jobs"):
-            tqdm.write(i)
-            future = [executor.submit(lstd_rbf_control, *i)]
-            futures += future
-        pbar = tqdm(total=len(futures), desc="Job completion")
-        while len(futures) > 0:
-            count = [f.done() for f in futures].count(True)
-            pbar.update(count)
-            futures = [f for f in futures if not f.done()]
-            time.sleep(1)
+    params = itertools.product(d,iv,np,nv,be,te,uf,e,mi,ti,rd)
+    utils.cc(lstd_rbf_control, params, proc, keyworded=False)
 
 def gs_lstd_rbft(proc=10, results_directory="./results-lstd-rbft"):
     #def lstd_rbft_control(discount_factor, initial_value, num_pos,
@@ -386,8 +374,8 @@ def gs_lstd_rbft(proc=10, results_directory="./results-lstd-rbft"):
     mi = [3000]
     ti = [0]
     rd = [results_directory]
-    indices = itertools.product(d,iv,np,nv,be,te,tf,uf,e,mi,ti,rd)
 
+    indices = itertools.product(d,iv,np,nv,be,te,tf,uf,e,mi,ti,rd)
     utils.cc(lstd_rbft_control, indices, proc=proc, keyworded=False)
 
 def graph(file_names):

@@ -299,7 +299,7 @@ def run3(n=100, proc=10, params=None, directory=None):
 
     discount_factors = ['0.9']
     update_frequencies = ['50']
-    behaviour_epsilons = ['0.05']
+    behaviour_epsilons = ['0.5']
     target_epsilons = ['0.5']
     sigmas = ['0', '0.25', '0.5', '0.75', '1']
     trace_factors = ['0', '0.25', '0.5', '0.75', '1']
