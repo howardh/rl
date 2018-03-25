@@ -8,6 +8,7 @@ from tqdm import tqdm
 import time
 import traceback
 import threading
+import random
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -356,6 +357,8 @@ def gs_lstd_rbf(proc=10, results_directory="./results-lstd-rbf"):
     rd = [results_directory]
 
     params = itertools.product(d,iv,np,nv,be,te,uf,e,mi,ti,rd)
+    params = list(params)
+    random.shuffle(params)
     utils.cc(lstd_rbf_control, params, proc, keyworded=False)
 
 def gs_lstd_rbft(proc=10, results_directory="./results-lstd-rbft"):
@@ -375,8 +378,10 @@ def gs_lstd_rbft(proc=10, results_directory="./results-lstd-rbft"):
     ti = [0]
     rd = [results_directory]
 
-    indices = itertools.product(d,iv,np,nv,be,te,tf,uf,e,mi,ti,rd)
-    utils.cc(lstd_rbft_control, indices, proc=proc, keyworded=False)
+    params = itertools.product(d,iv,np,nv,be,te,tf,uf,e,mi,ti,rd)
+    params = list(params)
+    random.shuffle(params)
+    utils.cc(lstd_rbft_control, params, proc=proc, keyworded=False)
 
 def graph(file_names):
     import matplotlib
@@ -539,8 +544,9 @@ if __name__ == "__main__":
         graph_dirs(args.results_dirs,output=args.output_file)
     elif args.exps:
         # The old school way
-        #exp3.run3(proc=3)
-        exp3.parse_results3('/NOBACKUP/hhuang63/results3/2018-03-20_19-17-32/mountaincar.exp3/part3')
+        utils.set_results_directory('/home/hhuang63/scratch/results/')
+        exp3.run3(proc=1)
+        exp3.parse_results3()
     else:
         if args.model == "tabular":
             params={"discount_factor":args.discount,

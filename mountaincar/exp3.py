@@ -13,6 +13,7 @@ import pprint
 import sys
 import traceback
 import datetime
+import random
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
@@ -294,20 +295,22 @@ def run3(n=100, proc=10, params=None, directory=None):
     params = []
     for vals in itertools.product(sigmas, trace_factors):
         d = dict(zip(keys,vals))
-        d['discount_factor'] = 0.9
+        d['discount_factor'] = 1
         d['initial_value'] = 0
         d['num_pos'] = 8
         d['num_vel'] = 8
-        d['behaviour_eps'] = 0.1
+        d['behaviour_eps'] = 0
         d['target_eps'] = 0
-        d['update_freq'] = 50
+        d['update_freq'] = 1
         d['epoch'] = 50
-        d['max_iters'] = 500
-        d['test_iters'] = 10
+        d['max_iters'] = 3000
+        d['test_iters'] = 1
         d["directory"] = os.path.join(directory, "l%f"%d['trace_factor'])
         params.append(d)
     params = itertools.repeat(params, n)
     params = itertools.chain(*list(params))
+    params = list(params)
+    random.shuffle(params)
     utils.cc(lstd_rbft_control, params, proc=proc, keyworded=True)
 
 def parse_results3(directory=None):
