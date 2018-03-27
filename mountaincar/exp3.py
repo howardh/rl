@@ -100,137 +100,141 @@ def lstd_rbft_control(discount_factor, initial_value, num_pos,
         print("Iterations:`",iters)
         #print(utils.torch_svd_inv(agent.learner.a_mat).numpy())
 
-def run(n=10, proc=10, directory=None):
+def run1(n=10, proc=10, directory=None):
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")
     print("Gridsearch")
-    print("Environment: CartPole")
+    print("Environment: MountainCar")
     print("Directory: %s" % directory)
-    print("Parameter space:")
-    print("""
-            \tDiscount factor: %s
-            \tUpdate Frequencies: %s
-            \tBehaviour Epsilons: %s
-            \tTarget Epsilons: %s
-            \tSigmas: %s
-            \tTrace Factors: %s
-    """ % (discount_factors, update_frequencies, behaviour_epsilons, target_epsilons, sigmas, trace_factors))
     print("Determines the best combination of parameters by the number of iterations needed to learn.")
-    indices = pandas.MultiIndex.from_product(
-            [discount_factors, update_frequencies, behaviour_epsilons,
-                target_epsilons, sigmas, trace_factors],
-            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon",
-                "Target Epsilon", "Sigma", "Lambda"])
-    data = pandas.DataFrame(index=indices, columns=range(n))
 
-    params = itertools.repeat(list(indices), n)
-    params = itertools.chain.from_iterable(params)
-    params = zip(params, itertools.repeat(directory))
-    utils.cc(_worker2, params, proc=proc, keyworded=False)
+    #def lstd_rbft_control(discount_factor, initial_value, num_pos,
+    #        num_vel, behaviour_eps, target_eps, trace_factor, sigma, update_freq, epoch, max_iters, test_iters,
 
-def parse_results(directory):
+    behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    target_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    trace_factors = [0, 0.25, 0.5, 0.75, 1]
+    sigmas = [0, 0.25, 0.5, 0.75, 1]
+
+    keys = ['behaviour_eps', 'target_eps', 'sigma','trace_factor']
+    params = []
+    #for d in params:
+    #    d["directory"] = os.path.join(directory, "l%f"%d['trace_factor'])
+    for vals in itertools.product(behaviour_eps, target_eps, sigmas, trace_factors):
+        d = dict(zip(keys,vals))
+        d['discount_factor'] = 1
+        d['initial_value'] = 0
+        d['num_pos'] = 8
+        d['num_vel'] = 8
+        d['update_freq'] = 1
+        d['epoch'] = 50
+        d['max_iters'] = 3000
+        d['test_iters'] = 1
+        d["directory"] = os.path.join(directory, "l%f"%d['trace_factor'])
+        params.append(d)
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    params = list(params)
+    random.shuffle(params)
+    utils.cc(lstd_rbft_control, params, proc=proc, keyworded=True)
+
+def parse_results1(directory=None):
     # Check that the experiment has been run and that results are present
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
     if not os.path.isdir(directory):
         print("No results to parse in %s" % directory)
         return None
 
-    import re
-    # Check if pickle files are there
-    results_file_name = os.path.join(directory, "results.pkl") 
-    sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
-    if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
-        with open(results_file_name, 'rb') as f:
-            data = dill.load(f)
-        with open(sorted_results_file_name, 'rb') as f:
-            sorted_data = dill.load(f)
-        return data, sorted_data
-
     # Parse set of parameters
-    files = [f for f in os.listdir(directory) if
-            os.path.isfile(os.path.join(directory,f))]
-    pattern = re.compile(r'^g((0|[1-9]\d*)(\.\d+)?)-u((0|[1-9]\d*)(\.\d+)?)-eb((0|[1-9]\d*)(\.\d+)?)-et((0|[1-9]\d*)(\.\d+)?)-s((0|[1-9]\d*)(\.\d+)?)-l((0|[1-9]\d*)(\.\d+)?)-(0|[1-9]\d*)\.csv$')
-    g = set()
-    u = set()
-    eb = set()
-    et = set()
-    s = set()
-    l = set()
-    for file_name in tqdm(files, desc="Parsing File Names"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            continue
-        g.add(regex_result.group(1))
-        u.add(regex_result.group(4))
-        eb.add(regex_result.group(7))
-        et.add(regex_result.group(10))
-        s.add(regex_result.group(13))
-        l.add(regex_result.group(16))
+    files = []
+    for d,_,file_names in os.walk(directory):
+        files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
+    all_params = utils.collect_file_params_pkl(files)
+    del all_params['directory']
+    kv_pairs = list(all_params.items())
+    vals = [v for k,v in kv_pairs]
+    keys = [k for k,v in kv_pairs]
 
-    indices = pandas.MultiIndex.from_product([g, u, eb, et, s, l],
-            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon", "Target Epsilon", "Sigma", "Trace Factor"])
+    indices = pandas.MultiIndex.from_product(vals, names=keys)
+
     # A place to store our results
-    data = pandas.DataFrame(0, index=indices, columns=["Sum", "Count", "Mean"]) # Average sum of rewards
-    data2 = pandas.DataFrame(0, index=indices, columns=["Sum", "Count", "Mean"]) # Average time to learn
-    for i in data.index:
-        data.loc[i]['Mean'] = sys.maxsize # FIXME: Hack. Can't use np.inf here.
+    data = pandas.DataFrame(0, index=indices, columns=["MaxS", "Count"])
+    data.sort_index(inplace=True)
 
-    # Load results from all csv files
+    # Load results from all pickle files
+    types = {'sigma': float, 
+            'trace_factor': float,
+            'behaviour_eps': float,
+            'target_eps': float}
+    def cast_params(param_dict):
+        for k in param_dict.keys():
+            if k in types:
+                param_dict[k] = types[k](param_dict[k])
+        return param_dict
     for file_name in tqdm(files, desc="Parsing File Contents"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            print("Invalid file. Skipping.")
-            continue
-        gamma = regex_result.group(1)
-        upd_freq = regex_result.group(4)
-        eps_b = regex_result.group(7)
-        eps_t = regex_result.group(10)
-        sigma = regex_result.group(13)
-        lam = regex_result.group(16)
-        with open(os.path.join(directory,file_name), 'r') as csvfile:
+        with open(os.path.join(directory,file_name), 'rb') as f:
             try:
-                reader = csv.reader(csvfile, delimiter=',')
-                results = [(int(r[0]), np.sum(eval(r[1]))) for r in reader]
-                time_to_learn = None
-                for a,b in results:
-                    if b >= 190:
-                        time_to_learn = a
-                        break
-                if time_to_learn is None:
-                    time_to_learn = results[-1][0]
+                x = dill.load(f)
+            except Exception as e:
+                tqdm.write("Skipping %s" % file_name)
+                continue
+        params = x[0]
+        params = cast_params(params)
+        param_vals = tuple([params[k] for k in keys])
 
-                # Sum of rewards
-                row = data.loc[(gamma, upd_freq, eps_b, eps_t, sigma, lam)]
-                row['Sum'] += results[-1][1]
-                row['Count'] += 1
-                row['Mean'] = row['Sum']/row['Count']
+        # Stuff
+        #print(data)
+        #print(param_vals)
+        series = x[1]
+        series = np.mean(series, axis=1)
+        data.loc[param_vals, 'MaxS'] += series[-1]
+        data.loc[param_vals, 'Count'] += 1
 
-                # Sum of learning time
-                row2 = data.loc[(gamma, upd_freq, eps_b, eps_t, sigma, lam)]
-                row['Sum'] += time_to_learn
-                row['Count'] += 1
-                row['Mean'] = row['Sum']/row['Count']
-            except Exception:
-                pass
+    # Check for missing data
+    missing_count = 0
+    for i in data.index:
+        if data.loc[i, 'Count'] <= 1:
+            #print("No data for index ", i)
+            print(dict(zip(keys, i)), ',')
+            missing_count += 1
+    print("%d data points missing" % missing_count)
 
-    # Save results
-    sorted_data = sorted([(i,data.loc[i]["Mean"]) for i in indices], key=operator.itemgetter(1))
-    sorted_data.reverse()
-    with open(results_file_name, 'wb') as f:
-        dill.dump(data, f)
-    with open(sorted_results_file_name, 'wb') as f:
-        dill.dump(sorted_data, f)
+    # Graph stuff
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
 
-    # Split by sigma value
-    by_sigma = dict()
-    for sigma in s:
-        df = data.iloc[data.index.get_level_values('Sigma') == sigma]
-        sorted_df = sorted([(i,df.loc[i]["Mean"]) for i in df.index], key=operator.itemgetter(1))
-        sorted_df.reverse()
-        by_sigma[sigma] = (df, sorted_df)
+    p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
+    for s,l in itertools.product(all_params['sigma'], all_params['trace_factor']):
+        fig, ax = plt.subplots(1,1)
+        ax.set_ylim([-205,-100])
+        ax.set_xlabel('Behaviour epsilon')
+        ax.set_ylabel('Cumulative reward')
+        p_dict['sigma'] = s
+        p_dict['trace_factor'] = l
+        for te in all_params['target_eps']:
+            x = []
+            y = []
+            p_dict['target_eps'] = te
+            for be in sorted(all_params['behaviour_eps']):
+                p_dict['behaviour_eps'] = be
+                p_dict = cast_params(p_dict)
+                param_vals = tuple([p_dict[k] for k in keys])
 
-    return data, sorted_data
+                x.append(be)
+                y.append(data.loc[param_vals, 'MaxS']/data.loc[param_vals, 'Count'])
+                #ax.set_prop_cycle(monochrome)
+            ax.plot(x,y)
+        file_name = os.path.join(directory, 'graph-s%f-l%f.png' % (s,l))
+        print("Saving file %s" % file_name)
+        plt.savefig(file_name)
+        plt.close(fig)
+
+    return data,(x,y)
 
 def get_best_params1(directory=None, sigma=None):
+    raise NotImplementedError()
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")
     return utils.get_best_params_by_sigma(directory, learned_threshold=190)
@@ -299,7 +303,7 @@ def run3(n=100, proc=10, params=None, directory=None):
         d['initial_value'] = 0
         d['num_pos'] = 8
         d['num_vel'] = 8
-        d['behaviour_eps'] = 0
+        d['behaviour_eps'] = 0.1
         d['target_eps'] = 0
         d['update_freq'] = 1
         d['epoch'] = 50

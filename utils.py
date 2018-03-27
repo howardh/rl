@@ -138,7 +138,7 @@ def collect_file_params(file_names):
 
 def collect_file_params_pkl(file_names):
     results = dict()
-    for file_name in file_names:
+    for file_name in tqdm(file_names):
         with open(file_name, 'rb') as f:
             try:
                 x = dill.load(f)

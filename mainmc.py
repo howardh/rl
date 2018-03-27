@@ -544,9 +544,11 @@ if __name__ == "__main__":
         graph_dirs(args.results_dirs,output=args.output_file)
     elif args.exps:
         # The old school way
-        utils.set_results_directory('/home/hhuang63/scratch/results/')
-        exp3.run3(proc=1)
-        exp3.parse_results3()
+        utils.set_results_directory('/home/hhuang63/scratch/results/lstd-rbft-4')
+        exp3.run1(proc=1,n=1)
+        #exp3.parse_results1()
+        #exp3.run3(proc=1,n=1)
+        #exp3.parse_results3()
     else:
         if args.model == "tabular":
             params={"discount_factor":args.discount,
