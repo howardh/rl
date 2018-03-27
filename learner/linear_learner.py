@@ -107,10 +107,9 @@ class LinearQsLearner(Learner):
 
             try:
                 #target = reward1 + gamma * (sigma*self.get_state_action_value(state1,action1) + (1-sigma)*self.get_state_value(state1))
-                with np.seterr(all='raise'):
-                    target = reward1
-                    target += gamma * sigma*self.get_state_action_value(state1,action1)
-                    target += gamma * (1-sigma)*self.get_state_value(state1)
+                target = reward1
+                target += gamma * sigma*self.get_state_action_value(state1,action1)
+                target += gamma * (1-sigma)*self.get_state_value(state1)
             except Warning as w:
                 print("BROKEN!")
                 print(w)

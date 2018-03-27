@@ -16,7 +16,7 @@ import datetime
 import random
 
 from agent.discrete_agent import TabularAgent
-from agent.lstd_agent import LSTDAgent
+from agent.linear_agent import LinearAgent
 
 import mountaincar 
 import mountaincar.features
@@ -24,52 +24,41 @@ import mountaincar.utils
 
 import utils
 
-discount_factors = ['1', '0.9', '0.8']
-update_frequencies = ['50', '200', '500']
-behaviour_epsilons = ['1', '0.5', '0.1', '0']
-target_epsilons = ['0.1', '0.05', '0']
-#sigmas = ['0', '0.25', '0.5', '0.75', '1']
-sigmas = ['0', '0.5', '1']
-trace_factors = ['0.01', '0.25', '0.5', '0.75', '0.99']
-
-def lstd_rbft_control(discount_factor, initial_value, num_pos,
-        num_vel, behaviour_eps, target_eps, trace_factor, sigma, update_freq, epoch, max_iters, test_iters,
+def rbft_control(discount_factor, learning_rate, trace_factor, sigma, num_pos,
+        num_vel, behaviour_eps, target_eps, epoch, max_iters, test_iters,
         directory):
-    args=locals()
+    args = locals()
+    env_name = 'MountainCar-v0'
+    e = gym.make(env_name)
+    start_time = datetime.datetime.now()
+
+    action_space = np.array([0,1,2])
+    obs_space = np.array([[-1.2, .6], [-0.07, 0.07]])
+    centres = np.array(list(itertools.product(
+            np.linspace(0,1,num_pos),
+            np.linspace(0,1,num_vel))))
+    def norm(x):
+        return np.array([(s-r[0])/(r[1]-r[0]) for s,r in zip(x, obs_space)])
+    def rbf(x):
+        x = norm(x)
+        dist = np.power(centres-x, 2).sum(axis=1,keepdims=True)
+        return np.exp(-100*dist)
+    agent = LinearAgent(
+            action_space=action_space,
+            discount_factor=discount_factor,
+            learning_rate=learning_rate,
+            num_features=num_pos*num_vel,
+            features=rbf,
+            trace_factor=trace_factor,
+            sigma=sigma
+    )
+    agent.set_behaviour_policy("%f-epsilon" % behaviour_eps)
+    agent.set_target_policy("%f-epsilon" % target_eps)
+
+    rewards = []
+    steps_to_learn = None
     try:
-        env_name = 'MountainCar-v0'
-        e = gym.make(env_name)
-        start_time = datetime.datetime.now()
-
-        action_space = np.array([0,1,2])
-        obs_space = np.array([[-1.2, .6], [-0.07, 0.07]])
-        centres = np.array(list(itertools.product(
-                np.linspace(0,1,num_pos),
-                np.linspace(0,1,num_vel))))
-        def norm(x):
-            return np.array([(s-r[0])/(r[1]-r[0]) for s,r in zip(x, obs_space)])
-        def rbf(x):
-            x = norm(x)
-            dist = np.power(centres-x, 2).sum(axis=1,keepdims=True)
-            return np.exp(-100*dist)
-        agent = LSTDAgent(
-                action_space=action_space,
-                discount_factor=discount_factor,
-                #initial_value=initial_value,
-                features=rbf,
-                num_features=num_pos*num_vel,
-                use_traces=True,
-                trace_factor=trace_factor,
-                sigma=sigma
-        )
-        agent.set_behaviour_policy("%f-epsilon" % behaviour_eps)
-        agent.set_target_policy("%f-epsilon" % target_eps)
-
-        rewards = []
-        steps_to_learn = None
         for iters in range(0,max_iters+1):
-            if iters % update_freq == 0:
-                agent.update_weights()
             if epoch is not None:
                 if iters % epoch == 0:
                     r = agent.test(e, test_iters, render=False, processors=1)
@@ -82,23 +71,18 @@ def lstd_rbft_control(discount_factor, initial_value, num_pos,
                     if steps_to_learn is None:
                         steps_to_learn = iters
             agent.run_episode(e)
+    except ValueError as e:
+        print(e)
+        tqdm.write("Diverged")
+        pass # Diverged weights
 
-        while iters < max_iters: # Means it diverged at some point
-            iters += 1
-            rewards.append(None)
+    while len(rewards) < (max_iters%epoch)+1: # Means it diverged at some point
+        rewards.append([-200]*test_iters)
 
-        data = (args, rewards, steps_to_learn)
-        file_name, file_num = utils.find_next_free_file("results", "pkl",
-                directory)
-        with open(file_name, "wb") as f:
-            dill.dump(data, f)
-
-        return rewards,steps_to_learn
-    except Exception as e:
-        #print(e)
-        traceback.print_exc()
-        print("Iterations:`",iters)
-        #print(utils.torch_svd_inv(agent.learner.a_mat).numpy())
+    data = (args, rewards, steps_to_learn)
+    file_name, file_num = utils.find_next_free_file("results", "pkl", directory)
+    with open(file_name, "wb") as f:
+        dill.dump(data, f)
 
 def run1(n=10, proc=10, directory=None):
     if directory is None:
@@ -108,25 +92,29 @@ def run1(n=10, proc=10, directory=None):
     print("Directory: %s" % directory)
     print("Determines the best combination of parameters by the number of iterations needed to learn.")
 
-    #def lstd_rbft_control(discount_factor, initial_value, num_pos,
-    #        num_vel, behaviour_eps, target_eps, trace_factor, sigma, update_freq, epoch, max_iters, test_iters,
+    #def rbft_control(discount_factor, learning_rate, trace_factor, sigma, num_pos, num_vel, behaviour_eps, target_eps, epoch, max_iters, test_iters, directory):
 
     behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
     target_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
     trace_factors = [0, 0.25, 0.5, 0.75, 1]
     sigmas = [0, 0.25, 0.5, 0.75, 1]
+    learning_rate = np.logspace(np.log10(10),np.log10(.001),num=13,endpoint=True,base=10).tolist()
+    #behaviour_eps = [0, 0.5]
+    #target_eps = [0, 0.2]
+    #trace_factors = [0, 0.5]
+    #sigmas = [0, 0.5]
+    #learning_rate = [1,0.1]
 
-    keys = ['behaviour_eps', 'target_eps', 'sigma','trace_factor']
+    keys = ['behaviour_eps', 'target_eps', 'sigma','trace_factor', 'learning_rate']
     params = []
     #for d in params:
     #    d["directory"] = os.path.join(directory, "l%f"%d['trace_factor'])
-    for vals in itertools.product(behaviour_eps, target_eps, sigmas, trace_factors):
+    for vals in itertools.product(behaviour_eps, target_eps, sigmas,
+            trace_factors, learning_rate):
         d = dict(zip(keys,vals))
         d['discount_factor'] = 1
-        d['initial_value'] = 0
         d['num_pos'] = 8
         d['num_vel'] = 8
-        d['update_freq'] = 1
         d['epoch'] = 50
         d['max_iters'] = 3000
         d['test_iters'] = 1
@@ -136,7 +124,7 @@ def run1(n=10, proc=10, directory=None):
     params = itertools.chain(*list(params))
     params = list(params)
     random.shuffle(params)
-    utils.cc(lstd_rbft_control, params, proc=proc, keyworded=True)
+    utils.cc(rbft_control, params, proc=proc, keyworded=True)
 
 def parse_results1(directory=None):
     # Check that the experiment has been run and that results are present
@@ -166,7 +154,8 @@ def parse_results1(directory=None):
     types = {'sigma': float, 
             'trace_factor': float,
             'behaviour_eps': float,
-            'target_eps': float}
+            'target_eps': float,
+            'learning_rate': float}
     def cast_params(param_dict):
         for k in param_dict.keys():
             if k in types:
@@ -194,7 +183,7 @@ def parse_results1(directory=None):
     # Check for missing data
     missing_count = 0
     for i in data.index:
-        if data.loc[i, 'Count'] <= 1:
+        if data.loc[i, 'Count'] <= 0:
             #print("No data for index ", i)
             print(dict(zip(keys, i)), ',')
             missing_count += 1
@@ -208,7 +197,7 @@ def parse_results1(directory=None):
     p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
     for s,l in itertools.product(all_params['sigma'], all_params['trace_factor']):
         fig, ax = plt.subplots(1,1)
-        ax.set_ylim([-205,-100])
+        ax.set_ylim([-205,-80])
         ax.set_xlabel('Behaviour epsilon')
         ax.set_ylabel('Cumulative reward')
         p_dict['sigma'] = s
@@ -299,13 +288,12 @@ def run3(n=100, proc=10, params=None, directory=None):
     params = []
     for vals in itertools.product(sigmas, trace_factors):
         d = dict(zip(keys,vals))
-        d['discount_factor'] = 1
-        d['initial_value'] = 0
-        d['num_pos'] = 8
-        d['num_vel'] = 8
+        d['learning_rate'] = 0.1
         d['behaviour_eps'] = 0.1
         d['target_eps'] = 0
-        d['update_freq'] = 1
+        d['discount_factor'] = 1
+        d['num_pos'] = 8
+        d['num_vel'] = 8
         d['epoch'] = 50
         d['max_iters'] = 3000
         d['test_iters'] = 1

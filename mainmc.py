@@ -19,6 +19,7 @@ import mountaincar
 import mountaincar.features
 import mountaincar.utils
 
+from mountaincar import exp2
 from mountaincar import exp3
 import utils
 
@@ -544,8 +545,11 @@ if __name__ == "__main__":
         graph_dirs(args.results_dirs,output=args.output_file)
     elif args.exps:
         # The old school way
-        utils.set_results_directory('/home/hhuang63/scratch/results/lstd-rbft-4')
-        exp3.run1(proc=1,n=1)
+        #utils.set_results_directory('/home/hhuang63/scratch/results/lstd-rbft-4')
+        utils.set_results_directory('/NOBACKUP/hhuang63/results3/2018-03-27_15-38-47')
+        #exp2.run1(proc=15,n=1)
+        exp2.parse_results1()
+        #exp3.run1(proc=1,n=1)
         #exp3.parse_results1()
         #exp3.run3(proc=1,n=1)
         #exp3.parse_results3()
