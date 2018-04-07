@@ -115,16 +115,15 @@ def run(n=10, proc=10, directory=None):
     print("Gridsearch")
     print("Environment: CartPole")
     print("Directory: %s" % directory)
-    print("Parameter space:")
-    print("""
-            \tDiscount factor: %s
-            \tUpdate Frequencies: %s
-            \tBehaviour Epsilons: %s
-            \tTarget Epsilons: %s
-            \tSigmas: %s
-            \tTrace Factors: %s
-    """ % (discount_factors, update_frequencies, behaviour_epsilons, target_epsilons, sigmas, trace_factors))
     print("Determines the best combination of parameters by the number of iterations needed to learn.")
+
+    discount_factors = ['0.9']
+    update_frequencies = ['1', '50', '200']
+    behaviour_epsilons = ['0', '0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '1']
+    target_epsilons = ['0', '0.1', '0.2', '0.3']
+    sigmas = ['0', '0.25', '0.5', '0.75', '1']
+    trace_factors = ['0', '0.25', '0.5', '0.75', '1']
+
     indices = pandas.MultiIndex.from_product(
             [discount_factors, update_frequencies, behaviour_epsilons,
                 target_epsilons, sigmas, trace_factors],
@@ -137,107 +136,55 @@ def run(n=10, proc=10, directory=None):
     params = zip(params, itertools.repeat(directory))
     utils.cc(_worker2, params, proc=proc, keyworded=False)
 
-def parse_results(directory):
+def parse_results(directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
     # Check that the experiment has been run and that results are present
     if not os.path.isdir(directory):
         print("No results to parse in %s" % directory)
         return None
 
-    import re
-    # Check if pickle files are there
-    results_file_name = os.path.join(directory, "results.pkl") 
-    sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
-    if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
-        with open(results_file_name, 'rb') as f:
-            data = dill.load(f)
-        with open(sorted_results_file_name, 'rb') as f:
-            sorted_data = dill.load(f)
-        return data, sorted_data
-
-    # Parse set of parameters
     files = [f for f in os.listdir(directory) if
             os.path.isfile(os.path.join(directory,f))]
-    pattern = re.compile(r'^g((0|[1-9]\d*)(\.\d+)?)-u((0|[1-9]\d*)(\.\d+)?)-eb((0|[1-9]\d*)(\.\d+)?)-et((0|[1-9]\d*)(\.\d+)?)-s((0|[1-9]\d*)(\.\d+)?)-l((0|[1-9]\d*)(\.\d+)?)-(0|[1-9]\d*)\.csv$')
-    g = set()
-    u = set()
-    eb = set()
-    et = set()
-    s = set()
-    l = set()
-    for file_name in tqdm(files, desc="Parsing File Names"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            continue
-        g.add(regex_result.group(1))
-        u.add(regex_result.group(4))
-        eb.add(regex_result.group(7))
-        et.add(regex_result.group(10))
-        s.add(regex_result.group(13))
-        l.add(regex_result.group(16))
+    all_params = utils.collect_file_params(files)
+    data = utils.parse_results(directory)
 
-    indices = pandas.MultiIndex.from_product([g, u, eb, et, s, l],
-            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon", "Target Epsilon", "Sigma", "Trace Factor"])
-    # A place to store our results
-    data = pandas.DataFrame(0, index=indices, columns=["Sum", "Count", "Mean"]) # Average sum of rewards
-    data2 = pandas.DataFrame(0, index=indices, columns=["Sum", "Count", "Mean"]) # Average time to learn
-    for i in data.index:
-        data.loc[i]['Mean'] = sys.maxsize # FIXME: Hack. Can't use np.inf here.
+    vals = [v for k,v in all_params.items()]
+    keys = data.index.names
+    print(all_params)
 
-    # Load results from all csv files
-    for file_name in tqdm(files, desc="Parsing File Contents"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            print("Invalid file. Skipping.")
-            continue
-        gamma = regex_result.group(1)
-        upd_freq = regex_result.group(4)
-        eps_b = regex_result.group(7)
-        eps_t = regex_result.group(10)
-        sigma = regex_result.group(13)
-        lam = regex_result.group(16)
-        with open(os.path.join(directory,file_name), 'r') as csvfile:
-            try:
-                reader = csv.reader(csvfile, delimiter=',')
-                results = [(int(r[0]), np.sum(eval(r[1]))) for r in reader]
-                time_to_learn = None
-                for a,b in results:
-                    if b >= 190:
-                        time_to_learn = a
-                        break
-                if time_to_learn is None:
-                    time_to_learn = results[-1][0]
+    # Graph stuff
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
 
-                # Sum of rewards
-                row = data.loc[(gamma, upd_freq, eps_b, eps_t, sigma, lam)]
-                row['Sum'] += results[-1][1]
-                row['Count'] += 1
-                row['Mean'] = row['Sum']/row['Count']
+    p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
+    for s,l in itertools.product(all_params['s'], all_params['l']):
+        fig, ax = plt.subplots(1,1)
+        ax.set_ylim([0,200])
+        ax.set_xlabel('Behaviour epsilon')
+        ax.set_ylabel('Cumulative reward')
+        p_dict['s'] = s # sigma
+        p_dict['l'] = l # trace factor
+        for te in all_params['et']:
+            x = []
+            y = []
+            p_dict['et'] = te
+            for be in sorted(all_params['eb']):
+                p_dict['eb'] = be
+                param_vals = tuple([p_dict[k] for k in keys])
 
-                # Sum of learning time
-                row2 = data.loc[(gamma, upd_freq, eps_b, eps_t, sigma, lam)]
-                row['Sum'] += time_to_learn
-                row['Count'] += 1
-                row['Mean'] = row['Sum']/row['Count']
-            except Exception:
-                pass
+                x.append(float(be))
+                y.append(data.loc[param_vals, 'MRS']/data.loc[param_vals, 'Count'])
+                #ax.set_prop_cycle(monochrome)
+            ax.plot(x,y,label='epsilon=%s'%te)
+        ax.legend(loc='best')
+        file_name = os.path.join(directory, 'graph-s%s-l%s.png' % (s,l))
+        print("Saving file %s" % file_name)
+        plt.savefig(file_name)
+        plt.close(fig)
 
-    # Save results
-    sorted_data = sorted([(i,data.loc[i]["Mean"]) for i in indices], key=operator.itemgetter(1))
-    sorted_data.reverse()
-    with open(results_file_name, 'wb') as f:
-        dill.dump(data, f)
-    with open(sorted_results_file_name, 'wb') as f:
-        dill.dump(sorted_data, f)
-
-    # Split by sigma value
-    by_sigma = dict()
-    for sigma in s:
-        df = data.iloc[data.index.get_level_values('Sigma') == sigma]
-        sorted_df = sorted([(i,df.loc[i]["Mean"]) for i in df.index], key=operator.itemgetter(1))
-        sorted_df.reverse()
-        by_sigma[sigma] = (df, sorted_df)
-
-    return data, sorted_data
+    return data
 
 def get_best_params1(directory=None, sigma=None):
     if directory is None:

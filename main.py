@@ -265,8 +265,10 @@ if __name__ == "__main__":
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test3")
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
 
-    exp3.run3(proc=10)
-    exp3.parse_results3()
+    utils.set_results_directory("/home/ml/hhuang63/results/2018-03-28_18-55-41")
+    exp3.run1(n=1,proc=3)
+    #exp3.run3(proc=10)
+    #exp3.parse_results3()
     #exp2.run1(proc=10)
     #exp2.run2(proc=1)
     #exp2.parse_results2()

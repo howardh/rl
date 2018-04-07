@@ -160,27 +160,51 @@ def parse_file(file_name, threshold=None, delete_invalid=False):
     the rewards as time series data, the sum of rewards, and when the threshold
     was met.
     """
-    threshold_met = None
-    with open(file_name, 'r') as csvfile:
-        reader = csv.reader(csvfile, delimiter=',')
-        series = [(int(r[0]), np.mean(eval(r[1]))) for r in reader]
-        # Check if we have data to return
-        if len(series) == 0:
-            if delete_invalid:
-                os.remove(file_name)
-            return None
-        # Compute time to learn
+    if file_name.endswith('.csv'):
+        threshold_met = None
+        with open(file_name, 'r') as csvfile:
+            reader = csv.reader(csvfile, delimiter=',')
+            series = [(int(r[0]), np.mean(eval(r[1]))) for r in reader]
+            # Check if we have data to return
+            if len(series) == 0:
+                if delete_invalid:
+                    os.remove(file_name)
+                return None
+            # Compute time to learn
+            if threshold is not None:
+                for r in series:
+                    if threshold_met is None and r[1] >= threshold:
+                        threshold_met = r[0]
+                if threshold_met is None:
+                    threshold_met = series[-1][0]
+            # Compute mean reward over time
+            means = [r[1] for r in series]
+            times = [r[0] for r in series]
+
+            return (times,means), np.mean(means), threshold_met
+
+    if file_name.endswith('.pkl'):
+        with open(os.path.join(directory,file_name), 'rb') as f:                                                 
+            try:
+                x = dill.load(f)                                                                                 
+            except Exception as e:
+                tqdm.write("Skipping %s" % file_name)
+                return None
+        series = x[1]                                                                                            
+        params = x[0]
+        epoch = 50 # default
+        if 'epoch' in params:                                                                                    
+            epoch = params['epoch']                                                                              
+        threshold_met = None
         if threshold is not None:
             for r in series:
-                if threshold_met is None and r[1] >= threshold:
-                    threshold_met = r[0]
-            if threshold_met is None:
+                if threshold_met is None and r[1] >= threshold:                                                  
+                    threshold_met = r[0]                                                                         
+            if threshold_met is None:                                                                            
                 threshold_met = series[-1][0]
-        # Compute mean reward over time
-        means = [r[1] for r in series]
-        times = [r[0] for r in series]
-
-        return (times,means), np.mean(means), threshold_met
+        means = np.mean(series, axis=1)
+        times = [epoch*i for i in range(len(means))]
+        return (times,series), means, threshold_met
 
 def parse_results(directory, learned_threshold=None):
     """
@@ -262,6 +286,93 @@ def parse_results(directory, learned_threshold=None):
         data.loc[key,'Count'] += 1
 
     # Return results
+    return data
+
+def parse_results_pkl(directory, learned_threshold=None,
+        dataframe_filename = "dataframe.pkl",
+        parsedfiles_filename = "parsedfiles.pkl"):
+    dataframe_fullpath = os.path.join(directory, dataframe_filename)
+    parsedfiles_fullpath = os.path.join(directory, parsedfiles_filename)
+
+    # Get a list of all files that have already been parsed
+    if os.path.isfile(parsedfiles_fullpath):
+        with open(parsedfiles_fullpath, 'rb') as f:
+            parsed_files = dill.load(f)
+    else:
+        parsed_files = [dataframe_fullpath, parsedfiles_fullpath]
+
+    # Get a list of all files in existence, and remove those that have already
+    # been parsed
+    files = []
+    for d,_,file_names in tqdm(os.walk(directory)):
+        files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
+    files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
+
+    # A place to store our results
+    if os.path.isfile(dataframe_fullpath):
+        # A dataframe already exists, so load that instead of making a new one
+        print("File exists. Loading...")
+        data = pandas.read_pickle(dataframe_fullpath)
+        keys = data.index.names
+        all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
+    else:
+        # Create new dataframe
+        # Parse set of parameters
+        all_params = collect_file_params_pkl(files)
+        del all_params['directory']
+        kv_pairs = list(all_params.items())
+        vals = [v for k,v in kv_pairs]
+        keys = [k for k,v in kv_pairs]
+
+        indices = pandas.MultiIndex.from_product(vals, names=keys)
+
+        data = pandas.DataFrame(0, index=indices, columns=["MRS", "TTLS", "MaxS", "Count"])
+        data.sort_index(inplace=True)
+
+    # Load results from all pickle files
+    types = {'sigma': float,
+            'lam': float,
+            'eps_b': float,
+            'eps_t': float,
+            'alpha': float}
+    def cast_params(param_dict):
+        for k in param_dict.keys():
+            if k in types:
+                param_dict[k] = types[k](param_dict[k])
+        return param_dict
+    try:
+        for file_name in tqdm(files, desc="Parsing File Contents"):
+            with open(os.path.join(directory,file_name), 'rb') as f:
+                try:
+                    params, series, time_to_learn = dill.load(f)
+                except Exception as e:
+                    tqdm.write("Skipping %s" % file_name)
+                    parsed_files.append(file_name)
+                    continue
+            params = cast_params(params)
+            param_vals = tuple([params[k] for k in keys])
+            series = np.mean(series, axis=1)
+
+            if time_to_learn is None:
+                data.loc[param_vals,'TTLS'] = float('inf')
+            else:
+                data.loc[param_vals,'TTLS'] += time_to_learn
+            data.loc[param_vals, 'MRS'] += np.mean(series)
+            data.loc[param_vals, 'MaxS'] += series[-1]
+            data.loc[param_vals, 'Count'] += 1
+            parsed_files.append(file_name)
+    except KeyboardInterrupt as e:
+        pass
+    finally:
+        if len(files) > 0:
+            print("Saving file to %s" % dataframe_fullpath)
+            data.to_pickle(dataframe_fullpath)
+            print("Done")
+            print("Saving file to %s" % parsedfiles_fullpath)
+            with open(parsedfiles_fullpath, 'wb') as f:
+                dill.dump(parsed_files, f)
+            print("Done")
+
     return data
 
 def parse_graphing_results(directory):

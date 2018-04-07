@@ -107,22 +107,19 @@ def run1(n=10, proc=10, directory=None):
     print("Gridsearch")
     print("Environment: FrozenLake4x4")
     print("Directory: %s" % directory)
-    print("Parameter space:")
-    print("""
-            \tDiscount factor: %s
-            \tUpdate Frequencies: %s
-            \tBehaviour Epsilons: %s
-            \tTarget Epsilons: %s
-            \tSigmas: %s
-            \tTrace Factors: %s
-    """ % (discount_factors, update_frequencies, behaviour_epsilons, target_epsilons, sigmas, trace_factors))
     print("Determines the best combination of parameters by the number of iterations needed to learn.")
+
+    discount_factors = ['1']
+    update_frequencies = ['1', '50', '200']
+    behaviour_epsilons = ['0', '0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '1']
+    target_epsilons = ['0', '0.1', '0.2', '0.3']
+    sigmas = ['0', '0.25', '0.5', '0.75', '1']
+    trace_factors = ['0', '0.25', '0.5', '0.75', '1']
 
     indices = pandas.MultiIndex.from_product(
             [discount_factors, update_frequencies, behaviour_epsilons,
                 target_epsilons, sigmas, trace_factors],
-            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon",
-                "Target Epsilon", "Sigma", "Lambda"])
+            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon", "Target Epsilon", "Sigma", "Lambda"])
     data = pandas.DataFrame(index=indices, columns=range(n))
 
     params = itertools.repeat(list(indices), n)

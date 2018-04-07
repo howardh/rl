@@ -10,7 +10,7 @@ import cartpole
 import cartpole.features
 import cartpole.utils
 
-#from cartpole import exp1
+from cartpole import exp1
 #from cartpole import exp2
 from cartpole import exp3
 import utils
@@ -89,14 +89,18 @@ if __name__ == "__main__":
     #experiments.run_all()
     #lstd_control()
     #lstd_control_steps()
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2017-06-20_20-34-59")
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-03-27_17-59-35")
 
     #import shutil
     #shutil.rmtree("/NOBACKUP/hhuang63/results3/test")
     #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test2")
     #exp3.run_all(20)
-    #exp3.run(n=10,proc=10)
+    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-03-28_16-58-42")
+    #exp1.run(n=1,proc=10)
+    d = exp1.parse_results()
+    #exp3.run(n=1,proc=15)
+    #exp3.parse_results()
     #exp3.run2(n=100,proc=10)
     #exp3.parse_results2()
-    exp3.run3(n=100,proc=10)
-    exp3.parse_results3()
+    #exp3.run3(n=100,proc=10)
+    #exp3.parse_results3()

@@ -95,15 +95,10 @@ def run1(n=10, proc=10, directory=None):
     #def rbft_control(discount_factor, learning_rate, trace_factor, sigma, num_pos, num_vel, behaviour_eps, target_eps, epoch, max_iters, test_iters, directory):
 
     behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-    target_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    target_eps = [0, 0.1, 0.2, 0.3, 0.4]
     trace_factors = [0, 0.25, 0.5, 0.75, 1]
     sigmas = [0, 0.25, 0.5, 0.75, 1]
     learning_rate = np.logspace(np.log10(10),np.log10(.001),num=13,endpoint=True,base=10).tolist()
-    #behaviour_eps = [0, 0.5]
-    #target_eps = [0, 0.2]
-    #trace_factors = [0, 0.5]
-    #sigmas = [0, 0.5]
-    #learning_rate = [1,0.1]
 
     keys = ['behaviour_eps', 'target_eps', 'sigma','trace_factor', 'learning_rate']
     params = []
