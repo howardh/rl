@@ -306,7 +306,10 @@ def parse_results_pkl(directory, learned_threshold=None,
     files = []
     for d,_,file_names in tqdm(os.walk(directory)):
         files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
-    files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
+    if len(files) != len(parsed_files):
+        files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
+    else:
+        files = []
 
     # A place to store our results
     if os.path.isfile(dataframe_fullpath):
@@ -326,7 +329,8 @@ def parse_results_pkl(directory, learned_threshold=None,
 
         indices = pandas.MultiIndex.from_product(vals, names=keys)
 
-        data = pandas.DataFrame(0, index=indices, columns=["MRS", "TTLS", "MaxS", "Count"])
+        data = pandas.DataFrame(0, index=indices, columns=["MRS", "TTLS",
+            "MaxS", "Count"])
         data.sort_index(inplace=True)
 
     # Load results from all pickle files
@@ -341,6 +345,7 @@ def parse_results_pkl(directory, learned_threshold=None,
                 param_dict[k] = types[k](param_dict[k])
         return param_dict
     try:
+        print("%d files to process." % len(files))
         for file_name in tqdm(files, desc="Parsing File Contents"):
             with open(os.path.join(directory,file_name), 'rb') as f:
                 try:
@@ -476,6 +481,58 @@ def parse_graphing_results_pkl(directory):
         t = times[s]
         results[s] = (t,mean,std)
     return results
+
+def get_series_with_params_pkl(directory, params):
+    # Collect all file names
+    files = []
+    for d,_,file_names in tqdm(os.walk(directory), desc='Collecting all files'):
+        files += [os.path.join(d,f) for f in tqdm(file_names, desc='From directory %s'%directory) if os.path.isfile(os.path.join(d,f))]
+
+    # Load results from all pickle files
+    types = {'sigma': float,
+            'lam': float,
+            'eps_b': float,
+            'eps_t': float,
+            'alpha': float,
+            'trace_factor': float,
+            'behaviour_eps': float,
+            'target_eps': float,
+            'learning_rate': float}
+    def cast_params(param_dict):
+        for k in param_dict.keys():
+            if k in types:
+                param_dict[k] = types[k](param_dict[k])
+        return param_dict
+    def params_equal(params1, params2):
+        for k,v in params1.items():
+            if k in params2:
+                if params1[k] != params2[k]:
+                    return False
+            else:
+                return False
+        return True
+    try:
+        data = []
+        count = 0
+        for file_name in tqdm(files, desc="Parsing File Contents"):
+            with open(os.path.join(directory,file_name), 'rb') as f:
+                try:
+                    file_params, series, time_to_learn = dill.load(f)
+                except Exception as e:
+                    tqdm.write("Skipping %s" % file_name)
+                    continue
+
+            # Check that params match
+            if not params_equal(params, file_params):
+                continue
+            series = np.mean(series, axis=1)
+            data.append(series)
+            count += 1
+    except KeyboardInterrupt as e:
+        pass 
+    print('%d files parsed' % count)
+
+    return data
 
 def sort_data(data):
     """

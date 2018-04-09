@@ -97,7 +97,11 @@ if __name__ == "__main__":
     #exp3.run_all(20)
     utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-03-28_16-58-42")
     #exp1.run(n=1,proc=10)
-    d = exp1.parse_results()
+    #d = exp1.parse_results()
+    while True:
+        exp1.run2(n=5,proc=10)
+        #d = exp1.parse_results2(labels=['ttl','mr','fr'])
+        d = exp1.parse_results2(labels=['mr','fr'])
     #exp3.run(n=1,proc=15)
     #exp3.parse_results()
     #exp3.run2(n=100,proc=10)
