@@ -2,95 +2,126 @@ import numpy as np
 import gym
 import itertools
 import pandas
-from pathos.multiprocessing import ProcessPool
+import dill
+import csv
+import os
+from tqdm import tqdm
+import time
+import operator
+import pprint
+import sys
+import traceback
+import random
 
-from agent.discrete_agent import TabularAgent
-from agent.lstd_agent import LSTDAgent
+from cartpole import ENV_NAME
+from cartpole import MAX_REWARD
+from cartpole import MIN_REWARD
+from cartpole import LEARNED_REWARD
 
-import cartpole 
-from cartpole import features
-from cartpole import utils
+import utils
 
-"""
-FrozenLake
 
-Tabular gridsearch
-LSTD gridsearch
-"""
+def get_params_nondiverged(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    d = data.loc[data['MaxS'] > 1]
+    params = [dict(zip(d.index.names,p)) for p in tqdm(d.index)]
+    for d in params:
+        d["directory"] = os.path.join(directory, "l%f"%d['lam'])
+    return params
 
-def exp1():
+def get_mean_rewards(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    mr_data = data.apply(lambda row: row.MRS/row.Count, axis=1)
+    return mr_data
+
+def get_final_rewards(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
+    return fr_data
+
+def get_ucb1_mean_reward(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    count_total = data['Count'].sum()
+    def ucb1(row):
+        a = row.MRS/row.Count
+        b = np.sqrt(2*np.log(count_total)/row.Count)
+        return a+b
+    score = data.apply(ucb1, axis=1)
+    return score
+
+def get_ucb1_final_reward(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    count_total = data['Count'].sum()
+    def ucb1(row):
+        a = row.MaxS/row.Count
+        b = np.sqrt(2*np.log(count_total)/row.Count)
+        return a+b
+    score = data.apply(ucb1, axis=1)
+    return score
+
+def get_params_best(directory, score_function, n=1):
+    score = score_function(directory)
+    if n == -1:
+        n = score.size
+    if n == 1:
+        params = [score.idxmax()]
+    else:
+        score = score.sort_values(ascending=False)
+        params = itertools.islice(score.index, n)
+    return [dict(zip(score.index.names,p)) for p in params]
+
+
+def run1(exp, n=1, proc=10, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
     print("Gridsearch")
-    print("Environment: CartPole")
-    print("Parameter space:")
-    print("""
-            \tDiscount factor 
-            \tUpdate frequency
-            \tBehaviour epsilon
-            \tTarget epsilon
-    """)
-    discount_factors = ['1', '0.9', '0.8', '0.5']
-    update_frequencies = ['100', '300', '500', '1000']
-    behaviour_epsilon = ['0', '0.05', '0.1', '0.2', '0.5', '1']
-    target_epsilon = ['0', '0.01', '0.05', '0.1']
-    indices = pandas.MultiIndex.from_product(
-            [discount_factors, update_frequencies, behaviour_epsilon, target_epsilon],
-            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon", "Target Epsilon"])
-    data = pandas.DataFrame(
-            np.zeros([len(discount_factors)*len(update_frequencies)*len(behaviour_epsilon)*len(target_epsilon),1]),
-            index=indices)
+    print("Environment: ", exp.ENV_NAME)
+    print("Directory: %s" % directory)
+    print("Determines the best combination of parameters by the number of iterations needed to learn.")
 
-    def run_trial(gamma, upd_freq, eps_b, eps_t):
-        env_name = 'CartPole-v0'
-        e = gym.make(env_name)
+    params = exp.get_params_gridsearch()
+    for p in params:
+        p['directory'] = directory
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    params = list(params)
+    random.shuffle(params)
+    utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
-        action_space = np.array([0,1])
-        agent = LSTDAgent(
-                action_space=action_space,
-                num_features=cartpole.features.IDENTITY_NUM_FEATURES,
-                discount_factor=gamma,
-                features=cartpole.features.identity2,
-                use_importance_sampling=False,
-                use_traces=False,
-                sigma=None,
-                trace_factor=None,
-        )
-        agent.set_behaviour_policy("%s-epsilon" % eps_b)
-        agent.set_target_policy("%s-epsilon" % eps_t)
+def run2(exp, n=1, m=10, proc=10, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
 
-        iters = 0
-        while True:
-            iters += 1
-            agent.run_episode(e)
-            if iters % upd_freq == 0:
-                agent.update_weights()
-                rewards = agent.test(e, 100, render=False)
-                print("Iteration %d\t Rewards: %f" % (iters, np.mean(rewards)))
-                if np.mean(rewards) >= 190:
-                    break
-            if iters > 100000:
-                break
-        return iters
+    params1 = get_params_best(directory, get_ucb1_mean_reward, m)
+    params2 = get_params_best(directory, get_ucb1_final_reward, m)
+    params = params1+params2
 
-    def foo(i):
-        g,n,eb,et = indices[i]
-        g = float(g)
-        n = int(n)
-        eb = float(eb)
-        et = float(et)
-        results = [run_trial(g,n,eb,et) for _ in range(10)]
-        return np.mean(results)
+    print("Further refining gridsearch, exploring with UCB1")
+    print("Environment: ", exp.ENV_NAME)
+    #print("Parameters: %s" % params)
+    print("Directory: %s" % directory)
 
-    pool = ProcessPool(processes=3)
-    output = pool.map(foo, range(len(indices)))
-    for i,x in enumerate(output):
-        g,n,eb,et = indices[i]
-        data.loc[g,n,eb,et] = x
-    print(output)
-    print(data)
-    return data
+    for p in params:
+        p['directory'] = directory
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
-def run_all():
-    gridsearch_results = exp1()
+def run3(exp, n=100, proc=10, params=None, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
 
-if __name__ == "__main__":
-    run_all()
+    params1 = get_params_best(directory, get_mean_rewards, 1)
+    params2 = get_params_best(directory, get_final_rewards, 1)
+    params = params1+params2
+
+    print("Running more trials with the best parameters found so far.")
+    print("Environment: ", exp.ENV_NAME)
+    print("Parameters: %s" % params)
+    print("Directory: %s" % directory)
+
+    for p in params:
+        p['directory'] = directory
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    utils.cc(exp.run_trial, params, proc=proc, keyworded=True)

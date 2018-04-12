@@ -2,7 +2,6 @@ import numpy as np
 import gym
 import itertools
 import pandas
-import multiprocessing
 import dill
 import csv
 import os
@@ -25,10 +24,15 @@ from cartpole import LEARNED_REWARD
 
 from cartpole import features
 from cartpole import utils
+from cartpole import experiments
+
+from cartpole.experiments import get_mean_rewards
+from cartpole.experiments import get_final_rewards
+from cartpole.experiments import get_params_best
 
 import utils
 
-def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
+def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
         max_iters=5000, epoch=50, test_iters=1):
     """
     Run the learning algorithm on CartPole and return the number of
@@ -83,10 +87,6 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
     with open(file_name, "wb") as f:
         dill.dump(data, f)
 
-def get_params_custom():
-    params = []
-    return params
-
 def get_params_gridsearch():
     update_frequencies = [1,50,200]
     behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -105,154 +105,9 @@ def get_params_gridsearch():
         params.append(d)
     return params
 
-def get_params_nondiverged(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    d = data.loc[data['MaxS'] > 1]
-    params = [dict(zip(d.index.names,p)) for p in tqdm(d.index)]
-    for d in params:
-        d["directory"] = os.path.join(directory, "l%f"%d['lam'])
-    return params
-
-def get_mean_rewards(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    mr_data = data.apply(lambda row: row.MRS/row.Count, axis=1)
-    return mr_data
-
-def get_final_rewards(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
-    return fr_data
-
-def get_ucb1_mean_reward(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    count_total = data['Count'].sum()
-    def ucb1(row):
-        a = row.MRS/row.Count
-        b = np.sqrt(2*np.log(count_total)/row.Count)
-        return a+b
-    score = data.apply(ucb1, axis=1)
-    return score
-
-def get_ucb1_final_reward(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    count_total = data['Count'].sum()
-    def ucb1(row):
-        a = row.MaxS/row.Count
-        b = np.sqrt(2*np.log(count_total)/row.Count)
-        return a+b
-    score = data.apply(ucb1, axis=1)
-    return score
-
-def get_params_best(directory, score_function, n=1):
-    score = score_function(directory)
-    if n == -1:
-        n = score.size
-    if n == 1:
-        params = [score.idxmax()]
-    else:
-        score = score.sort_values(ascending=False)
-        params = itertools.islice(score.index, n)
-    return [dict(zip(score.index.names,p)) for p in params]
-
-def run(n=1, proc=10, directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-    print("Gridsearch")
-    print("Environment: ", ENV_NAME)
-    print("Directory: %s" % directory)
-    print("Determines the best combination of parameters by the number of iterations needed to learn.")
-
-    params = get_params_gridsearch()
-    for p in params:
-        p['directory'] = directory
-    params = itertools.repeat(params, n)
-    params = itertools.chain(*list(params))
-    params = list(params)
-    random.shuffle(params)
-    utils.cc(_run_trial, params, proc=proc, keyworded=True)
-
-def run2(n=1, m=10, proc=10, directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-
-    params1 = get_params_best(directory, get_ucb1_mean_reward, m)
-    params2 = get_params_best(directory, get_ucb1_final_reward, m)
-    params = params1+params2
-
-    print("Further refining gridsearch, exploring with UCB1")
-    print("Environment: ", ENV_NAME)
-    #print("Parameters: %s" % params)
-    print("Directory: %s" % directory)
-
-    for p in params:
-        p['directory'] = directory
-    params = itertools.repeat(params, n)
-    params = itertools.chain(*list(params))
-    utils.cc(_run_trial, params, proc=proc, keyworded=True)
-
-def run3(n=100, proc=10, params=None, directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-
-    params1 = get_params_best(directory, get_mean_rewards, 1)
-    params2 = get_params_best(directory, get_final_rewards, 1)
-    params = params1+params2
-
-    print("Running more trials with the best parameters found so far.")
-    print("Environment: ", ENV_NAME)
-    print("Parameters: %s" % params)
-    print("Directory: %s" % directory)
-
-    for p in params:
-        p['directory'] = directory
-    params = itertools.repeat(params, n)
-    params = itertools.chain(*list(params))
-    utils.cc(_run_trial, params, proc=proc, keyworded=True)
-
-def parse_results3(directory=None):
-    """
-    Parse the CSV files produced by run2, and generates a graph.
-    """
-    import re
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part3")
-
-    subdirs = [os.path.join(directory,f) for f in os.listdir(directory) if os.path.isdir(os.path.join(directory,f))]
-    for d in subdirs:
-        data = utils.parse_graphing_results(d)
-
-        # Plot
-        for sigma in data.keys():
-            mean = data[sigma][1]
-            std = data[sigma][2]
-            x = data[sigma][0]
-            label = "sigma-%s"%sigma
-            plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.5)
-            plt.plot(x, mean, label=label)
-        plt.legend(loc='best')
-        plt.xlabel("Episodes")
-        plt.ylabel("Reward")
-        plt.savefig(os.path.join(d, "graph.png"))
-        plt.close()
-
-        for sigma in data.keys():
-            mean = data[sigma][1]
-            x = data[sigma][0]
-            label = "sigma-%s"%sigma
-            plt.plot(x, mean, label=label)
-        plt.legend(loc='best')
-        plt.xlabel("Episodes")
-        plt.ylabel("Reward")
-        plt.savefig(os.path.join(d, "graph2.png"))
-        plt.close()
-
 def plot_final_rewards(directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
+        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
     # Check that the experiment has been run and that results are present
     if not os.path.isdir(directory):
         print("No results to parse in %s" % directory)
@@ -275,8 +130,6 @@ def plot_final_rewards(directory=None):
     each_plot = ['sigma', 'lam', 'upd_freq']
     file_name_template = 'graph-s{sigma}-l{lam}-u{upd_freq}.png'
     label_template = 'epsilon={eps_t}'
-
-    print(all_params)
 
     p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
     # Loop over plots
@@ -340,14 +193,3 @@ def plot_best(directory=None):
 
     return data
 
-def run_all(proc=10):
-    part1_dir = os.path.join(utils.get_results_directory(),__name__,"part1")
-    part2_dir = os.path.join(utils.get_results_directory(),__name__,"part2")
-
-    run(directory=part1_dir, proc=proc)
-    parse_results(directory=part1_dir)
-    run2(directory=part2_dir, proc=proc)
-    parse_results2(directory=part2_dir)
-
-if __name__ == "__main__":
-    run_all()
