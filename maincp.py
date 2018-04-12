@@ -103,16 +103,16 @@ if __name__ == "__main__":
     #    #d = exp1.parse_results2(labels=['ttl','mr','fr'])
     #    d = exp1.parse_results2(labels=['mr','fr'])
     #d = exp1.parse_results2(labels=['mr','fr'])
-    #graph.graph_all()
 
     utils.set_results_directory("/home/ml/hhuang63/results/final")
+    #graph.graph_all()
     #exp3.run(n=5,proc=20)
-    #while True:
-    #    exp3.run2(n=1,m=100,proc=20)
+    while True:
+        exp1.run2(n=1,m=100,proc=20)
     #exp3.run3(n=100,proc=20)
     #exp3.plot_final_rewards()
     #exp3.plot_best()
-    exp1.plot_final_rewards()
+    #exp1.plot_final_rewards()
     #exp1.plot_best()
     #d = exp3.get_params_ucb1_mean_reward()
     #exp3.parse_results()

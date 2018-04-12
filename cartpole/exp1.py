@@ -165,154 +165,43 @@ def run(n=1, proc=10, directory=None):
     random.shuffle(params)
     utils.cc(_run_trial, params, proc=proc, keyworded=True)
 
-def parse_results(directory=None):
-    # Check that the experiment has been run and that results are present
+def run2(n=1, m=10, proc=10, directory=None):
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-    if not os.path.isdir(directory):
-        print("No results to parse in %s" % directory)
-        return None
 
-    data = utils.parse_results_pkl(directory, 190)
-    keys = data.index.names
-    all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
+    params1 = get_params_best(directory, get_ucb1_mean_reward, m)
+    params2 = get_params_best(directory, get_ucb1_final_reward, m)
+    params = params1+params2
 
-    # Graph stuff
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
-    p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
-    for s,l in itertools.product(all_params['sigma'],all_params['lam']):
-        fig, ax = plt.subplots(1,1)
-        ax.set_ylim([0,210])
-        ax.set_xlabel('Behaviour epsilon')
-        ax.set_ylabel('Cumulative reward')
-        p_dict['sigma'] = s
-        p_dict['lam'] = l
-        for te in all_params['eps_t']:
-            x = []
-            y = []
-            p_dict['eps_t'] = te
-            for be in sorted(all_params['eps_b']):
-                p_dict['eps_b'] = be
-                #p_dict = cast_params(p_dict)
-                m = 0
-                for a in all_params['alpha']:
-                    p_dict['alpha'] = a
-                    param_vals = tuple([p_dict[k] for k in keys])
-                    val = data.loc[param_vals, 'MaxS']/data.loc[param_vals, 'Count']
-                    m = max(m,val)
-                x.append(be)
-                y.append(m)
-                #ax.set_prop_cycle(monochrome)
-            ax.plot(x,y,label='epsilon=%f'%te)
-        ax.legend(loc='best')
-        file_name = os.path.join(directory, 'graph-s%f-l%f.png' % (s,l))
-        print("Saving file %s" % file_name)
-        plt.savefig(file_name)
-        plt.close(fig)
-
-    return data
-
-def get_non_diverged(directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-    data = utils.parse_results_pkl(directory, 190)
-    d = data.loc[data['MaxS'] > 50]
-    params = [dict(zip(d.index.names,p)) for p in tqdm(d.index)]
-    return params
-
-def get_best_params1(directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-    data = utils.parse_results_pkl(directory, 190)
-    #params = [('lam', 1.0), ('sigma', 1.0), ('eps_b', 0.4)]
-    #for k,v in params:
-    #    data = data.xs(v, level=k)
-    #ttl_data = data.apply(lambda row: row.TTLS/row.Count, axis=1)
-    #best_ttl_params = ttl_data.idxmin()
-    mr_data = data.apply(lambda row: row.MRS/row.Count, axis=1)
-    best_mr_params = mr_data.idxmax()
-    fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
-    best_fr_params = fr_data.idxmax()
-    print("Done computing best parameters")
-    #print("Best ttl params: ", best_ttl_params)
-    #print("Best ttl: ", ttl_data.loc[best_ttl_params])
-    print("Best mr params: ", best_mr_params)
-    print("Best mr: ", mr_data.loc[best_mr_params])
-    print("Best fr params: ", best_fr_params)
-    print("Best fr: ", fr_data.loc[best_fr_params])
-    keys = data.index.names
-    #best_ttl_params = dict(zip(keys,best_ttl_params))
-    best_mr_params = dict(zip(keys,best_mr_params))
-    best_fr_params = dict(zip(keys,best_fr_params))
-    #return best_ttl_params, best_mr_params, best_fr_params
-    #best_mr_params.update(params)
-    #best_fr_params.update(params)
-    return best_mr_params, best_fr_params
-
-def run2(n=1000, proc=10, params=None, directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-    if params is None:
-        params = get_best_params1()
-
-    print("Environment: CartPole")
-    print("Parameters: ", params)
-    print("Running with best params found")
+    print("Further refining gridsearch, exploring with UCB1")
+    print("Environment: ", ENV_NAME)
+    #print("Parameters: %s" % params)
     print("Directory: %s" % directory)
 
-    for d in params:
-        d["directory"] = os.path.join(directory, "l%f"%d['lam'])
+    for p in params:
+        p['directory'] = directory
     params = itertools.repeat(params, n)
     params = itertools.chain(*list(params))
-    params = list(params)
-    random.shuffle(params)
     utils.cc(_run_trial, params, proc=proc, keyworded=True)
 
-def parse_results2(directory=None, params=None, labels=None):
-    """
-    Parse the CSV files produced by run2, and generates a graph.
-    """
-    import re
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
+def run3(n=100, proc=10, params=None, directory=None):
     if directory is None:
-        input_directory = os.path.join(utils.get_results_directory(),__name__,"part1")
-        output_directory = os.path.join(utils.get_results_directory(),__name__,"part1")
-    else:
-        input_directory = directory
-        output_directory = directory
-    if params is None:
-        params = get_best_params1()
-    if labels is None:
-        labels = ['']*len(params)
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
 
-    print("Computing series with given params")
-    data = [utils.get_series_with_params_pkl(input_directory, p) for p in params]
+    params1 = get_params_best(directory, get_mean_rewards, 1)
+    params2 = get_params_best(directory, get_final_rewards, 1)
+    params = params1+params2
 
-    # Plot
-    fig, ax = plt.subplots(1,1)
-    ax.set_ylim([0,210])
-    ax.set_xlabel("Episodes")
-    ax.set_ylabel("Reward")
-    for l,d in zip(labels,data):
-        print(np.array(d).shape)
-        mean = np.mean(d,axis=0)
-        std = np.std(d,axis=0)
-        x = [50*i for i in range(len(mean))] # FIXME temporary solution because lazy
-        plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.5)
-        ax.plot(x, mean, label=l)
-        print(mean)
-    ax.legend(loc='best')
-    file_name = os.path.join(output_directory, "graph.png")
-    plt.savefig(file_name)
-    plt.close(fig)
-    print("Saved file: ", file_name)
-    return data
+    print("Running more trials with the best parameters found so far.")
+    print("Environment: ", ENV_NAME)
+    print("Parameters: %s" % params)
+    print("Directory: %s" % directory)
+
+    for p in params:
+        p['directory'] = directory
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    utils.cc(_run_trial, params, proc=proc, keyworded=True)
 
 def plot_final_rewards(directory=None):
     if directory is None:
