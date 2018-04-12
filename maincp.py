@@ -13,6 +13,7 @@ import cartpole.utils
 from cartpole import exp1
 #from cartpole import exp2
 from cartpole import exp3
+from cartpole import graph
 import utils
 
 # When taking an action, there's an equal probability of moving in any direction that isn't the opposite direction
@@ -93,16 +94,27 @@ if __name__ == "__main__":
 
     #import shutil
     #shutil.rmtree("/NOBACKUP/hhuang63/results3/test")
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test2")
     #exp3.run_all(20)
-    utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-03-28_16-58-42")
+    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/2018-03-28_16-58-42")
     #exp1.run(n=1,proc=10)
     #d = exp1.parse_results()
-    while True:
-        exp1.run2(n=5,proc=10)
-        #d = exp1.parse_results2(labels=['ttl','mr','fr'])
-        d = exp1.parse_results2(labels=['mr','fr'])
-    #exp3.run(n=1,proc=15)
+    #while True:
+    #    exp1.run2(n=5,proc=10)
+    #    #d = exp1.parse_results2(labels=['ttl','mr','fr'])
+    #    d = exp1.parse_results2(labels=['mr','fr'])
+    #d = exp1.parse_results2(labels=['mr','fr'])
+    #graph.graph_all()
+
+    utils.set_results_directory("/home/ml/hhuang63/results/final")
+    #exp3.run(n=5,proc=20)
+    #while True:
+    #    exp3.run2(n=1,m=100,proc=20)
+    #exp3.run3(n=100,proc=20)
+    #exp3.plot_final_rewards()
+    #exp3.plot_best()
+    exp1.plot_final_rewards()
+    #exp1.plot_best()
+    #d = exp3.get_params_ucb1_mean_reward()
     #exp3.parse_results()
     #exp3.run2(n=100,proc=10)
     #exp3.parse_results2()

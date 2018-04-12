@@ -12,31 +12,30 @@ import operator
 import pprint
 import sys
 import traceback
+import random
 
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
 
 import cartpole 
+from cartpole import ENV_NAME
+from cartpole import MAX_REWARD
+from cartpole import MIN_REWARD
+from cartpole import LEARNED_REWARD
+
 from cartpole import features
 from cartpole import utils
 
 import utils
 
-discount_factors = ['1', '0.9', '0.8']
-update_frequencies = ['50', '200', '500']
-behaviour_epsilons = ['1', '0.5', '0.1', '0']
-target_epsilons = ['0.1', '0.05', '0']
-#sigmas = ['0', '0.25', '0.5', '0.75', '1']
-sigmas = ['0', '0.5', '1']
-trace_factors = ['0.01', '0.25', '0.5', '0.75', '0.99']
-
 def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
-        stop_when_learned=False, max_iters=5000, max_trials=None):
+        max_iters=5000, epoch=50, test_iters=1):
     """
     Run the learning algorithm on CartPole and return the number of
     iterations needed to learn the task.
     """
-    env_name = 'CartPole-v0'
+    args = locals()
+    env_name = ENV_NAME
     e = gym.make(env_name)
 
     action_space = np.array([0,1])
@@ -53,214 +52,162 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
     agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
     agent.set_target_policy("%.3f-epsilon"%eps_t)
 
-    file_name,num = utils.find_next_free_file(
-            "g%.3f-u%d-eb%.3f-et%.3f-s%.3f-l%.3f" % (gamma, upd_freq, eps_b, eps_t, sigma, lam),
-            "csv", directory)
-    if max_trials is not None and num >= max_trials:
-        # Delete the created file, since we're not using it anymore
-        os.remove(file_name) # TODO: This doesn't seem to be working
-        return None
-    with open(file_name, 'w') as csvfile:
-        csvwriter = csv.writer(csvfile, delimiter=',')
+    rewards = []
+    steps_to_learn = None
+    try:
         for iters in range(0,max_iters+1):
             if iters % upd_freq == 0:
                 agent.update_weights()
-            if iters % 50 == 0:
-                agent.set_target_policy("0-epsilon")
-                rewards = agent.test(e, 100)
-                agent.set_target_policy("%.3f-epsilon"%eps_t)
-                csvwriter.writerow([iters, rewards])
-                csvfile.flush()
-                if stop_when_learned and np.mean(rewards) >= 190:
-                    break
+            if epoch is not None:
+                if iters % epoch == 0:
+                    r = agent.test(e, test_iters, render=False, processors=1)
+                    rewards.append(r)
+                    if np.mean(r) >= LEARNED_REWARD:
+                        if steps_to_learn is None:
+                            steps_to_learn = iters
+            else:
+                if r >= LEARNED_REWARD:
+                    if steps_to_learn is None:
+                        steps_to_learn = iters
             agent.run_episode(e)
-    return iters
+    except ValueError as e:
+        tqdm.write(str(e))
+        tqdm.write("Diverged")
 
-def _worker(g,u,eb,et,s,l, directory=None):
-    try:
-        g = float(g)
-        u = int(u)
-        eb = float(eb)
-        et = float(et)
-        s = float(s)
-        l = float(l)
-        m = None
-        return _run_trial(g,u,eb,et,s,l,directory,False,5000,m)
-    except KeyboardInterrupt:
-        return None
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    # If it diverged at some point...
+    while len(rewards) < (max_iters/epoch)+1: 
+        rewards.append([0]*test_iters)
 
-def _worker2(params, directory=None):
-    try:
-        g,u,eb,et,s,l = params
-        g = float(g)
-        u = int(u)
-        eb = float(eb)
-        et = float(et)
-        s = float(s)
-        l = float(l)
-        m = None
-        return _run_trial(g,u,eb,et,s,l,directory,False,5000,m)
-    except KeyboardInterrupt:
-        return None
-    #except Exception as e:
-    #    traceback.print_exc()
-    #    raise e
+    data = (args, rewards, steps_to_learn)
+    file_name, file_num = utils.find_next_free_file("results", "pkl", directory)
+    with open(file_name, "wb") as f:
+        dill.dump(data, f)
 
-def run(n=10, proc=10, directory=None):
+def get_params_custom():
+    params = []
+    return params
+
+def get_params_gridsearch():
+    update_frequencies = [1,50,200]
+    behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    target_eps = [0, 0.1, 0.2, 0.3, 0.4]
+    trace_factors = [0, 0.25, 0.5, 0.75, 1]
+    sigmas = [0, 0.25, 0.5, 0.75, 1]
+
+    keys = ['upd_freq','eps_b', 'eps_t', 'sigma','lam']
+    params = []
+    for vals in itertools.product(update_frequencies, behaviour_eps, target_eps, sigmas, trace_factors):
+        d = dict(zip(keys,vals))
+        d['gamma'] = 0.9
+        d['epoch'] = 50
+        d['max_iters'] = 5000
+        d['test_iters'] = 1
+        params.append(d)
+    return params
+
+def get_params_nondiverged(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    d = data.loc[data['MaxS'] > 1]
+    params = [dict(zip(d.index.names,p)) for p in tqdm(d.index)]
+    for d in params:
+        d["directory"] = os.path.join(directory, "l%f"%d['lam'])
+    return params
+
+def get_mean_rewards(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    mr_data = data.apply(lambda row: row.MRS/row.Count, axis=1)
+    return mr_data
+
+def get_final_rewards(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
+    return fr_data
+
+def get_ucb1_mean_reward(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    count_total = data['Count'].sum()
+    def ucb1(row):
+        a = row.MRS/row.Count
+        b = np.sqrt(2*np.log(count_total)/row.Count)
+        return a+b
+    score = data.apply(ucb1, axis=1)
+    return score
+
+def get_ucb1_final_reward(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    count_total = data['Count'].sum()
+    def ucb1(row):
+        a = row.MaxS/row.Count
+        b = np.sqrt(2*np.log(count_total)/row.Count)
+        return a+b
+    score = data.apply(ucb1, axis=1)
+    return score
+
+def get_params_best(directory, score_function, n=1):
+    score = score_function(directory)
+    if n == -1:
+        n = score.size
+    if n == 1:
+        params = [score.idxmax()]
+    else:
+        score = score.sort_values(ascending=False)
+        params = itertools.islice(score.index, n)
+    return [dict(zip(score.index.names,p)) for p in params]
+
+def run(n=1, proc=10, directory=None):
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")
     print("Gridsearch")
-    print("Environment: CartPole")
+    print("Environment: ", ENV_NAME)
     print("Directory: %s" % directory)
     print("Determines the best combination of parameters by the number of iterations needed to learn.")
 
-    discount_factors = ['0.9']
-    update_frequencies = ['1', '50', '200']
-    behaviour_epsilons = ['0', '0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '1']
-    target_epsilons = ['0', '0.1', '0.2', '0.3']
-    sigmas = ['0', '0.25', '0.5', '0.75', '1']
-    trace_factors = ['0', '0.25', '0.5', '0.75', '1']
-
-    indices = pandas.MultiIndex.from_product(
-            [discount_factors, update_frequencies, behaviour_epsilons,
-                target_epsilons, sigmas, trace_factors],
-            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon",
-                "Target Epsilon", "Sigma", "Lambda"])
-    data = pandas.DataFrame(index=indices, columns=range(n))
-
-    params = itertools.repeat(list(indices), n)
-    params = itertools.chain.from_iterable(params)
-    params = zip(params, itertools.repeat(directory))
-    utils.cc(_worker2, params, proc=proc, keyworded=False)
-
-def parse_results(directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-    # Check that the experiment has been run and that results are present
-    if not os.path.isdir(directory):
-        print("No results to parse in %s" % directory)
-        return None
-
-    files = [f for f in os.listdir(directory) if
-            os.path.isfile(os.path.join(directory,f))]
-    all_params = utils.collect_file_params(files)
-    data = utils.parse_results(directory)
-
-    vals = [v for k,v in all_params.items()]
-    keys = data.index.names
-    print(all_params)
-
-    # Graph stuff
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
-    p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
-    for s,l in itertools.product(all_params['s'], all_params['l']):
-        fig, ax = plt.subplots(1,1)
-        ax.set_ylim([0,200])
-        ax.set_xlabel('Behaviour epsilon')
-        ax.set_ylabel('Cumulative reward')
-        p_dict['s'] = s # sigma
-        p_dict['l'] = l # trace factor
-        for te in all_params['et']:
-            x = []
-            y = []
-            p_dict['et'] = te
-            for be in sorted(all_params['eb']):
-                p_dict['eb'] = be
-                param_vals = tuple([p_dict[k] for k in keys])
-
-                x.append(float(be))
-                y.append(data.loc[param_vals, 'MRS']/data.loc[param_vals, 'Count'])
-                #ax.set_prop_cycle(monochrome)
-            ax.plot(x,y,label='epsilon=%s'%te)
-        ax.legend(loc='best')
-        file_name = os.path.join(directory, 'graph-s%s-l%s.png' % (s,l))
-        print("Saving file %s" % file_name)
-        plt.savefig(file_name)
-        plt.close(fig)
-
-    return data
-
-def get_best_params1(directory=None, sigma=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-    return utils.get_best_params_by_sigma(directory, learned_threshold=190)
-
-def run2(n=1000, proc=10, params=None, directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part2")
-    if params is None:
-        params = get_best_params1()
-
-    print("Environment: CartPole")
-    print("Parameters: %s" % params)
-    print("Running with best params found")
-    print("Directory: %s" % directory)
-
-    params = [p for p in params.values()]
+    params = get_params_gridsearch()
     for p in params:
         p['directory'] = directory
     params = itertools.repeat(params, n)
     params = itertools.chain(*list(params))
-    utils.cc(_worker, params, proc=proc, keyworded=True)
+    params = list(params)
+    random.shuffle(params)
+    utils.cc(_run_trial, params, proc=proc, keyworded=True)
 
-def parse_results2(directory=None):
-    """
-    Parse the CSV files produced by run2, and generates a graph.
-    """
-    import re
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
+def run2(n=1, m=10, proc=10, directory=None):
     if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part2")
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
 
-    data = utils.parse_graphing_results(directory)
+    params1 = get_params_best(directory, get_ucb1_mean_reward, m)
+    params2 = get_params_best(directory, get_ucb1_final_reward, m)
+    params = params1+params2
 
-    # Plot
-    for sigma in data.keys():
-        mean = data[sigma][1]
-        std = data[sigma][2]
-        x = data[sigma][0]
-        label = "sigma-%s"%sigma
-        plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.5)
-        plt.plot(x, mean, label=label)
-    plt.legend(loc='best')
-    plt.xlabel("Episodes")
-    plt.ylabel("Reward")
-    plt.savefig(os.path.join(directory, "graph.png"))
-    return data
+    print("Further refining gridsearch, exploring with UCB1")
+    print("Environment: ", ENV_NAME)
+    #print("Parameters: %s" % params)
+    print("Directory: %s" % directory)
+
+    for p in params:
+        p['directory'] = directory
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    utils.cc(_run_trial, params, proc=proc, keyworded=True)
 
 def run3(n=100, proc=10, params=None, directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part3")
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
 
-    print("Running Cartpole with a range of lambdas and sigmas.")
-    print("Saving results in %s" % directory)
+    params1 = get_params_best(directory, get_mean_rewards, 1)
+    params2 = get_params_best(directory, get_final_rewards, 1)
+    params = params1+params2
 
-    discount_factors = ['0.9']
-    update_frequencies = ['50']
-    behaviour_epsilons = ['0.5']
-    target_epsilons = ['0.5']
-    sigmas = ['0', '0.25', '0.5', '0.75', '1']
-    trace_factors = ['0', '0.25', '0.5', '0.75', '1']
+    print("Running more trials with the best parameters found so far.")
+    print("Environment: ", ENV_NAME)
+    print("Parameters: %s" % params)
+    print("Directory: %s" % directory)
 
-    keys = ["g","u","eb","et","s","l"]
-    params = []
-    for vals in itertools.product(discount_factors, update_frequencies,
-            behaviour_epsilons, target_epsilons, sigmas, trace_factors):
-        d = dict(zip(keys,vals))
-        d["directory"] = os.path.join(directory, "l%f"%float(d['l']))
-        params.append(d)
+    for p in params:
+        p['directory'] = directory
     params = itertools.repeat(params, n)
     params = itertools.chain(*list(params))
-    utils.cc(_worker, params, proc=proc, keyworded=True)
+    utils.cc(_run_trial, params, proc=proc, keyworded=True)
 
 def parse_results3(directory=None):
     """
@@ -302,6 +249,96 @@ def parse_results3(directory=None):
         plt.ylabel("Reward")
         plt.savefig(os.path.join(d, "graph2.png"))
         plt.close()
+
+def plot_final_rewards(directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
+    # Check that the experiment has been run and that results are present
+    if not os.path.isdir(directory):
+        print("No results to parse in %s" % directory)
+        return None
+
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = data.apply(lambda row: row.MRS/row.Count, axis=1)
+    keys = data.index.names
+    all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
+
+    # Graph stuff
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    x_axis = 'eps_b'
+    best_of = []
+    average = []
+    each_curve = ['eps_t']
+    each_plot = ['sigma', 'lam', 'upd_freq']
+    file_name_template = 'graph-s{sigma}-l{lam}-u{upd_freq}.png'
+    label_template = 'epsilon={eps_t}'
+
+    print(all_params)
+
+    p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
+    # Loop over plots
+    for p1 in itertools.product(*[all_params[k] for k in each_plot]):
+        for k,v in zip(each_plot,p1):
+            p_dict[k] = v
+        fig, ax = plt.subplots(1,1)
+        ax.set_ylim([MIN_REWARD,MAX_REWARD])
+        ax.set_xlabel('Behaviour epsilon')
+        ax.set_ylabel('Cumulative reward')
+        # Loop over curves in a plot
+        for p2 in itertools.product(*[sorted(all_params[k]) for k in each_curve]):
+            for k,v in zip(each_curve,p2):
+                p_dict[k] = v
+            x = []
+            y = []
+            for px in sorted(all_params[x_axis]):
+                p_dict[x_axis] = px
+                param_vals = tuple([p_dict[k] for k in keys])
+                x.append(float(px))
+                y.append(data.loc[param_vals])
+            ax.plot(x,y,label=label_template.format(**p_dict))
+        ax.legend(loc='best')
+        file_name = os.path.join(directory, file_name_template.format(**p_dict))
+        print("Saving file %s" % file_name)
+        plt.savefig(file_name)
+        plt.close(fig)
+
+    return data
+
+def plot_best(directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
+
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    data = []
+
+    fig, ax = plt.subplots(1,1)
+    ax.set_ylim([MIN_REWARD,MAX_REWARD])
+    ax.set_xlabel('Behaviour epsilon')
+    ax.set_ylabel('Cumulative reward')
+    for score_function in [get_mean_rewards, get_final_rewards]:
+        params = get_params_best(directory, score_function, 1)[0]
+        print("Plotting params: ", params)
+
+        series = utils.get_series_with_params_pkl(directory, params)
+        mean = np.mean(series, axis=0)
+        std = np.std(series, axis=0)
+        epoch = params['epoch']
+        x = [i*epoch for i in range(len(mean))]
+        data.append((x, mean, std, 'LSTD'))
+        ax.plot(x,mean,label='LSTD')
+    ax.legend(loc='best')
+    file_name = os.path.join(directory, 'graph-best.png')
+    print("Saving file %s" % file_name)
+    plt.savefig(file_name)
+    plt.close(fig)
+
+    return data
 
 def run_all(proc=10):
     part1_dir = os.path.join(utils.get_results_directory(),__name__,"part1")

@@ -141,11 +141,10 @@ def collect_file_params_pkl(file_names):
     for file_name in tqdm(file_names):
         with open(file_name, 'rb') as f:
             try:
-                x = dill.load(f)
+                file_params,_,_ = dill.load(f)
             except Exception as e:
                 tqdm.write("Skipping %s" % file_name)
                 continue
-        file_params = x[0]
         if file_params is None:
             continue
         for k,v in file_params.items():
@@ -482,11 +481,51 @@ def parse_graphing_results_pkl(directory):
         results[s] = (t,mean,std)
     return results
 
-def get_series_with_params_pkl(directory, params):
-    # Collect all file names
+def get_series_with_params_pkl(directory, params,
+        series_filename="series.pkl",
+        parsedfiles_filename="sparsedfiles.pkl"):
+    series_fullpath = os.path.join(directory, series_filename)
+    parsedfiles_fullpath = os.path.join(directory, parsedfiles_filename)
+
+    # Get a list of all files that have already been parsed
+    if os.path.isfile(parsedfiles_fullpath):
+        with open(parsedfiles_fullpath, 'rb') as f:
+            parsed_files = dill.load(f)
+    else:
+        parsed_files = set([series_fullpath, parsedfiles_fullpath])
+
+    # Get a list of all files in existence, and remove those that have already
+    # been parsed
     files = []
-    for d,_,file_names in tqdm(os.walk(directory), desc='Collecting all files'):
-        files += [os.path.join(d,f) for f in tqdm(file_names, desc='From directory %s'%directory) if os.path.isfile(os.path.join(d,f))]
+    for d,_,file_names in tqdm(os.walk(directory)):
+        files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
+    if len(files) != len(parsed_files):
+        files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
+    else:
+        files = []
+
+    # A place to store our results
+    if os.path.isfile(series_fullpath):
+        # A dataframe already exists, so load that instead of making a new one
+        print("File exists. Loading...")
+        data = pandas.read_pickle(series_fullpath)
+        keys = data.index.names
+        all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
+    else:
+        # Create new Series
+        # Parse set of parameters
+        all_params = collect_file_params_pkl(files)
+        del all_params['directory']
+        kv_pairs = list(all_params.items())
+        vals = [v for k,v in kv_pairs]
+        keys = [k for k,v in kv_pairs]
+
+        indices = pandas.MultiIndex.from_product(vals, names=keys)
+
+        data = pandas.Series(data=None, index=indices, dtype=object)
+        data.sort_index(inplace=True)
+        #for i in tqdm(data.index, desc="Setting default value"):
+        #    data.loc[i] = []
 
     # Load results from all pickle files
     types = {'sigma': float,
@@ -512,27 +551,52 @@ def get_series_with_params_pkl(directory, params):
                 return False
         return True
     try:
-        data = []
         count = 0
         for file_name in tqdm(files, desc="Parsing File Contents"):
             with open(os.path.join(directory,file_name), 'rb') as f:
                 try:
                     file_params, series, time_to_learn = dill.load(f)
+                    if type(file_params) is not dict:
+                        continue
                 except Exception as e:
                     tqdm.write("Skipping %s" % file_name)
+                    parsed_files.add(os.path.join(directory,file_name))
                     continue
-
-            # Check that params match
-            if not params_equal(params, file_params):
-                continue
-            series = np.mean(series, axis=1)
-            data.append(series)
+            file_params = cast_params(file_params)
+            index = tuple([file_params[k] for k in data.index.names])
+            series = np.mean(series, axis=1).tolist()
+            if type(data.loc[index]) is not list:
+                data.loc[index] = []
+            data.loc[index].append(series)
             count += 1
+            parsed_files.add(os.path.join(directory,file_name))
     except KeyboardInterrupt as e:
         pass 
+    except Exception as e:
+        print(e)
+        print(file_params)
+        print(index)
+        return data
     print('%d files parsed' % count)
 
-    return data
+    if len(files) > 0:
+        with open(series_fullpath, 'wb') as f:
+            dill.dump(data, f)
+            print("Saved ", series_fullpath)
+        with open(parsedfiles_fullpath, 'wb') as f:
+            dill.dump(parsed_files, f)
+            print("Saved ", parsedfiles_fullpath)
+    keys = [k for k in params.keys()]
+    vals = [params[k] for k in keys]
+    if len(params) == 0:
+        dataxs = data
+    else:
+        dataxs = data.xs(vals, level=keys)
+    all_series = []
+    for i in dataxs.index:
+        all_series += dataxs.loc[i]
+    return all_series
+    #return np.mean(all_series,axis=0), np.std(all_series,axis=0)
 
 def sort_data(data):
     """
