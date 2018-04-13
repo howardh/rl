@@ -523,6 +523,23 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def run_all(proc=20):
+    # SGD
+    experiments.run1(exp2, n=1, proc=proc)
+    for _ in range(100):
+        experiments.run2(exp2, n=1, m=100, proc=proc)
+    experiments.run3(exp2, n=100, proc=proc)
+    exp2.plot_final_rewards()
+
+    # LSTD
+    experiments.run1(exp3, n=1, proc=proc)
+    for _ in range(100):
+        experiments.run2(exp3, n=1, m=100, proc=proc)
+    experiments.run3(exp3, n=100, proc=proc)
+    exp3.plot_final_rewards()
+
+    graph.graph_all()
+
 if __name__ == "__main__":
     args = parse_args()
     if args.parse_results:

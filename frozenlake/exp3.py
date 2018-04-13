@@ -91,56 +91,91 @@ def get_params_gridsearch():
         params.append(d)
     return params
 
-def run(n=1, proc=10, directory=None):
+def plot_final_rewards(directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
+    # Check that the experiment has been run and that results are present
+    if not os.path.isdir(directory):
+        print("No results to parse in %s" % directory)
+        return None
+
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = data.apply(lambda row: row.MRS/row.Count, axis=1)
+    keys = data.index.names
+    all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
+
+    # Graph stuff
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    x_axis = 'eps_b'
+    best_of = []
+    average = []
+    each_curve = ['eps_t']
+    each_plot = ['sigma', 'lam', 'upd_freq']
+    file_name_template = 'graph-s{sigma}-l{lam}-u{upd_freq}.png'
+    label_template = 'epsilon={eps_t}'
+
+    p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
+    # Loop over plots
+    for p1 in itertools.product(*[all_params[k] for k in each_plot]):
+        for k,v in zip(each_plot,p1):
+            p_dict[k] = v
+        fig, ax = plt.subplots(1,1)
+        ax.set_ylim([MIN_REWARD,MAX_REWARD])
+        ax.set_xlabel('Behaviour epsilon')
+        ax.set_ylabel('Cumulative reward')
+        # Loop over curves in a plot
+        for p2 in itertools.product(*[sorted(all_params[k]) for k in each_curve]):
+            for k,v in zip(each_curve,p2):
+                p_dict[k] = v
+            x = []
+            y = []
+            for px in sorted(all_params[x_axis]):
+                p_dict[x_axis] = px
+                param_vals = tuple([p_dict[k] for k in keys])
+                x.append(float(px))
+                y.append(data.loc[param_vals])
+            ax.plot(x,y,label=label_template.format(**p_dict))
+        ax.legend(loc='best')
+        file_name = os.path.join(directory, file_name_template.format(**p_dict))
+        print("Saving file %s" % file_name)
+        plt.savefig(file_name)
+        plt.close(fig)
+
+    return data
+
+def plot_best(directory=None):
     if directory is None:
         directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-    print("Gridsearch")
-    print("Environment: ", ENV_NAME)
-    print("Directory: %s" % directory)
-    print("Determines the best combination of parameters by the number of iterations needed to learn.")
 
-    params = get_params_gridsearch()
-    for p in params:
-        p['directory'] = directory
-    params = itertools.repeat(params, n)
-    params = itertools.chain(*list(params))
-    params = list(params)
-    random.shuffle(params)
-    utils.cc(_run_trial, params, proc=proc, keyworded=True)
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
 
-def run2(n=1, m=10, proc=10, directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
+    data = []
 
-    params1 = get_params_best(directory, get_ucb1_mean_reward, m)
-    params2 = get_params_best(directory, get_ucb1_final_reward, m)
-    params = params1+params2
+    fig, ax = plt.subplots(1,1)
+    ax.set_ylim([MIN_REWARD,MAX_REWARD])
+    ax.set_xlabel('Behaviour epsilon')
+    ax.set_ylabel('Cumulative reward')
+    for score_function in [get_mean_rewards, get_final_rewards]:
+        params = get_params_best(directory, score_function, 1)[0]
+        print("Plotting params: ", params)
 
-    print("Further refining gridsearch, exploring with UCB1")
-    print("Environment: ", ENV_NAME)
-    print("Directory: %s" % directory)
+        series = utils.get_series_with_params_pkl(directory, params)
+        mean = np.mean(series, axis=0)
+        std = np.std(series, axis=0)
+        epoch = params['epoch']
+        x = [i*epoch for i in range(len(mean))]
+        data.append((x, mean, std, 'LSTD'))
+        ax.plot(x,mean,label='LSTD')
+    ax.legend(loc='best')
+    file_name = os.path.join(directory, 'graph-best.png')
+    print("Saving file %s" % file_name)
+    plt.savefig(file_name)
+    plt.close(fig)
 
-    for p in params:
-        p['directory'] = directory
-    params = itertools.repeat(params, n)
-    params = itertools.chain(*list(params))
-    utils.cc(_run_trial, params, proc=proc, keyworded=True)
+    return data
 
-def run3(n=100, proc=10, params=None, directory=None):
-    if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
-
-    params1 = get_params_best(directory, get_mean_rewards, 1)
-    params2 = get_params_best(directory, get_final_rewards, 1)
-    params = params1+params2
-
-    print("Running more trials with the best parameters found so far.")
-    print("Environment: ", ENV_NAME)
-    print("Parameters: %s" % params)
-    print("Directory: %s" % directory)
-
-    for p in params:
-        p['directory'] = directory
-    params = itertools.repeat(params, n)
-    params = itertools.chain(*list(params))
-    utils.cc(_run_trial, params, proc=proc, keyworded=True)
