@@ -2,185 +2,126 @@ import numpy as np
 import gym
 import itertools
 import pandas
-from pathos.multiprocessing import ProcessPool
-from pathos.threading import ThreadPool
-import multiprocessing
 import dill
 import csv
 import os
 from tqdm import tqdm
+import time
+import operator
+import pprint
+import sys
+import traceback
+import random
 
-from agent.discrete_agent import TabularAgent
-from agent.lstd_agent import LSTDAgent
+from frozenlake import ENV_NAME
+from frozenlake import MAX_REWARD
+from frozenlake import MIN_REWARD
+from frozenlake import LEARNED_REWARD
 
-import frozenlake
-from frozenlake import features
-from frozenlake import utils
+import utils
 
-"""
-FrozenLake
 
-Tabular gridsearch
-LSTD gridsearch
-"""
+def get_params_nondiverged(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    d = data.loc[data['MaxS'] > 1]
+    params = [dict(zip(d.index.names,p)) for p in tqdm(d.index)]
+    for d in params:
+        d["directory"] = os.path.join(directory, "l%f"%d['lam'])
+    return params
 
-def exp1():
+def get_mean_rewards(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    mr_data = data.apply(lambda row: row.MRS/row.Count, axis=1)
+    return mr_data
+
+def get_final_rewards(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
+    return fr_data
+
+def get_ucb1_mean_reward(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    count_total = data['Count'].sum()
+    def ucb1(row):
+        a = row.MRS/row.Count
+        b = np.sqrt(2*np.log(count_total)/row.Count)
+        return a+b
+    score = data.apply(ucb1, axis=1)
+    return score
+
+def get_ucb1_final_reward(directory):
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    count_total = data['Count'].sum()
+    def ucb1(row):
+        a = row.MaxS/row.Count
+        b = np.sqrt(2*np.log(count_total)/row.Count)
+        return a+b
+    score = data.apply(ucb1, axis=1)
+    return score
+
+def get_params_best(directory, score_function, n=1):
+    score = score_function(directory)
+    if n == -1:
+        n = score.size
+    if n == 1:
+        params = [score.idxmax()]
+    else:
+        score = score.sort_values(ascending=False)
+        params = itertools.islice(score.index, n)
+    return [dict(zip(score.index.names,p)) for p in params]
+
+
+def run1(exp, n=1, proc=10, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
     print("Gridsearch")
-    print("Environment: FrozenLake4x4")
-    print("Parameter space:")
-    print("""
-            \tDiscount factor: 
-            \tLearning rate:
-            \tOptimizer:
-    """)
-    print("Determines the best combination of parameters by comparing the performance over time of several algorithms.")
-    discount_factors = ['1', '0.99', '0.9']
-    learning_rates = ['0.1', '0.01', '0.001']
-    optimizers = ['Optimizer.RMS_PROP', 'Optimizer.NONE']
-    indices = pandas.MultiIndex.from_product(
-            [discount_factors, learning_rates, optimizers],
-            names=["Discount Factor", "Learning Rate", "Optimizer"])
-    data = pandas.DataFrame(
-            np.zeros([len(discount_factors)*len(learning_rates)*len(optimizers),1]),
-            index=indices)
+    print("Environment: ", exp.ENV_NAME)
+    print("Directory: %s" % directory)
+    print("Determines the best combination of parameters by the number of iterations needed to learn.")
 
-    def run_trial(gamma, alpha, op):
-        env_name = 'FrozenLake-v0'
-        e = gym.make(env_name)
+    params = exp.get_params_gridsearch()
+    for p in params:
+        p['directory'] = directory
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    params = list(params)
+    random.shuffle(params)
+    utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
-        action_space = np.array([0,1,2,3])
-        agent = TabularAgent(
-                action_space=action_space,
-                discount_factor=gamma,
-                learning_rate=alpha,
-                optimizer=op)
+def run2(exp, n=1, m=10, proc=10, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
 
-        for iters in range(1,10000):
-            agent.run_episode(e)
-            if iters % 500 == 0:
-                rewards = agent.test(e, 100, max_steps=1000)
-                if np.mean(rewards) >= 0.78:
-                    break
-        return iters
+    params1 = get_params_best(directory, get_ucb1_mean_reward, m)
+    params2 = get_params_best(directory, get_ucb1_final_reward, m)
+    params = params1+params2
 
-    def foo(i):
-        g,a,o = indices[i]
-        g = float(g)
-        a = float(a)
-        o = eval(o)
-        results = [run_trial(g,a,o) for _ in range(10)]
-        print(indices[i])
-        print(results)
-        return np.mean(results)
-    pool = ProcessPool(3)
-    output = pool.imap(foo, range(len(indices)))
-    for i,x in enumerate(output):
-        g,a,o = indices[i]
-        data.loc[g,a,o] = x
-    print(data)
-    return data
+    print("Further refining gridsearch, exploring with UCB1")
+    print("Environment: ", exp.ENV_NAME)
+    #print("Parameters: %s" % params)
+    print("Directory: %s" % directory)
 
-def exp1_2():
-    print("Environment: FrozenLake4x4")
-    print("Params:")
-    print("""
-            \tDiscount factor: 1
-            \tLearning rate: 0.1
-            \tOptimizer: RMS Prop
-    """)
+    for p in params:
+        p['directory'] = directory
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
-    env_name = 'FrozenLake-v0'
-    e = gym.make(env_name)
+def run3(exp, n=100, proc=10, params=None, directory=None):
+    if directory is None:
+        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
 
-    action_space = np.array([0,1,2,3])
-    agent = TabularAgent(action_space=action_space, discount_factor=1, learning_rate=0.1, optimizer=Optimizer.RMS_PROP)
+    params1 = get_params_best(directory, get_mean_rewards, 1)
+    params2 = get_params_best(directory, get_final_rewards, 1)
+    params = params1+params2
 
-    file_num = 0
-    while os.path.isfile("data/%d.csv" % file_num):
-        file_num += 1
-    with open('data/%d.csv' % file_num, 'w') as csvfile:
-        csvwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-        iters = 0
-        all_rewards = []
-        while iters < 100000:
-            iters += 1
-            agent.run_episode(e)
-            if iters % 500 == 0:
-                print(iters)
-                rewards = agent.test(e, 100, max_steps=1000)
-                all_rewards.append(rewards)
-                csvwriter.writerow(rewards)
-                csvfile.flush()
-                print(rewards)
-    return data
+    print("Running more trials with the best parameters found so far.")
+    print("Environment: ", exp.ENV_NAME)
+    print("Parameters: %s" % params)
+    print("Directory: %s" % directory)
 
-def exp2():
-    print("Gridsearch")
-    print("Environment: FrozenLake4x4")
-    print("Parameter space:")
-    print("""
-            \tDiscount factor 
-            \tUpdate frequency
-            \tBehaviour epsilon
-            \tTarget epsilon
-    """)
-    discount_factors = ['1', '0.99', '0.9']
-    update_frequencies = ['100', '300', '500', '1000']
-    behaviour_epsilon = ['0', '0.05', '0.1', '0.2', '0.5', '1']
-    target_epsilon = ['0', '0.01', '0.05', '0.1']
-    indices = pandas.MultiIndex.from_product(
-            [discount_factors, update_frequencies, behaviour_epsilon, target_epsilon],
-            names=["Discount Factor", "Update Frequency", "Behaviour Epsilon", "Target Epsilon"])
-    data = pandas.DataFrame(
-            np.zeros([len(discount_factors)*len(update_frequencies)*len(behaviour_epsilon)*len(target_epsilon),1]),
-            index=indices)
-
-    def run_trial(gamma, upd_freq, eps_b, eps_t):
-        env_name = 'FrozenLake-v0'
-        e = gym.make(env_name)
-
-        action_space = np.array([0,1,2,3])
-        agent = LSTDAgent(
-                action_space=action_space,
-                num_features=frozenlake.features.ONE_HOT_NUM_FEATURES,
-                discount_factor=gamma,
-                features=frozenlake.features.one_hot,
-                use_importance_sampling=False,
-                sigma=1
-        )
-        agent.set_behaviour_policy("%s-epsilon" % eps_b)
-        agent.set_target_policy("%s-epsilon" % eps_t)
-
-        for iters in range(1,1000):
-            agent.run_episode(e)
-            if iters % upd_freq == 0:
-                agent.update_weights()
-                rewards = agent.test(e, 100)
-                if np.mean(rewards) >= 0.78:
-                    break
-        return iters
-
-    def foo(i):
-        g,n,eb,et = indices[i]
-        g = float(g)
-        n = int(n)
-        eb = float(eb)
-        et = float(et)
-        results = [run_trial(g,n,eb,et) for _ in range(10)]
-        return np.mean(results)
-    pool = ProcessPool(processes=3)
-    output = pool.imap(foo, range(len(indices)))
-    for i,x in enumerate(output):
-        g,n,eb,et = indices[i]
-        data.loc[g,n,eb,et] = x
-    print(data)
-    return data
-
-def run_all():
-    #gridsearch_results = exp1()
-    #gridsearch_results.to_csv("gridsearch.csv")
-    exp1_2()
-    #exp2()
-
-if __name__ == "__main__":
-    run_all()
+    for p in params:
+        p['directory'] = directory
+    params = itertools.repeat(params, n)
+    params = itertools.chain(*list(params))
+    utils.cc(exp.run_trial, params, proc=proc, keyworded=True)

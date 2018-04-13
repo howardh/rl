@@ -19,24 +19,21 @@ import frozenlake
 import frozenlake.features
 import frozenlake.utils
 
+from frozenlake import ENV_NAME
+from frozenlake import MAX_REWARD
+from frozenlake import MIN_REWARD
+from frozenlake import LEARNED_REWARD
+
 import utils
 
-#discount_factors = ['1', '0.9', '0.5']
-discount_factors = ['1']
-update_frequencies = ['50', '200', '500']
-behaviour_epsilons = ['1', '0.5', '0']
-target_epsilons = ['0', '0.01', '0.05']
-sigmas = ['0', '0.5', '1']
-#trace_factors = ['0.01', '0.25', '0.5', '0.75', '0.99']
-trace_factors = ['0.25', '0.75']
-
-def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
-        directory=None, max_iters=5000, test_iters=1):
+def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
+        directory=None, max_iters=5000, epoch=50, test_iters=1):
     """
     Run the learning algorithm on FrozenLake and return the number of
     iterations needed to learn the task.
     """
-    env_name = 'FrozenLake-v0'
+    args = locals()
+    env_name = ENV_NAME
     e = gym.make(env_name)
 
     action_space = np.array([0,1,2,3])
@@ -76,10 +73,6 @@ def _run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
     with open(file_name, "wb") as f:
         dill.dump(data, f)
 
-def get_params_custom():
-    params = []
-    return params
-
 def get_params_gridsearch():
     update_frequencies = [1,50,200]
     behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -97,55 +90,6 @@ def get_params_gridsearch():
         d['test_iters'] = 1
         params.append(d)
     return params
-
-def get_params_nondiverged(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    d = data.loc[data['MaxS'] > 1]
-    params = [dict(zip(d.index.names,p)) for p in tqdm(d.index)]
-    for d in params:
-        d["directory"] = os.path.join(directory, "l%f"%d['lam'])
-    return params
-
-def get_mean_rewards(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    mr_data = data.apply(lambda row: row.MRS/row.Count, axis=1)
-    return mr_data
-
-def get_final_rewards(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
-    return fr_data
-
-def get_ucb1_mean_reward(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    count_total = data['Count'].sum()
-    def ucb1(row):
-        a = row.MRS/row.Count
-        b = np.sqrt(2*np.log(count_total)/row.Count)
-        return a+b
-    score = data.apply(ucb1, axis=1)
-    return score
-
-def get_ucb1_final_reward(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
-    count_total = data['Count'].sum()
-    def ucb1(row):
-        a = row.MaxS/row.Count
-        b = np.sqrt(2*np.log(count_total)/row.Count)
-        return a+b
-    score = data.apply(ucb1, axis=1)
-    return score
-
-def get_params_best(directory, score_function, n=1):
-    score = score_function(directory)
-    if n == -1:
-        n = score.size
-    if n == 1:
-        params = [score.idxmax()]
-    else:
-        score = score.sort_values(ascending=False)
-        params = itertools.islice(score.index, n)
-    return [dict(zip(score.index.names,p)) for p in params]
 
 def run(n=1, proc=10, directory=None):
     if directory is None:
@@ -174,7 +118,6 @@ def run2(n=1, m=10, proc=10, directory=None):
 
     print("Further refining gridsearch, exploring with UCB1")
     print("Environment: ", ENV_NAME)
-    #print("Parameters: %s" % params)
     print("Directory: %s" % directory)
 
     for p in params:
@@ -201,13 +144,3 @@ def run3(n=100, proc=10, params=None, directory=None):
     params = itertools.repeat(params, n)
     params = itertools.chain(*list(params))
     utils.cc(_run_trial, params, proc=proc, keyworded=True)
-
-def run_all(proc=10):
-    run1(proc=proc)
-    run2(proc=proc)
-    parse_results2()
-    run3(proc=proc)
-    parse_results3()
-
-if __name__ == "__main__":
-    run_all()

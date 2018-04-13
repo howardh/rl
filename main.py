@@ -9,10 +9,10 @@ from agent.lstd_agent import LSTDAgent
 import frozenlake
 from frozenlake import features
 from frozenlake import utils
-from frozenlake import exp1
+#from frozenlake import exp1
 from frozenlake import exp2
 from frozenlake import exp3
-#from frozenlake import exp4
+from frozenlake import experiments
 from frozenlake import graph
 
 import frozenlake8x8
@@ -260,18 +260,24 @@ def lstd_control_8x8():
             if np.mean(rewards) >= 0.99:
                 break
 
-if __name__ == "__main__":
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/final")
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test3")
-    #utils.set_results_directory("/NOBACKUP/hhuang63/results3/test")
+def run_all(proc=20):
+    # SGD
+    experiments.run1(exp2, n=1, proc=proc)
+    for _ in range(100):
+        experiments.run2(exp2, n=1, m=100, proc=proc)
+    experiments.run3(exp2, n=10, proc=proc)
+    exp1.plot_final_rewards()
 
-    utils.set_results_directory("/home/ml/hhuang63/results/2018-03-28_18-55-41")
-    exp3.run1(n=1,proc=3)
-    #exp3.run3(proc=10)
-    #exp3.parse_results3()
-    #exp2.run1(proc=10)
-    #exp2.run2(proc=1)
-    #exp2.parse_results2()
-    #exp2.parse_results3()
-    #p = exp3.get_best_params1()
-    #graph.graph_all()
+    # LSTD
+    experiments.run1(exp3, n=1, proc=proc)
+    for _ in range(100):
+        experiments.run2(exp3, n=1, m=100, proc=proc)
+    experiments.run3(exp3, n=10, proc=proc)
+    exp3.plot_final_rewards()
+
+    graph.graph_all()
+
+if __name__ == "__main__":
+    utils.set_results_directory("/home/ml/hhuang63/results/final")
+
+    run_all(proc=15)
