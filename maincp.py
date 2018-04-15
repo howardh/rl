@@ -12,6 +12,7 @@ import cartpole.utils
 
 from cartpole import exp1
 from cartpole import exp3
+from cartpole import exp4
 from cartpole import experiments
 from cartpole import graph
 import utils
@@ -104,11 +105,16 @@ def run_all(proc=20):
     graph.graph_all()
 
 if __name__ == "__main__":
-    utils.set_results_directory("/home/ml/hhuang63/results/final")
+    #utils.set_results_directory("/home/ml/hhuang63/results/final")
+    utils.set_results_directory("/home/ml/hhuang63/results/test")
+    #experiments.run1(exp1, n=1, proc=20)
+    #while True:
+    #    experiments.run2(exp1, n=1, m=100, proc=20)
     #run_all(proc=20)
 
     #while True:
     #    experiments.run2(exp1, n=1, m=100, proc=20)
-    #exp1.plot_best()
-    #graph.graph_all()
-    experiments.run3(exp1, n=100, proc=proc)
+    exp1.plot_best()
+    #graph.graph_sgd()
+    #graph.graph_lstd()
+    #experiments.run3(exp1, n=100, proc=proc)

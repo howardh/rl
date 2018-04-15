@@ -4,8 +4,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import frozenlake.exp2
-import frozenlake.exp3
+import mountaincar.exp2
+import mountaincar.exp3
 import utils
 
 def graph_all(directory=None):
@@ -16,8 +16,8 @@ def graph_all(directory=None):
 
     print("Graphing data...")
 
-    data2 = frozenlake.exp2.plot_best()
-    data3 = frozenlake.exp3.plot_best()
+    data2 = mountaincar.exp2.plot_best()
+    data3 = mountaincar.exp3.plot_best()
     data = data1+data3
 
     fig = plt.figure()

@@ -22,75 +22,29 @@ from cartpole import LEARNED_REWARD
 from cartpole import features
 from cartpole import utils
 from cartpole import experiments
+from cartpole import exp1
 from cartpole.experiments import get_mean_rewards
 from cartpole.experiments import get_final_rewards
 from cartpole.experiments import get_params_best
 
 import utils
 
-def run_trial(gamma, alpha, eps_b, eps_t, sigma, lam, directory=None,
-        max_iters=5000, epoch=50, test_iters=1):
-    """
-    Run the learning algorithm on CartPole and return the number of
-    iterations needed to learn the task.
-    """
-    args = locals()
-    env_name = 'CartPole-v0'
-    e = gym.make(env_name)
+run_trial = exp1.run_trial
 
-    action_space = np.array([0,1])
-    agent = LinearAgent(
-            action_space=action_space,
-            learning_rate=alpha,
-            num_features=cartpole.features.IDENTITY_NUM_FEATURES,
-            discount_factor=gamma,
-            features=cartpole.features.identity2,
-            trace_factor=lam,
-            sigma=sigma
-    )
-    agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
-    agent.set_target_policy("%.3f-epsilon"%eps_t)
+get_directory = exp1.get_directory
 
-    rewards = []
-    steps_to_learn = None
-    try:
-        for iters in range(0,max_iters+1):
-            if epoch is not None:
-                if iters % epoch == 0:
-                    r = agent.test(e, test_iters, render=False, processors=1)
-                    rewards.append(r)
-                    if np.mean(r) >= 190:
-                        if steps_to_learn is None:
-                            steps_to_learn = iters
-            else:
-                if r >= 190:
-                    if steps_to_learn is None:
-                        steps_to_learn = iters
-            agent.run_episode(e)
-    except ValueError as e:
-        tqdm.write(str(e))
-        tqdm.write("Diverged")
-
-    while len(rewards) < (max_iters/epoch)+1: # Means it diverged at some point
-        rewards.append([0]*test_iters)
-
-    data = (args, rewards, steps_to_learn)
-    file_name, file_num = utils.find_next_free_file("results", "pkl", directory)
-    with open(file_name, "wb") as f:
-        dill.dump(data, f)
-
-def get_directory():
-    return os.path.join(utils.get_results_directory(),__name__,"part1")
-
-def get_params_custom():
-    params = []
-    return params
+def get_params_best(directory, score_function, n=1):
+    out0 = cartpole.experiments.get_params_best(
+            directory, score_function, n, {'sigma': 0.0})
+    out1 = cartpole.experiments.get_params_best(
+            directory, score_function, n, {'sigma': 1.0})
+    return out0+out1
 
 def get_params_gridsearch():
     behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
     target_eps = [0, 0.1, 0.2, 0.3, 0.4]
     trace_factors = [0, 0.25, 0.5, 0.75, 1]
-    sigmas = [0, 0.25, 0.5, 0.75, 1]
+    sigmas = [0, 1]
     learning_rate = np.logspace(np.log10(10),np.log10(.0001),num=16,endpoint=True,base=10).tolist()
     #learning_rate = np.logspace(np.log10(.001),np.log10(.00001),num=7,endpoint=True,base=10).tolist()
 
@@ -107,6 +61,7 @@ def get_params_gridsearch():
     return params
 
 def plot_final_rewards(directory=None):
+    raise NotImplementedError()
     if directory is None:
         directory=get_directory()
     # Check that the experiment has been run and that results are present
@@ -180,21 +135,21 @@ def plot_best(directory=None):
 
     fig, ax = plt.subplots(1,1)
     ax.set_ylim([MIN_REWARD,MAX_REWARD])
-    ax.set_xlabel('Behaviour epsilon')
+    ax.set_xlabel('Episodes')
     ax.set_ylabel('Cumulative reward')
     for score_function in [get_mean_rewards, get_final_rewards]:
-        params = get_params_best(directory, score_function, 1)[0]
-        print("Plotting params: ", params)
+        for params in get_params_best(directory, score_function, 1):
+            print("Plotting params: ", params)
 
-        series = utils.get_series_with_params_pkl(directory, params)
-        mean = np.mean(series, axis=0)
-        std = np.std(series, axis=0)
-        epoch = params['epoch']
-        x = [i*epoch for i in range(len(mean))]
-        data.append((x, mean, std, 'SGD'))
-        ax.plot(x,mean,label='SGD')
+            series = utils.get_series_with_params_pkl(directory, params)
+            mean = np.mean(series, axis=0)
+            std = np.std(series, axis=0)
+            epoch = params['epoch']
+            x = [i*epoch for i in range(len(mean))]
+            data.append((x, mean, std, 'SGD sigma=%s'%params['sigma']))
+            ax.plot(x,mean,label='SGD sigma=%s'%params['sigma'])
     ax.legend(loc='best')
-    file_name = os.path.join(directory, 'graph-best.png')
+    file_name = os.path.join(directory, 'graph-best4.png')
     print("Saving file %s" % file_name)
     plt.savefig(file_name)
     plt.close(fig)

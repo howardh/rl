@@ -73,7 +73,7 @@ def get_params_best(directory, score_function, n=1):
 
 def run1(exp, n=1, proc=10, directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
+        directory=exp.get_directory()
     print("Gridsearch")
     print("Environment: ", exp.ENV_NAME)
     print("Directory: %s" % directory)
@@ -90,7 +90,7 @@ def run1(exp, n=1, proc=10, directory=None):
 
 def run2(exp, n=1, m=10, proc=10, directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
+        directory=exp.get_directory()
 
     params1 = get_params_best(directory, get_ucb1_mean_reward, m)
     params2 = get_params_best(directory, get_ucb1_final_reward, m)
@@ -109,7 +109,7 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
 
 def run3(exp, n=100, proc=10, params=None, directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
+        directory=exp.get_directory()
 
     params1 = get_params_best(directory, get_mean_rewards, 1)
     params2 = get_params_best(directory, get_final_rewards, 1)

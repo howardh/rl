@@ -59,21 +59,28 @@ def get_ucb1_final_reward(directory):
     score = data.apply(ucb1, axis=1)
     return score
 
-def get_params_best(directory, score_function, n=1):
+def get_params_best(directory, score_function, n=1, params={}):
     score = score_function(directory)
+    if len(params) > 0:
+        keys = tuple([k for k in params.keys()])
+        vals = tuple([params[k] for k in keys])
+        score = score.xs(vals,level=keys)
     if n == -1:
         n = score.size
     if n == 1:
-        params = [score.idxmax()]
+        output_params = [score.idxmax()]
     else:
         score = score.sort_values(ascending=False)
-        params = itertools.islice(score.index, n)
-    return [dict(zip(score.index.names,p)) for p in params]
+        output_params = itertools.islice(score.index, n)
+    output_params = [dict(zip(score.index.names,p)) for p in output_params]
+    for p in output_params:
+        p.update(params)
+    return output_params
 
 
 def run1(exp, n=1, proc=10, directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
+        directory=exp.get_directory()
     print("Gridsearch")
     print("Environment: ", exp.ENV_NAME)
     print("Directory: %s" % directory)
@@ -90,10 +97,10 @@ def run1(exp, n=1, proc=10, directory=None):
 
 def run2(exp, n=1, m=10, proc=10, directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
+        directory=exp.get_directory()
 
-    params1 = get_params_best(directory, get_ucb1_mean_reward, m)
-    params2 = get_params_best(directory, get_ucb1_final_reward, m)
+    params1 = exp.get_params_best(directory, get_ucb1_mean_reward, m)
+    params2 = exp.get_params_best(directory, get_ucb1_final_reward, m)
     params = params1+params2
 
     print("Further refining gridsearch, exploring with UCB1")
@@ -109,10 +116,10 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
 
 def run3(exp, n=100, proc=10, params=None, directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
+        directory=exp.get_directory()
 
-    params1 = get_params_best(directory, get_mean_rewards, 1)
-    params2 = get_params_best(directory, get_final_rewards, 1)
+    params1 = exp.get_params_best(directory, get_mean_rewards, 1)
+    params2 = exp.get_params_best(directory, get_final_rewards, 1)
     params = params1+params2
 
     print("Running more trials with the best parameters found so far.")

@@ -17,6 +17,9 @@ from agent.linear_agent import LinearAgent
 import frozenlake
 import frozenlake.features
 import frozenlake.utils
+from frozenlake.experiments import get_mean_rewards
+from frozenlake.experiments import get_final_rewards
+from frozenlake.experiments import get_params_best
 
 from frozenlake import ENV_NAME
 from frozenlake import MAX_REWARD
@@ -68,6 +71,9 @@ def run_trial(alpha, gamma, eps_b, eps_t, sigma, lam,
     with open(file_name, "wb") as f:
         dill.dump(data, f)
 
+def get_directory():
+    return os.path.join(utils.get_results_directory(),__name__,"part1")
+
 def get_params_gridsearch():
     behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
     target_eps = [0, 0.1, 0.2, 0.3, 0.4]
@@ -89,7 +95,7 @@ def get_params_gridsearch():
 
 def plot_final_rewards(directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
+        directory=get_directory()
     # Check that the experiment has been run and that results are present
     if not os.path.isdir(directory):
         print("No results to parse in %s" % directory)
@@ -151,7 +157,7 @@ def plot_final_rewards(directory=None):
 
 def plot_best(directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
+        directory=get_directory()
 
     import matplotlib
     matplotlib.use('Agg')

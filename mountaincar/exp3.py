@@ -15,17 +15,19 @@ import traceback
 import datetime
 import random
 
-from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
 
 import mountaincar 
 import mountaincar.features
 import mountaincar.utils
+from mountaincar.experiments import get_mean_rewards
+from mountaincar.experiments import get_final_rewards
+from mountaincar.experiments import get_params_best
 
-from mountaincar import ENV_NAME
-from mountaincar import MAX_REWARD
-from mountaincar import MIN_REWARD
-from mountaincar import LEARNED_REWARD
+from . import ENV_NAME
+from . import MAX_REWARD
+from . import MIN_REWARD
+from . import LEARNED_REWARD
 
 import utils
 
@@ -86,6 +88,9 @@ def run_trial(discount_factor, initial_value, num_pos,
         traceback.print_exc()
         print("Iterations:`",iters)
 
+def get_directory():
+    return os.path.join(utils.get_results_directory(),__name__,"part1")
+
 def get_params_gridsearch():
     behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
     target_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -110,7 +115,7 @@ def get_params_gridsearch():
 
 def plot_final_rewards(directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),exp.__name__,"part1")
+        directory=get_directory()
     # Check that the experiment has been run and that results are present
     if not os.path.isdir(directory):
         print("No results to parse in %s" % directory)
@@ -168,7 +173,7 @@ def plot_final_rewards(directory=None):
 
 def plot_best(directory=None):
     if directory is None:
-        directory=os.path.join(utils.get_results_directory(),__name__,"part1")
+        directory=get_directory()
 
     import matplotlib
     matplotlib.use('Agg')
