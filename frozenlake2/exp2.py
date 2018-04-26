@@ -105,7 +105,7 @@ def plot_final_rewards(directory=None):
         print("No results to parse in %s" % directory)
         return None
 
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = utils.parse_results(directory, LEARNED_REWARD)
     data = data.apply(lambda row: row.MRS/row.Count, axis=1)
     keys = data.index.names
     all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])

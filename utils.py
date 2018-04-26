@@ -18,6 +18,8 @@ _results_dir = None
 
 lock = threading.Lock()
 
+# File IO
+
 def get_results_directory():
     global _results_dir
     if _results_dir is not None:
@@ -59,84 +61,9 @@ def find_next_free_file(prefix, suffix, directory):
             break
     return path, i
 
-def load_data(directory, pattern=re.compile(r'^.+\.csv$')):
-    import csv
-    import numpy as np
-    files = [f for f in os.listdir(directory) if
-            os.path.isfile(os.path.join(directory,f))]
-
-    # A place to store our results
-    data = []
-    params = dict()
-
-    # Load results from all csv files
-    for file_name in tqdm(files, desc="Parsing File Contents"):
-        regex_result = pattern.match(file_name)
-        if regex_result is None:
-            continue # Skip files that don't match the pattern
-        p = parse_file_name(file_name)
-        for k,v in p.items():
-            if k not in params.keys():
-                params[k] = set()
-            params[k].add(v)
-        with open(os.path.join(directory,file_name), 'r') as csvfile:
-            reader = csv.reader(csvfile, delimiter=',')
-            results = [np.sum(eval(r[1])) for r in reader]
-            data += [results]
-
-    # Remove all incomplete series
-    max_len = max([len(x) for x in data])
-    data = [x for x in data if len(x) == max_len]
-
-    # Compute stuff
-    m = np.mean(data, axis=0)
-    v = np.var(data, axis=0)
-    s = np.std(data, axis=0)
-
-    # Build output
-    output = dict()
-    output['mean'] = m
-    output['std'] = s
-    output['var'] = v
-    output['params'] = params
-
-    return output
-
-def parse_file_name(file_name):
-    pattern = re.compile(r'((?:(?:^|-)(?:[a-zA-Z]+)(?:\.|\d)+)+)-\d+\.csv')
-    regex_result = pattern.match(file_name)
-    if regex_result is None:
-        return None # Should maybe return a descriptive error? Or throw exception?
-
-    # Parse param string
-    param_string = regex_result.group(1)
-    tokens = param_string.split('-')
-    token_pattern = re.compile(r'([a-zA_Z]+)((?:0|[1-9]\d*)(?:\.\d+)?)')
-
-    results = dict()
-    for t in tokens:
-        regex_results = token_pattern.match(t)
-        if regex_results is None:
-            return None # Invalid file name
-        param_name = regex_results.group(1)
-        param_value = regex_results.group(2)
-        results[param_name] = param_value
-
-    return results
+# Data processing
 
 def collect_file_params(file_names):
-    results = dict()
-    for file_name in file_names:
-        file_params = parse_file_name(file_name)
-        if file_params is None:
-            continue
-        for k,v in file_params.items():
-            if k not in results:
-                results[k] = set()
-            results[k].add(v)
-    return results
-
-def collect_file_params_pkl(file_names):
     results = dict()
     for file_name in tqdm(file_names):
         with open(file_name, 'rb') as f:
@@ -205,89 +132,7 @@ def parse_file(file_name, threshold=None, delete_invalid=False):
         times = [epoch*i for i in range(len(means))]
         return (times,series), means, threshold_met
 
-def parse_results(directory, learned_threshold=None):
-    """
-    Given a directory containing the results of experiments as CSV files,
-    compute statistics on the data, and return it as a Pandas dataframe.
-
-    CSV format:
-        Two columns:
-        * Time
-            An integer value, which could represent episode count, step count,
-            or clock time
-        * Rewards
-            A list of floating point values, where each value represents the
-            total reward obtained from each test run. This list may be of any
-            length, and must be wrapped in double quotes.
-    e.g.
-        0,"[0,0,0]"
-        10,"[1,0,0,0,0]"
-        20,"[0,1,0,1,0]"
-        30,"[0,1,1,0,1,0,1]"
-
-    Pandas Dataframe format:
-        Columns:
-        * MRS - Mean Reward Sum
-            Given the graph of the mean testing reward over time, the MRS is
-            the average of these testing rewards over time.
-        * TTLS - Time to Learn Sum
-            The first time step at which the testing reward matches/surpasses the given
-            threshold. Units may be in episodes, steps, or clock time,
-            depending on the units used in the CSV data.
-        * Count
-            Number of trials that were run with the given parameters.
-        Indices:
-            Obtained from the parameters in the file names.
-    """
-    # Check if pickle files are there
-    results_file_name = os.path.join(directory, "results.pkl") 
-    sorted_results_file_name = os.path.join(directory, "sorted_results.pkl") 
-    if os.path.isfile(results_file_name) and os.path.isfile(sorted_results_file_name):
-        print("Data already computed. Loading pickle files.")
-        with open(results_file_name, 'rb') as f:
-            data = dill.load(f)
-        with open(sorted_results_file_name, 'rb') as f:
-            sorted_data = dill.load(f)
-        return data, sorted_data
-
-    # Parse set of parameters
-    files = [f for f in os.listdir(directory) if
-            os.path.isfile(os.path.join(directory,f))]
-    params = collect_file_params(files)
-    param_names = list(params.keys())
-    param_vals = [params[k] for k in param_names]
-
-    # A place to store our results
-    indices = pandas.MultiIndex.from_product(param_vals, names=param_names)
-    data = pandas.DataFrame(0, index=indices, columns=["MRS", "TTLS", "Count"])
-    data['MRS'] = data.MRS.astype(float)
-    data.sortlevel(inplace=True) # Why am I doing this again? Can I replace it with sort_index?
-    #data.sort_index(inplace=True)
-
-    # Load results from all csv files
-    for file_name in tqdm(files, desc="Parsing File Contents"):
-        file_params = parse_file_name(file_name)
-        if file_params is None:
-            tqdm.write("Invalid file (%s). Skipping." % file_name)
-            continue
-        output = parse_file(os.path.join(directory,file_name),
-                learned_threshold)
-        if output is None:
-            tqdm.write("Skipping empty file: %s" % file_name)
-            continue
-        _,mr,ttl = output
-        key = tuple([file_params[k] for k in param_names])
-        data.loc[key,'MRS'] += mr
-        if ttl is None:
-            data.loc[key,'TTLS'] = None
-        else:
-            data.loc[key,'TTLS'] += ttl
-        data.loc[key,'Count'] += 1
-
-    # Return results
-    return data
-
-def parse_results_pkl(directory, learned_threshold=None,
+def parse_results(directory, learned_threshold=None,
         dataframe_filename = "dataframe.pkl",
         parsedfiles_filename = "parsedfiles.pkl"):
     dataframe_fullpath = os.path.join(directory, dataframe_filename)
@@ -320,7 +165,7 @@ def parse_results_pkl(directory, learned_threshold=None,
     else:
         # Create new dataframe
         # Parse set of parameters
-        all_params = collect_file_params_pkl(files)
+        all_params = collect_file_params(files)
         del all_params['directory']
         kv_pairs = list(all_params.items())
         vals = [v for k,v in kv_pairs]
@@ -380,70 +225,9 @@ def parse_results_pkl(directory, learned_threshold=None,
     return data
 
 def parse_graphing_results(directory):
-    # TODO: Remove incomplete series
-    files = [f for f in os.listdir(directory) if
-            os.path.isfile(os.path.join(directory,f))]
-    params = collect_file_params(files)
-    if 's' in set(params.keys()):
-        sigmas = params['s']
-        data = dict()
-        times = dict()
-        for s in sigmas:
-            data[s] = []
-            times[s] = None
-    else:
-        sigmas = None
-        data = []
-        times = None
-    for file_name in tqdm(files, desc="Parsing File Contents"):
-        try:
-            full_path = os.path.join(directory,file_name)
-            series,_,_ = parse_file(full_path)
-            if series is not None:
-                if sigmas is not None:
-                    s = parse_file_name(file_name)['s']
-                    data[s].append(series[1])
-                    if times[s] is None or len(times[s]) < len(series[0]):
-                        times[s] = series[0]
-                else:
-                    data.append(series[1])
-                    if times is None or len(times) < len(series[0]):
-                        times = series[0]
-        except SyntaxError as e:
-            tqdm.write("Broken file: %s" % file_name)
-        except Exception as e:
-            tqdm.write("Broken file: %s" % file_name)
-
-    if sigmas is None:
-        max_len = 0
-        for row in data:
-            max_len = max(max_len, len(row))
-        data = [d for d in data if len(d) == max_len]
-    else:
-        results = dict()
-        for s in data.keys():
-            max_len = 0
-            for row in data[s]:
-                max_len = max(max_len, len(row))
-            data[s] = [d for d in data[s] if len(d) == max_len]
-
-    if sigmas is None:
-        mean = np.mean(data, axis=0)
-        std = np.std(data, axis=0)
-        return times, mean, std
-    else:
-        results = dict()
-        for s in data.keys():
-            mean = np.mean(data[s], axis=0)
-            std = np.std(data[s], axis=0)
-            t = times[s]
-            results[s] = (t,mean,std)
-        return results
-
-def parse_graphing_results_pkl(directory):
     # Load data
     file_names = [os.path.join(directory,f) for f in tqdm(os.listdir(directory)) if os.path.isfile(os.path.join(directory,f))]
-    params = collect_file_params_pkl(file_names)
+    params = collect_file_params(file_names)
     print(params)
     sigmas = params['sigma']
     data = dict()
@@ -481,7 +265,7 @@ def parse_graphing_results_pkl(directory):
         results[s] = (t,mean,std)
     return results
 
-def get_series_with_params_pkl(directory, params,
+def get_series_with_params(directory, params,
         series_filename="series.pkl",
         parsedfiles_filename="sparsedfiles.pkl"):
     series_fullpath = os.path.join(directory, series_filename)
@@ -514,7 +298,7 @@ def get_series_with_params_pkl(directory, params,
     else:
         # Create new Series
         # Parse set of parameters
-        all_params = collect_file_params_pkl(files)
+        all_params = collect_file_params(files)
         del all_params['directory']
         kv_pairs = list(all_params.items())
         vals = [v for k,v in kv_pairs]
@@ -597,7 +381,6 @@ def get_series_with_params_pkl(directory, params,
     for i in dataxs.index:
         all_series += dataxs.loc[i]
     return all_series
-    #return np.mean(all_series,axis=0), np.std(all_series,axis=0)
 
 def sort_data(data):
     """
@@ -642,6 +425,8 @@ def get_best_params_by_sigma(directory, learned_threshold):
         results[s] = params
     return results
 
+# Math
+
 def svd_inv(a):
     #u,s,vt = scipy.sparse.linalg.svds(a,k=int(min(a.shape)/2))
     u,s,vt = scipy.sparse.linalg.svds(a,k=2000)
@@ -662,11 +447,7 @@ def torch_svd_inv(a):
     y = torch.mm(torch.mm(v, torch.diag(sinv)), u.t())
     return y
 
-_solve_start_time = timeit.default_timer()
 def solve(a,b):
-    global _solve_start_time
-    print("Solve time: %s" % (timeit.default_timer()-_solve_start_time))
-    _solve_start_time = timeit.default_timer()
     result = scipy.sparse.linalg.lsqr(a, np.array(b.todense()).reshape((b.shape[0],)))
     return result[0].reshape((b.shape[0],1))
 
@@ -676,6 +457,8 @@ def solve_approx(a,b):
     result = svd_inv(a)*b
     print("Solve time: %s" % (timeit.default_timer()-solve_start_time))
     return result.reshape((b.shape[0],1))
+
+# Multiprocessing
 
 def cc2(fn, params, proc=10, keyworded=False):
     from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED

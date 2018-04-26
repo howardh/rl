@@ -9,7 +9,7 @@ import utils
 
 def get_data(params, directory, label=''):
     print("Parsing plotting data for params: ", params)
-    series = utils.get_series_with_params_pkl(directory, params)
+    series = utils.get_series_with_params(directory, params)
     print("# series: ", len(series))
     mean = np.mean(series, axis=0)
     std = np.std(series, axis=0)

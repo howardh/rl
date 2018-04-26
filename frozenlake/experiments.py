@@ -24,7 +24,7 @@ import utils
 
 
 def get_params_nondiverged(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = utils.parse_results(directory, LEARNED_REWARD)
     d = data.loc[data['MaxS'] > 1]
     params = [dict(zip(d.index.names,p)) for p in tqdm(d.index)]
     for d in params:
@@ -32,17 +32,17 @@ def get_params_nondiverged(directory):
     return params
 
 def get_mean_rewards(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = utils.parse_results(directory, LEARNED_REWARD)
     mr_data = data.apply(lambda row: row.MRS/row.Count, axis=1)
     return mr_data
 
 def get_final_rewards(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = utils.parse_results(directory, LEARNED_REWARD)
     fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
     return fr_data
 
 def get_ucb1_mean_reward(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = utils.parse_results(directory, LEARNED_REWARD)
     count_total = data['Count'].sum()
     def ucb1(row):
         a = row.MRS/row.Count
@@ -52,7 +52,7 @@ def get_ucb1_mean_reward(directory):
     return score
 
 def get_ucb1_final_reward(directory):
-    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = utils.parse_results(directory, LEARNED_REWARD)
     count_total = data['Count'].sum()
     def ucb1(row):
         a = row.MaxS/row.Count
