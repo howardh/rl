@@ -12,6 +12,8 @@ import pprint
 import sys
 import traceback
 import random
+import fabulous
+from fabulous.color import bold
 
 from cartpole import ENV_NAME
 from cartpole import MAX_REWARD
@@ -81,10 +83,13 @@ def get_params_best(directory, score_function, n=1, params={}):
 def run1(exp, n=1, proc=10, directory=None):
     if directory is None:
         directory=exp.get_directory()
-    print("Gridsearch")
-    print("Environment: ", exp.ENV_NAME)
-    print("Directory: %s" % directory)
-    print("Determines the best combination of parameters by the number of iterations needed to learn.")
+    print("-"*80)
+    print("Gridsearch: Run n trials on each combination of parameters.")
+    to_print = [
+            ("Environment",exp.ENV_NAME),
+            ("Directory", directory)]
+    for heading,val in to_print:
+        print("%s: %s" % (bold(heading),val))
 
     params = exp.get_params_gridsearch()
     for p in params:
@@ -103,10 +108,14 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
     params2 = exp.get_params_best(directory, get_ucb1_final_reward, m)
     params = params1+params2
 
+    print("-"*80)
     print("Further refining gridsearch, exploring with UCB1")
-    print("Environment: ", exp.ENV_NAME)
-    #print("Parameters: %s" % params)
-    print("Directory: %s" % directory)
+    to_print = [
+            ("Environment",exp.ENV_NAME),
+            #("Parameters", params),
+            ("Directory", directory)]
+    for heading,val in to_print:
+        print("%s: %s" % (bold(heading),val))
 
     for p in params:
         p['directory'] = directory
@@ -114,18 +123,29 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
     params = itertools.chain(*list(params))
     utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
-def run3(exp, n=100, proc=10, params=None, directory=None):
+def run3(exp, n=100, proc=10, params=None, directory=None,
+        by_mean_reward=True, by_final_reward=True):
     if directory is None:
         directory=exp.get_directory()
+    if params is None:
+        if by_mean_reward:
+            params1 = get_params_best(directory, get_mean_rewards, 1)
+        else:
+            params1 = []
+        if by_final_reward:
+            params2 = get_params_best(directory, get_final_rewards, 1)
+        else:
+            params2 = []
+        params = params1+params2
 
-    params1 = exp.get_params_best(directory, get_mean_rewards, 1)
-    params2 = exp.get_params_best(directory, get_final_rewards, 1)
-    params = params1+params2
-
+    print("-"*80)
     print("Running more trials with the best parameters found so far.")
-    print("Environment: ", exp.ENV_NAME)
-    print("Parameters: %s" % params)
-    print("Directory: %s" % directory)
+    to_print = [
+            ("Environment",exp.ENV_NAME),
+            ("Parameters", params),
+            ("Directory", directory)]
+    for heading,val in to_print:
+        print("%s: %s" % (bold(heading),val))
 
     for p in params:
         p['directory'] = directory

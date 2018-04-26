@@ -24,7 +24,7 @@ from learner.lstd_learner import SparseLSTDLearner
 class LSTDAgent(Agent):
 
     def __init__(self, num_features, action_space, discount_factor,
-            use_traces=False, trace_factor=None,
+            use_traces=False, trace_factor=None, trace_type='accumulating',
             use_importance_sampling=False, sigma=1, features=lambda x: x,
             sparse=False, cuda=False, lspi=False):
         if lspi:
@@ -35,23 +35,15 @@ class LSTDAgent(Agent):
             )
         else:
             if use_traces:
-                if sigma==1:
-                    #print("Initializing LSTD agent with traces")
-                    self.learner = LSTDTraceLearner(
-                            num_features=num_features,
-                            action_space=action_space,
-                            discount_factor=discount_factor,
-                            trace_factor=trace_factor
-                    )
-                else:
-                    #print("Initializing LSTD agent with Q(sigma=%f)" % sigma)
-                    self.learner = LSTDTraceQsLearner(
-                            num_features=num_features,
-                            action_space=action_space,
-                            discount_factor=discount_factor,
-                            trace_factor=trace_factor,
-                            sigma=sigma
-                    )
+                #print("Initializing LSTD agent with Q(sigma=%f)" % sigma)
+                self.learner = LSTDTraceQsLearner(
+                        num_features=num_features,
+                        action_space=action_space,
+                        discount_factor=discount_factor,
+                        trace_factor=trace_factor,
+                        sigma=sigma,
+                        trace_type=trace_type
+                )
             else:
                 #print("Initializing LSTD agent")
                 if sparse:

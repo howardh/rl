@@ -26,6 +26,7 @@ from frozenlake import MAX_REWARD
 from frozenlake import MIN_REWARD
 from frozenlake import LEARNED_REWARD
 
+import graph
 import utils
 
 def run_trial(alpha, gamma, eps_b, eps_t, sigma, lam,
@@ -79,17 +80,18 @@ def get_params_gridsearch():
     target_eps = [0, 0.1, 0.2, 0.3, 0.4]
     trace_factors = [0, 0.25, 0.5, 0.75, 1]
     sigmas = [0, 0.25, 0.5, 0.75, 1]
-    learning_rate = np.logspace(np.log10(10),np.log10(.0001),num=16,endpoint=True,base=10).tolist()
+    #learning_rate = np.logspace(np.log10(10),np.log10(.001),num=13,endpoint=True,base=10).tolist()
+    learning_rate = np.logspace(np.log10(1),np.log10(.001),num=10,endpoint=True,base=10).tolist()
 
     keys = ['eps_b', 'eps_t', 'sigma','lam', 'alpha']
     params = []
     for vals in itertools.product(behaviour_eps, target_eps, sigmas,
             trace_factors, learning_rate):
         d = dict(zip(keys,vals))
-        d['gamma'] = 0.9
-        d['epoch'] = 50
-        d['max_iters'] = 5000
-        d['test_iters'] = 1
+        d['gamma'] = 1
+        d['epoch'] = 10
+        d['max_iters'] = 2000
+        d['test_iters'] = 50
         params.append(d)
     return params
 
@@ -159,32 +161,39 @@ def plot_best(directory=None):
     if directory is None:
         directory=get_directory()
 
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
     data = []
-
-    fig, ax = plt.subplots(1,1)
-    ax.set_ylim([MIN_REWARD,MAX_REWARD])
-    ax.set_xlabel('Behaviour epsilon')
-    ax.set_ylabel('Cumulative reward')
     for score_function in [get_mean_rewards, get_final_rewards]:
         params = get_params_best(directory, score_function, 1)[0]
         print("Plotting params: ", params)
-
-        series = utils.get_series_with_params_pkl(directory, params)
-        mean = np.mean(series, axis=0)
-        std = np.std(series, axis=0)
-        epoch = params['epoch']
-        x = [i*epoch for i in range(len(mean))]
-        data.append((x, mean, std, 'SGD'))
-        ax.plot(x,mean,label='SGD')
-    ax.legend(loc='best')
-    file_name = os.path.join(directory, 'graph-best.png')
-    print("Saving file %s" % file_name)
-    plt.savefig(file_name)
-    plt.close(fig)
+        data.append(graph.get_data(params, directory, label='SGD'))
+    graph.graph_data(data, 'graph-best.png', directory)
 
     return data
 
+def plot_custom(directory=None):
+    if directory is None:
+        directory=get_directory()
+
+    all_params = [
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 0.25},
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.1, 'lam': 0.25},
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.2, 'lam': 0.25},
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.3, 'lam': 0.25}
+    ]
+    all_params = [
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 0.0},
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 0.25},
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 0.5},
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 0.75},
+            {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 1.0}
+    ]
+    data = []
+    for params in all_params:
+        print("Plotting params: ", params)
+        #data.append(graph.get_data(params, directory,
+        #        label='SGD eps_t=%f'%params['eps_t']))
+        data.append(graph.get_data(params, directory,
+                label='SGD lam=%f'%params['lam']))
+    graph.graph_data(data, 'graph-custom.png', directory)
+
+    return data

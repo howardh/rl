@@ -1,35 +1,18 @@
 import os
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import mountaincar
+from mountaincar import MAX_REWARD
+from mountaincar import MIN_REWARD
 
-import mountaincar.exp2
-import mountaincar.exp3
+import graph
+from graph import graph_data
 import utils
 
+def get_directory():
+    return os.path.join(utils.get_results_directory(),__name__)
+
 def graph_all(directory=None):
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__)
-    if not os.path.isdir(directory):
-        os.makedirs(directory, exist_ok=True)
-
-    print("Graphing data...")
-
     data2 = mountaincar.exp2.plot_best()
     data3 = mountaincar.exp3.plot_best()
-    data = data1+data3
-
-    fig = plt.figure()
-
-    # Exp 1
-    for x,mean,std,label in data:
-        plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.3)
-        plt.plot(x, mean, label=label)
-
-    plt.xlabel("Episodes")
-    plt.ylabel("Cumulative Reward")
-    plt.legend()
-    output = os.path.join(directory, "graph.png")
-    plt.savefig(output)
-    print("Graph saved at %s" % output)
+    data = data2+data3
+    graph_data(data, "graph-all.png", get_directory(), ylims=[MIN_REWARD,MAX_REWARD])

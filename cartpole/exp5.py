@@ -31,6 +31,7 @@ from cartpole.experiments import get_mean_rewards
 from cartpole.experiments import get_final_rewards
 from cartpole.experiments import get_params_best
 
+import graph
 import utils
 
 run_trial = exp3.run_trial
@@ -121,31 +122,11 @@ def plot_best(directory=None):
     if directory is None:
         directory=get_directory()
 
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
     data = []
-
-    fig, ax = plt.subplots(1,1)
-    ax.set_ylim([MIN_REWARD,MAX_REWARD])
-    ax.set_xlabel('Episodes')
-    ax.set_ylabel('Cumulative reward')
     for score_function in [get_mean_rewards, get_final_rewards]:
-        for params in get_params_best(directory, score_function, 1):
-            print("Plotting params: ", params)
-
-            series = utils.get_series_with_params_pkl(directory, params)
-            mean = np.mean(series, axis=0)
-            std = np.std(series, axis=0)
-            epoch = params['epoch']
-            x = [i*epoch for i in range(len(mean))]
-            data.append((x, mean, std, 'LSTD sigma=%s'%params['sigma']))
-            ax.plot(x,mean,label='LSTD sigma=%s'%params['sigma'])
-    ax.legend(loc='best')
-    file_name = os.path.join(directory, 'graph-best5.png')
-    print("Saving file %s" % file_name)
-    plt.savefig(file_name)
-    plt.close(fig)
+        params = get_params_best(directory, score_function, 1)[0]
+        print("Plotting params: ", params)
+        data.append(graph.get_data(params, directory, label='LSTD sigma=%s'%params['sigma']))
+    graph.graph_data(data, 'graph-best5.png', directory)
 
     return data

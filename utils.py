@@ -507,7 +507,7 @@ def get_series_with_params_pkl(directory, params,
     # A place to store our results
     if os.path.isfile(series_fullpath):
         # A dataframe already exists, so load that instead of making a new one
-        print("File exists. Loading...")
+        print("File exists. Loading %s..." % series_fullpath)
         data = pandas.read_pickle(series_fullpath)
         keys = data.index.names
         all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
@@ -576,7 +576,8 @@ def get_series_with_params_pkl(directory, params,
         print(e)
         print(file_params)
         print(index)
-        return data
+        print(series)
+        raise e
     print('%d files parsed' % count)
 
     if len(files) > 0:

@@ -27,6 +27,7 @@ from frozenlake import MAX_REWARD
 from frozenlake import MIN_REWARD
 from frozenlake import LEARNED_REWARD
 
+import graph
 import utils
 
 def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
@@ -91,9 +92,9 @@ def get_params_gridsearch():
     for vals in itertools.product(update_frequencies, behaviour_eps, target_eps, sigmas, trace_factors):
         d = dict(zip(keys,vals))
         d['gamma'] = 1
-        d['epoch'] = 50
-        d['max_iters'] = 5000
-        d['test_iters'] = 1
+        d['epoch'] = 10
+        d['max_iters'] = 2000
+        d['test_iters'] = 50
         params.append(d)
     return params
 
@@ -156,32 +157,11 @@ def plot_best(directory=None):
     if directory is None:
         directory=get_directory()
 
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
     data = []
-
-    fig, ax = plt.subplots(1,1)
-    ax.set_ylim([MIN_REWARD,MAX_REWARD])
-    ax.set_xlabel('Behaviour epsilon')
-    ax.set_ylabel('Cumulative reward')
     for score_function in [get_mean_rewards, get_final_rewards]:
         params = get_params_best(directory, score_function, 1)[0]
         print("Plotting params: ", params)
-
-        series = utils.get_series_with_params_pkl(directory, params)
-        mean = np.mean(series, axis=0)
-        std = np.std(series, axis=0)
-        epoch = params['epoch']
-        x = [i*epoch for i in range(len(mean))]
-        data.append((x, mean, std, 'LSTD'))
-        ax.plot(x,mean,label='LSTD')
-    ax.legend(loc='best')
-    file_name = os.path.join(directory, 'graph-best.png')
-    print("Saving file %s" % file_name)
-    plt.savefig(file_name)
-    plt.close(fig)
+        data.append(graph.get_data(params, directory, label='SGD'))
+    graph.graph_data(data, 'graph-best.png', directory)
 
     return data
-

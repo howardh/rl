@@ -64,7 +64,7 @@ class LinearLearner(Learner):
 
 class LinearQsLearner(Learner):
     def __init__(self, num_features, action_space, discount_factor,
-            learning_rate, trace_factor=0, sigma=0):
+            learning_rate, trace_factor=0, sigma=0, trace_type='accumulating'):
         self.cuda = False
         self.num_features = num_features
         self.action_space = action_space
@@ -72,6 +72,9 @@ class LinearQsLearner(Learner):
         self.trace_factor = trace_factor
         self.learning_rate = learning_rate
         self.sigma = sigma
+        if trace_type not in ['replacing', 'accumulating']:
+            raise ValueError("Invalid trace type: %s. Must be either 'replacing' or 'accumulating'" % trace_type)
+        self.trace_type = trace_type
 
         self.target_policy = self.get_epsilon_greedy(0)
         self.behaviour_policy = self.get_epsilon_greedy(0.1)
@@ -125,7 +128,12 @@ class LinearQsLearner(Learner):
             delta = target-output
             self.traces *= lam*gamma
             self.traces *= ((1-sigma)*self.target_policy(state0)[action0] + sigma)
-            self.traces[action0,:] += state_tensor.view(-1)
+            if self.trace_type == 'accumulating':
+                self.traces[action0,:] += state_tensor.view(-1)
+            elif self.trace_type == 'replacing':
+                self.traces[action0,:] = torch.max(self.traces[action0,:],state_tensor.view(-1))
+            else:
+                raise ValueError("Invalid trace type: %s" % self.trace_type)
 
             self.weights += alpha*delta*self.traces
 
@@ -147,7 +155,12 @@ class LinearQsLearner(Learner):
             delta = target-output
             self.traces *= lam*gamma
             self.traces *= ((1-sigma)*self.target_policy(state0)[action0] + sigma)
-            self.traces[action0,:] += state_tensor
+            if self.trace_type == 'accumulating':
+                self.traces[action0,:] += state_tensor.view(-1)
+            elif self.trace_type == 'replacing':
+                self.traces[action0,:] = torch.max(self.traces[action0,:],state_tensor.view(-1))
+            else:
+                raise ValueError("Invalid trace type: %s" % self.trace_type)
 
             self.weights += alpha*delta*self.traces
 

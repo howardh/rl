@@ -11,19 +11,26 @@ import time
 import operator
 
 from agent.discrete_agent import TabularAgent
-from agent.lstd_agent import LSTDAgent
 
 import frozenlake
+import frozenlake.features
+import frozenlake.utils
+from frozenlake.experiments import get_mean_rewards
+from frozenlake.experiments import get_final_rewards
+from frozenlake.experiments import get_params_best
+
+from frozenlake import ENV_NAME
+from frozenlake import MAX_REWARD
+from frozenlake import MIN_REWARD
+from frozenlake import LEARNED_REWARD
+from frozenlake import exp2
+
 import utils
 
-discount_factors = ['1', '0.99', '0.9']
-learning_rates = ['1', '0.1', '0.01', '0.001']
-trace_factors = ['0', '0.8', '0.5', '0.2', '0']
-sigmas = ['0', '0.5', '1']
-
-def _run_trial(gamma, alpha, lam, sigma, directory=None, break_when_learned=False,
-        n_episodes=5000):
-    env_name = 'FrozenLake-v0'
+def run_trial(alpha, gamma, eps_b, eps_t, sigma, lam,
+        directory=None, max_iters=5000, epoch=50, test_iters=1):
+    args = locals()
+    env_name = ENV_NAME
     e = gym.make(env_name)
 
     action_space = np.array([0,1,2,3])
@@ -33,198 +40,126 @@ def _run_trial(gamma, alpha, lam, sigma, directory=None, break_when_learned=Fals
             learning_rate=alpha,
             trace_factor=lam,
             sigma=sigma)
+    agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
+    agent.set_target_policy("%.3f-epsilon"%eps_t)
 
-    file_name = utils.find_next_free_file("g%f-a%f-l%f-s%f" % (gamma, alpha, lam, sigma), "csv", directory)
-    with open(file_name[0], 'w') as csvfile:
-        csvwriter = csv.writer(csvfile, delimiter=',')
-        csvwriter.writerow([0, 0])
-        for iters in range(0,n_episodes+1):
-            if iters % 500 == 0:
-                rewards = agent.test(e, 100)
-                csvwriter.writerow([iters, rewards])
-                csvfile.flush()
-                if break_when_learned and np.mean(rewards) >= 0.78:
-                    break
+    rewards = []
+    steps_to_learn = None
+    try:
+        for iters in range(0,max_iters+1):
+            if epoch is not None and iters % epoch == 0:
+                r = agent.test(e, test_iters, render=False, processors=1)
+                rewards.append(r)
             agent.run_episode(e)
-    return iters
+    except ValueError as e:
+        tqdm.write(str(e))
+        tqdm.write("Diverged")
 
-def _worker(i, directory=None):
-    try:
-        g,a,l,s = i
-        g = float(g)
-        a = float(a)
-        l = float(l)
-        s = float(s)
-        return _run_trial(g,a,l,s,directory)
-    except KeyboardInterrupt:
+    while len(rewards) < (max_iters/epoch)+1: 
+        rewards.append([0]*test_iters)
+
+    data = (args, rewards, steps_to_learn)
+    file_name, file_num = utils.find_next_free_file("results", "pkl", directory)
+    with open(file_name, "wb") as f:
+        dill.dump(data, f)
+
+def get_directory():
+    return os.path.join(utils.get_results_directory(),__name__,"part1")
+
+get_params_gridsearch = exp2.get_params_gridsearch
+
+def plot_final_rewards(directory=None):
+    if directory is None:
+        directory=get_directory()
+    # Check that the experiment has been run and that results are present
+    if not os.path.isdir(directory):
+        print("No results to parse in %s" % directory)
         return None
 
-def _worker2(g,a,l,s,directory=None):
-    try:
-        return _run_trial(g,a,l,s,directory)
-    except KeyboardInterrupt:
-        return None
+    data = utils.parse_results_pkl(directory, LEARNED_REWARD)
+    data = data.apply(lambda row: row.MRS/row.Count, axis=1)
+    keys = data.index.names
+    all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
 
-def run1(n=10, proc=10, directory=None):
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part1")
-
-    print("Gridsearch")
-    print("Environment: FrozenLake4x4")
-    print("Parameter space:")
-    print("\tDiscount factor: %s"%discount_factors)
-    print("\tLearning rate: %s"%learning_rates)
-    print("\tTrace Factor: %s"%[0])
-    print("\tSigmas: %s"%[0])
-    print("Determines the best combination of parameters by the number of iterations needed to learn.")
-    print("Directory: %s" % directory)
-
-    indices = pandas.MultiIndex.from_product(
-            [discount_factors, learning_rates, [0], [0]],
-            names=["Discount Factor", "Learning Rate", "Trace Factor", "Sigma"])
-    data = pandas.DataFrame(index=indices, columns=range(n))
-
-    params = itertools.repeat(list(indices), n)
-    params = itertools.chain.from_iterable(params)
-    params = zip(params, itertools.repeat(directory))
-    utils.cc(_worker, params, proc=proc, keyworded=False)
-
-def get_best_params(directory):
-    data = utils.parse_results(directory, learned_threshold=0.78)
-    mr, ttl = utils.sort_data(data)
-    params = [eval(x) for x in ttl[0][0]]
-    return utils.combine_params_with_names(data,params)
-
-def run2(n=10, proc=10, params=None, directory=None):
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part2")
-    if params is None:
-        params = get_best_params(os.path.join(utils.get_results_directory(),__name__,"part1"))
-
-    print(params)
-        
-    print("Environment: FrozenLake4x4")
-    print("Parameters:")
-    print("""
-            \tDiscount factor: %s
-            \tLearning rate: %s
-    """ % (params['g'], params['a']))
-    print("Runs stuff with the best parameters found during gridsearch")
-
-    params = [params['g'], params['a'], 0, 0, directory]
-    utils.cc(_run_trial, itertools.repeat(params,n), proc=proc, keyworded=False)
-
-def parse_results2(directory=None):
+    # Graph stuff
     import matplotlib
-    matplotlib.use("Agg")
+    matplotlib.use('Agg')
     import matplotlib.pyplot as plt
 
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part2")
+    x_axis = 'eps_b'
+    best_of = []
+    average = []
+    each_curve = ['eps_t']
+    each_plot = ['sigma', 'lam', 'alpha']
+    file_name_template = 'graph-s{sigma}-l{lam}-a{alpha}.png'
+    label_template = 'epsilon={eps_t}'
 
-    data = utils.parse_graphing_results(directory)
-    data = data[list(data.keys())[0]]
+    print(all_params)
 
-    mean = data[1]
-    std = data[2]
-    x = data[0]
-    plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.5)
-    plt.plot(x, mean, label="Tabular")
-    plt.xlabel("Episodes")
-    plt.ylabel("Cumulative Reward")
-    plt.legend()
-    output = os.path.join(directory, "graph.png")
-    plt.savefig(output)
-    print("Graph saved at %s" % output)
-
-    return (mean,std)
-
-def run3(n=10, proc=10, directory=None):
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part3")
-
-    print("Gridsearch")
-    print("Environment: FrozenLake4x4")
-    print("Parameter space:")
-    print("\tDiscount factor: %s"%discount_factors)
-    print("\tLearning rate: %s"%learning_rates)
-    print("\tTrace Factor: %s"%trace_factors)
-    print("\tSigmas: %s"%sigmas)
-    print("Determines the best combination of parameters by the number of iterations needed to learn.")
-    print("Directory: %s" % directory)
-
-    indices = pandas.MultiIndex.from_product(
-            [discount_factors, learning_rates, trace_factors, sigmas],
-            names=["Discount Factor", "Learning Rate", "Trace Factor", "Sigma"])
-    data = pandas.DataFrame(index=indices, columns=range(n))
-
-    params = itertools.repeat(list(indices), n)
-    params = itertools.chain.from_iterable(params)
-    params = zip(params, itertools.repeat(directory))
-    utils.cc(_worker, params, proc=proc, keyworded=False)
-
-def get_best_params3(directory=None):
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part3")
-    return utils.get_best_params_by_sigma(directory,0.78)
-
-def run4(n=100, proc=10, directory=None):
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part4")
-
-    best_params = get_best_params3()
-
-    print("Environment: FrozenLake4x4")
-    print("Parameters: %s" % best_params)
-    print("Running with best params found")
-    print("Directory: %s" % directory)
-
-    params = [p for p in best_params.values()]
-    for p in params:
-        p['directory'] = directory
-    params = itertools.repeat(params, n)
-    params = itertools.chain(*list(params))
-    utils.cc(_worker2, params, proc=proc, keyworded=True)
-
-def parse_results4(directory=None):
-    """
-    Parse the CSV files produced by run4, and generates a graph.
-    """
-    import re
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    if directory is None:
-        directory = os.path.join(utils.get_results_directory(),__name__,"part4")
-
-    data = utils.parse_graphing_results(directory)
-    #return data
-
-    # Plot
-    for sigma in data.keys():
-        mean = data[sigma][1]
-        std = data[sigma][2]
-        x = data[sigma][0]
-        label = "sigma-%s"%sigma
-        plt.fill_between(x, mean-std/2, mean+std/2, alpha=0.5)
-        plt.plot(x, mean, label=label)
-    plt.legend(loc='best')
-    plt.xlabel("Episodes")
-    plt.ylabel("Reward")
-    output = os.path.join(directory, "graph.png")
-    plt.savefig(output)
-    print("Graph saved at %s" % output)
+    p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
+    # Loop over plots
+    for pp in itertools.product(*[all_params[k] for k in each_plot]):
+        for k,v in zip(each_plot,pp):
+            p_dict[k] = v
+        fig, ax = plt.subplots(1,1)
+        ax.set_ylim([MIN_REWARD,MAX_REWARD])
+        ax.set_xlabel('Behaviour epsilon')
+        ax.set_ylabel('Cumulative reward')
+        # Loop over curves in a plot
+        for pc in itertools.product(*[sorted(all_params[k]) for k in each_curve]):
+            for k,v in zip(each_curve,pc):
+                p_dict[k] = v
+            x = []
+            y = []
+            for px in sorted(all_params[x_axis]):
+                p_dict[x_axis] = px
+                vals = []
+                for pb in itertools.product(*[sorted(all_params[k]) for k in best_of]):
+                    for k,v in zip(each_curve,pb):
+                        p_dict[k] = v
+                    param_vals = tuple([p_dict[k] for k in keys])
+                    vals.append(data.loc[param_vals])
+                x.append(float(px))
+                y.append(np.max(vals))
+            ax.plot(x,y,label=label_template.format(**p_dict))
+        ax.legend(loc='best')
+        file_name = os.path.join(directory, file_name_template.format(**p_dict))
+        print("Saving file %s" % file_name)
+        plt.savefig(file_name)
+        plt.close(fig)
 
     return data
 
-def run_all(proc=10):
-    run1(n=10,proc=proc)
-    run2(n=500,proc=proc)
-    parse_results2()
-    run3(n=10,proc=proc)
-    run4(n=1000,proc=proc)
-    parse_results4()
+def plot_best(directory=None):
+    if directory is None:
+        directory=get_directory()
 
-if __name__ == "__main__":
-    run()
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    data = []
+
+    fig, ax = plt.subplots(1,1)
+    ax.set_ylim([MIN_REWARD,MAX_REWARD])
+    ax.set_xlabel('Behaviour epsilon')
+    ax.set_ylabel('Cumulative reward')
+    for score_function in [get_mean_rewards, get_final_rewards]:
+        params = get_params_best(directory, score_function, 1)[0]
+        print("Plotting params: ", params)
+
+        series = utils.get_series_with_params_pkl(directory, params)
+        mean = np.mean(series, axis=0)
+        std = np.std(series, axis=0)
+        epoch = params['epoch']
+        x = [i*epoch for i in range(len(mean))]
+        data.append((x, mean, std, 'SGD'))
+        ax.plot(x,mean,label='SGD')
+    ax.legend(loc='best')
+    file_name = os.path.join(directory, 'graph-best.png')
+    print("Saving file %s" % file_name)
+    plt.savefig(file_name)
+    plt.close(fig)
+
+    return data
+

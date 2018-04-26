@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+torch.set_num_threads(1) # torch.svd takes up multiple cores
 import itertools
 
 import utils
@@ -203,7 +204,7 @@ class LSTDTraceLearner(LSTDLearner):
 
 class LSTDTraceQsLearner(LSTDLearner):
     def __init__(self, num_features, action_space, discount_factor,
-            trace_factor, sigma):
+            trace_factor, sigma, trace_type='accumulating'):
         LSTDLearner.__init__(self, num_features=num_features, action_space=action_space, discount_factor=discount_factor)
 
         if trace_factor is None:
@@ -213,6 +214,7 @@ class LSTDTraceQsLearner(LSTDLearner):
 
         self.trace_factor = trace_factor
         self.sigma = sigma
+        self.trace_type = trace_type
 
         # Trace vector
         self.e_mat = torch.zeros([1,self.num_features*len(self.action_space)])
@@ -244,12 +246,26 @@ class LSTDTraceQsLearner(LSTDLearner):
             pi0 = torch.from_numpy(self.get_target_policy(state0)).float().view(len(self.action_space),1)
             pi1 = torch.from_numpy(self.get_target_policy(state1)).float().view(len(self.action_space),1)
 
-            self.e_mat = lam*gamma*((1-sigma)*pi0.view(-1)[action0]+sigma)*self.e_mat + x0.t()
+            #self.e_mat = lam*gamma*((1-sigma)*pi0.view(-1)[action0]+sigma)*self.e_mat + x0.t()
+            self.e_mat *= lam*gamma*((1-sigma)*pi0.view(-1)[action0]+sigma)
+            if self.trace_type == 'accumulating':
+                self.e_mat += x0.t()
+            elif self.trace_type == 'replacing':
+                self.e_mat = torch.max(self.e_mat, x0.t())
+            else:
+                raise ValueError("Invalid trace type: %s" % self.trace_type)
             self.a_mat += self.e_mat.t() @ (x0-gamma*(sigma*x1 + (1-sigma)*(x1_all @ pi1))).t()
             self.b_mat += reward1*self.e_mat.t()
 
         if terminal:
-            self.e_mat = lam*gamma*((1-sigma)*pi1.view(-1)[action1]+sigma)*self.e_mat + x1.t()
+            #self.e_mat = lam*gamma*((1-sigma)*pi1.view(-1)[action1]+sigma)*self.e_mat + x1.t()
+            self.e_mat *= lam*gamma*((1-sigma)*pi1.view(-1)[action1]+sigma)
+            if self.trace_type == 'accumulating':
+                self.e_mat += x0.t()
+            elif self.trace_type == 'replacing':
+                self.e_mat = torch.max(self.e_mat, x0.t())
+            else:
+                raise ValueError("Invalid trace type: %s" % self.trace_type)
             self.a_mat += self.e_mat.t() @ x1.t()
             self.b_mat += reward2*self.e_mat.t()
 
