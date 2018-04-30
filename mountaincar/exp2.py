@@ -18,11 +18,6 @@ import random
 from agent.linear_agent import LinearAgent
 
 import mountaincar 
-import mountaincar.features
-import mountaincar.utils
-from mountaincar.experiments import get_mean_rewards
-from mountaincar.experiments import get_final_rewards
-from mountaincar.experiments import get_params_best
 
 from . import ENV_NAME
 from . import MAX_REWARD
@@ -109,27 +104,7 @@ def get_params_gridsearch():
         params.append(d)
     return params
 
-def plot_final_rewards(directory=None):
-    if directory is None:
-        directory=get_directory()
-    # Check that the experiment has been run and that results are present
-    if not os.path.isdir(directory):
-        print("No results to parse in %s" % directory)
-        return None
-
-    data = utils.parse_results(directory, LEARNED_REWARD)
-    data = data.apply(lambda row: row.MRS/row.Count, axis=1)
-    keys = data.index.names
-    all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
-
-    #def run_trial(discount_factor, initial_value, num_pos,
-    #        num_vel, behaviour_eps, target_eps, trace_factor, 
-    #        sigma, update_freq, epoch, max_iters, test_iters, directory):
-    # Graph stuff
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
+def get_plot_params_final_rewards():
     x_axis = 'behaviour_eps'
     best_of = []
     average = []
@@ -137,45 +112,11 @@ def plot_final_rewards(directory=None):
     each_plot = ['sigma', 'trace_factor', 'learning_rate']
     file_name_template = 'graph-s{sigma}-l{trace_factor}-a{learning_rate}.png'
     label_template = 'epsilon={target_eps}'
+    xlabel = 'Behaviour Epsilon'
+    ylabel = 'Cumulative reward'
+    return locals()
 
-    p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
-    # Loop over plots
-    for p1 in itertools.product(*[all_params[k] for k in each_plot]):
-        for k,v in zip(each_plot,p1):
-            p_dict[k] = v
-        fig, ax = plt.subplots(1,1)
-        ax.set_ylim([MIN_REWARD,MAX_REWARD])
-        ax.set_xlabel('Behaviour epsilon')
-        ax.set_ylabel('Cumulative reward')
-        # Loop over curves in a plot
-        for p2 in itertools.product(*[sorted(all_params[k]) for k in each_curve]):
-            for k,v in zip(each_curve,p2):
-                p_dict[k] = v
-            x = []
-            y = []
-            for px in sorted(all_params[x_axis]):
-                p_dict[x_axis] = px
-                param_vals = tuple([p_dict[k] for k in keys])
-                x.append(float(px))
-                y.append(data.loc[param_vals])
-            ax.plot(x,y,label=label_template.format(**p_dict))
-        ax.legend(loc='best')
-        file_name = os.path.join(directory, file_name_template.format(**p_dict))
-        print("Saving file %s" % file_name)
-        plt.savefig(file_name)
-        plt.close(fig)
-
-    return data
-
-def plot_best(directory=None):
-    if directory is None:
-        directory=get_directory()
-
-    data = []
-    for score_function in [get_mean_rewards, get_final_rewards]:
-        params = get_params_best(directory, score_function, 1)[0]
-        print("Plotting params: ", params)
-        data.append(graph.get_data(params, directory, label='SGD'))
-    graph.graph_data(data, 'graph-best.png', directory)
-
-    return data
+def get_plot_params_best():
+    file_name = 'graph-best.png'
+    label_template = 'SGD'
+    return locals()

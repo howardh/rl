@@ -18,7 +18,8 @@ def get_data(params, directory, label=''):
 
     return (x, mean, std, label)
 
-def graph_data(data, file_name, directory, ylims=None):
+def graph_data(data, file_name, directory,
+        ylims=None, xlabel='', ylabel=''):
     if directory is None:
         raise ValueError("Invalid directory: ", directory)
     if not os.path.isdir(directory):
@@ -29,8 +30,8 @@ def graph_data(data, file_name, directory, ylims=None):
     fig, ax = plt.subplots(1,1)
     if ylims is not None:
         ax.set_ylim(ylims)
-    ax.set_xlabel("Episodes")
-    ax.set_ylabel("Cumulative Reward")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
 
     for x,mean,std,label in data:
         if std is not None:

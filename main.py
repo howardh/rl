@@ -12,13 +12,13 @@ import frozenlake
 #from frozenlake import exp1
 from frozenlake import exp2
 from frozenlake import exp3
-from frozenlake import experiments
 from frozenlake import graph
 
 import frozenlake8x8
 import frozenlake8x8.features
 import frozenlake8x8.utils
 
+import experiments
 import utils
 
 # When taking an action, there's an equal probability of moving in any direction that isn't the opposite direction
@@ -260,88 +260,27 @@ def lstd_control_8x8():
             if np.mean(rewards) >= 0.99:
                 break
 
-def foo(alpha, gamma, eps_b, eps_t, sigma, lam,
-        directory=None, max_iters=5000, epoch=50, test_iters=1):
-    env_name = "FrozenLake-v0"
-    e = gym.make(env_name)
-
-    action_space = np.array([0,1,2,3])
-    agent = LinearAgent(
-            action_space=action_space,
-            num_features=frozenlake.features.ONE_HOT_NUM_FEATURES,
-            discount_factor=gamma,
-            learning_rate=alpha,
-            features=frozenlake.features.one_hot,
-            trace_factor=lam,
-            sigma=sigma,
-    )
-    agent.learner.weights *= 0
-    agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
-    agent.set_target_policy("%.3f-epsilon"%eps_t)
-
-    try:
-        for iters in tqdm(range(0,max_iters+1)):
-            agent.learner.traces *= 0
-            r = agent.run_episode(e)
-            if r[0] == 1:
-                print("\nBoop!")
-                frozenlake.utils.print_traces(agent, frozenlake.features.one_hot)
-                frozenlake.utils.print_values(agent, frozenlake.features.one_hot)
-                frozenlake.utils.print_values2(agent, frozenlake.features.one_hot)
-                agent.learner.traces *= 0
-                r = agent.run_episode(e)
-                print("\nBoop!")
-                frozenlake.utils.print_traces(agent, frozenlake.features.one_hot)
-                frozenlake.utils.print_values(agent, frozenlake.features.one_hot)
-                frozenlake.utils.print_values2(agent, frozenlake.features.one_hot)
-                break
-    except ValueError as e:
-        tqdm.write(str(e))
-        tqdm.write("Diverged")
-    except KeyboardInterrupt:
-        pass
-    frozenlake.utils.print_policy(agent, frozenlake.features.one_hot)
-
 def run_all(proc=20):
     # SGD
-    #experiments.run1(exp2, n=1, proc=proc)
-    #for _ in range(1):
-    #    experiments.run2(exp2, n=1, m=100, proc=proc)
-    #experiments.run3(exp2, n=15, proc=proc)
+    experiments.run1(exp2, n=1, proc=proc)
+    for _ in range(1):
+        experiments.run2(exp2, n=1, m=100, proc=proc)
+    experiments.run3(exp2, n=15, proc=proc)
     exp2.plot_best()
-    #exp2.plot_final_rewards()
+    exp2.plot_final_rewards()
 
     # LSTD
-    #experiments.run1(exp3, n=1, proc=proc)
-    #for _ in range(100):
-    #    experiments.run2(exp3, n=1, m=100, proc=proc)
-    #experiments.run3(exp3, n=15, proc=proc)
-    #exp2.plot_best()
-    #exp3.plot_final_rewards()
+    experiments.run1(exp3, n=1, proc=proc)
+    for _ in range(100):
+        experiments.run2(exp3, n=1, m=100, proc=proc)
+    experiments.run3(exp3, n=15, proc=proc)
+    exp2.plot_best()
+    exp3.plot_final_rewards()
 
-    #graph.graph_all()
+    graph.graph_sgd()
+    graph.graph_lstd()
+    graph.graph_all()
 
 if __name__ == "__main__":
     utils.set_results_directory("/home/ml/hhuang63/results/final")
     run_all(proc=15)
-
-    #while True:
-    #    #run_all(proc=15)
-    #    #experiments.run2(exp3, n=1, m=100, proc=15)
-    #    experiments.run3(exp3, n=30, proc=10, by_mean_reward=False)
-    #    #experiments.run3(exp2, n=50, proc=15)
-    #experiments.run3(exp3, n=30, proc=10, by_mean_reward=False)
-    #experiments.run3(exp3, n=30, proc=10, by_mean_reward=False)
-    #experiments.run3(exp3, n=30, proc=10, by_mean_reward=False)
-    #graph.graph_all()
-
-    #all_params = [
-    #        {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 0.25},
-    #        {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 0.5},
-    #        {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 0.75},
-    #        {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'epoch': 10, 'alpha': 0.4641588833612779, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 1.0}
-    #]
-    #experiments.run3(exp2, n=100, proc=30, params=all_params)
-    #exp2.plot_custom()
-    #p = {'eps_b': 0.0, 'test_iters': 50, 'sigma': 1.0, 'gamma': 1, 'alpha': 0.5, 'max_iters': 2000, 'eps_t': 0.0, 'lam': 1}
-    #foo(**p)
