@@ -525,22 +525,17 @@ def cc3(fn, params, proc=10, keyworded=False):
 
 # Compute Canada
 
-# https://slurm.schedmd.com/job_array.html
-# https://stackoverflow.com/questions/4906977/how-do-i-access-environment-variables-from-python
-# SLURM_ARRAY_TASK_COUNT
-# SLURM_ARRAY_TASK_ID
-# SLURM_ARRAY_TASK_MAX
-# SLURM_ARRAY_TASK_MIN
-
 def split_params(params):
-    # Split params by array task ID
+    """ Split params by array task ID
+    See https://slurm.schedmd.com/job_array.html for details
+    """
     try:
         task_id = int(os.environ['SLURM_ARRAY_TASK_ID'])
         task_min = int(os.environ['SLURM_ARRAY_TASK_MIN'])
         task_max = int(os.environ['SLURM_ARRAY_TASK_MAX'])
     except KeyError:
         return params
-    per_task = np.ceil(len(params)/(task_max-task_min))
-    start_index = (task_id-task_min)*per_task
-    end_index = np.min((task_id-task_min+1)*per_task, len(params))
+    per_task = int(np.ceil(len(params)/(task_max-task_min+1)))
+    start_index = int((task_id-task_min)*per_task)
+    end_index = int(np.min([(task_id-task_min+1)*per_task, len(params)]))
     return params[start_index:end_index]

@@ -1,7 +1,3 @@
-import torch
-import gym
-import numpy as np
-import pprint
 from tqdm import tqdm
 
 import frozenlake2
