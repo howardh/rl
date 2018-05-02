@@ -185,10 +185,10 @@ def plot_final_rewards(exp):
     ylabel = plot_params['ylabel']
 
     # Graph stuff
-    data = []
     p_dict = dict([(k,next(iter(v))) for k,v in all_params.items()])
     # Loop over plots
     for pp in itertools.product(*[all_params[k] for k in each_plot]):
+        output_data = []
         for k,v in zip(each_plot,pp):
             p_dict[k] = v
         # Loop over curves in a plot
@@ -207,8 +207,8 @@ def plot_final_rewards(exp):
                     vals.append(data.loc[param_vals])
                 x.append(float(px))
                 y.append(np.max(vals))
-            data.append((x,y,None,label_template.format(**p_dict)))
-        graph.graph_data(data=data, 
+            output_data.append((x,y,None,label_template.format(**p_dict)))
+        graph.graph_data(data=output_data, 
                 file_name=file_name_template.format(**p_dict),
                 directory=directory,
                 ylims=[exp.MIN_REWARD,exp.MAX_REWARD],
@@ -272,3 +272,19 @@ def plot_custom():
     graph.graph_data(data, 'graph-custom.png', directory)
 
     return data
+
+# Plotting across experiments
+
+def plot_custom_best_mean(exps, labels):
+    data = []
+    for exp,l in zip(exps,labels):
+        directory = exp.get_directory()
+        params = get_params_best(exp, directory, get_mean_rewards, 1)[0]
+        print("Plotting params: ", params)
+        data.append(graph.get_data(
+            params, 
+            directory,
+            label=l))
+    output_directory = os.path.join(utils.get_results_directory(),__name__)
+    graph.graph_data(data, 'foo.png', output_directory, xlabel='Episodes',
+            ylabel='Cumulative Reward')

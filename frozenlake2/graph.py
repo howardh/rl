@@ -1,9 +1,12 @@
 import os
 
-import frozenlake
-from frozenlake import MAX_REWARD
-from frozenlake import MIN_REWARD
+import frozenlake2
+from frozenlake2 import exp2
+from frozenlake2 import exp3
+from frozenlake2 import MAX_REWARD
+from frozenlake2 import MIN_REWARD
 
+import experiments
 import graph
 from graph import graph_data
 import utils
@@ -12,17 +15,17 @@ def get_directory():
     return os.path.join(utils.get_results_directory(),__name__)
 
 def graph_sgd(directory=None):
-    data = frozenlake.exp2.plot_best()
+    data = experiments.plot_best(exp2)
     graph_data(data, "graph-sgd.png", get_directory(), ylims=[MIN_REWARD,MAX_REWARD])
 
 def graph_lstd(directory=None):
-    data = frozenlake.exp3.plot_best()
+    data = experiments.plot_best(exp3)
     n = 51
     data = [(x[:n],m[:n],s[:n],l) for x,m,s,l in data]
     graph_data(data, "graph-lstd.png", get_directory(), ylims=[MIN_REWARD,MAX_REWARD])
 
 def graph_all(directory=None):
-    data2 = frozenlake.exp2.plot_best()
-    data3 = frozenlake.exp3.plot_best()
+    data2 = experiments.plot_best(exp2)
+    data3 = experiments.plot_best(exp3)
     data = data2+data3
     graph_data(data, "graph-all.png", get_directory(), ylims=[MIN_REWARD,MAX_REWARD])

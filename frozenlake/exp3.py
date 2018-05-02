@@ -12,7 +12,6 @@ import operator
 import pprint
 import sys
 
-from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
 
 import frozenlake

@@ -261,9 +261,9 @@ class LSTDTraceQsLearner(LSTDLearner):
             #self.e_mat = lam*gamma*((1-sigma)*pi1.view(-1)[action1]+sigma)*self.e_mat + x1.t()
             self.e_mat *= lam*gamma*((1-sigma)*pi1.view(-1)[action1]+sigma)
             if self.trace_type == 'accumulating':
-                self.e_mat += x0.t()
+                self.e_mat += x1.t()
             elif self.trace_type == 'replacing':
-                self.e_mat = torch.max(self.e_mat, x0.t())
+                self.e_mat = torch.max(self.e_mat, x1.t())
             else:
                 raise ValueError("Invalid trace type: %s" % self.trace_type)
             self.a_mat += self.e_mat.t() @ x1.t()
