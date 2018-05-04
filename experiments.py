@@ -126,6 +126,8 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
         p['directory'] = directory
     params = itertools.repeat(params, n)
     params = itertools.chain(*list(params))
+    params = list(params)
+    params = utils.split_params(params)
     utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
 def run3(exp, n=100, proc=10, params=None, directory=None,
