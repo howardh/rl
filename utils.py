@@ -148,12 +148,15 @@ def parse_results(directory, learned_threshold=None,
     # Get a list of all files in existence, and remove those that have already
     # been parsed
     files = []
-    for d,_,file_names in tqdm(os.walk(directory)):
-        files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
-    if len(files) != len(parsed_files):
-        files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
+    if is_first_task():
+        for d,_,file_names in tqdm(os.walk(directory)):
+            files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
+        if len(files) != len(parsed_files):
+            files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
+        else:
+            files = []
     else:
-        files = []
+        print("Skipping file parsing. Task ID does not match first task.")
 
     # A place to store our results
     if os.path.isfile(dataframe_fullpath):
@@ -281,12 +284,15 @@ def get_series_with_params(directory, params,
     # Get a list of all files in existence, and remove those that have already
     # been parsed
     files = []
-    for d,_,file_names in tqdm(os.walk(directory)):
-        files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
-    if len(files) != len(parsed_files):
-        files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
+    if is_first_task():
+        for d,_,file_names in tqdm(os.walk(directory)):
+            files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
+        if len(files) != len(parsed_files):
+            files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
+        else:
+            files = []
     else:
-        files = []
+        print("Skipping file parsing. Task ID does not match first task.")
 
     # A place to store our results
     if os.path.isfile(series_fullpath):
@@ -539,3 +545,15 @@ def split_params(params):
     start_index = int((task_id-task_min)*per_task)
     end_index = int(np.min([(task_id-task_min+1)*per_task, len(params)]))
     return params[start_index:end_index]
+
+def is_first_task():
+    """ Check if the task ID is the first one.
+    Some tasks should only be done by one task in an array, or else it could break things due to concurrency problems.
+    """
+    try:
+        task_id = int(os.environ['SLURM_ARRAY_TASK_ID'])
+        task_min = int(os.environ['SLURM_ARRAY_TASK_MIN'])
+        return task_id == task_min
+    except KeyError:
+        # If we're not on compute canada, then everything is fine
+        return True

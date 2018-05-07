@@ -29,4 +29,6 @@ def run_all(proc=20):
 if __name__ == "__main__":
     utils.set_results_directory("/home/ml/hhuang63/results/final")
     utils.set_results_directory("/home/hhuang63/scratch/results/final")
-    run_all(1)
+    #run_all(1)
+    #experiments.run1(exp3, n=1, proc=1)
+    experiments.run2(exp3, n=10, m=75, proc=1)
