@@ -43,8 +43,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, sigma, lam, directory=None,
             discount_factor=gamma,
             features=cartpole.features.identity2,
             trace_factor=lam,
-            sigma=sigma,
-            trace_type='replacing'
+            sigma=sigma
     )
     agent.set_behaviour_policy("%.3f-epsilon"%eps_b)
     agent.set_target_policy("%.3f-epsilon"%eps_t)
@@ -97,7 +96,7 @@ def get_params_gridsearch():
     for vals in itertools.product(behaviour_eps, target_eps, sigmas,
             trace_factors, learning_rate):
         d = dict(zip(keys,vals))
-        d['gamma'] = 1
+        d['gamma'] = 0.9
         d['epoch'] = 50
         d['max_iters'] = 5000
         d['test_iters'] = 1

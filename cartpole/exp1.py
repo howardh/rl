@@ -96,7 +96,7 @@ def get_params_gridsearch():
     for vals in itertools.product(behaviour_eps, target_eps, sigmas,
             trace_factors, learning_rate):
         d = dict(zip(keys,vals))
-        d['gamma'] = 1
+        d['gamma'] = 0.9
         d['epoch'] = 50
         d['max_iters'] = 5000
         d['test_iters'] = 1
