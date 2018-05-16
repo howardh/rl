@@ -118,4 +118,7 @@ def run_all(proc=20):
 
 if __name__ == "__main__":
     utils.set_results_directory("/home/ml/hhuang63/results/final")
-    run_all(20)
+    utils.skip_new_files(True)
+    #run_all(20)
+    experiments.plot_best_trials(exp1,3)
+    experiments.plot_best_trials(exp3,3)

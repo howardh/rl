@@ -43,5 +43,6 @@ if __name__ == "__main__":
     utils.set_results_directory("/home/ml/hhuang63/results/final")
     #utils.set_results_directory("/home/hhuang63/scratch/results/final")
     #run_all(20)
-    experiments.plot_best(exp1)
+    #experiments.plot_best(exp1)
     #experiments.run2(exp1, n=10, m=100, proc=1)
+    graph.graph_all()

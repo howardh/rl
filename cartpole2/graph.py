@@ -1,12 +1,10 @@
 import os
 
-import cartpole
-from cartpole import exp1
-from cartpole import exp3
-from cartpole import exp4
-from cartpole import exp5
-from cartpole import MAX_REWARD
-from cartpole import MIN_REWARD
+import cartpole2
+from cartpole2 import exp1
+from cartpole2 import exp3
+from cartpole2 import MAX_REWARD
+from cartpole2 import MIN_REWARD
 
 import experiments
 import graph
@@ -38,8 +36,9 @@ def graph_sarsa_tb(directory=None):
 
 def graph_all(directory=None):
     data1 = experiments.plot_best(exp1)
-    data3 = experiments.plot_best(exp3)
-    data4 = experiments.plot_best(exp4)
-    data5 = experiments.plot_best(exp5)
-    data = data1+data3+data4+data5
+    #data3 = experiments.plot_best(exp3)
+    #data4 = experiments.plot_best(exp4)
+    #data5 = experiments.plot_best(exp5)
+    #data = data1+data3+data4+data5
+    data = data1
     graph_data(data, "graph-all.png", get_directory(), ylims=[MIN_REWARD,MAX_REWARD])

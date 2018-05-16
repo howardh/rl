@@ -12,11 +12,9 @@ import frozenlake
 #from frozenlake import exp1
 from frozenlake import exp2
 from frozenlake import exp3
+from frozenlake import exp4
+from frozenlake import exp5
 from frozenlake import graph
-
-import frozenlake8x8
-import frozenlake8x8.features
-import frozenlake8x8.utils
 
 import experiments
 import utils
@@ -266,15 +264,16 @@ def run_all(proc=20):
     for _ in range(1):
         experiments.run2(exp2, n=1, m=100, proc=proc)
     experiments.run3(exp2, n=15, proc=proc)
-    exp2.plot_best()
-    exp2.plot_final_rewards()
+    experiments.plot_best(exp2)
+    experiments.plot_final_rewards(exp2)
 
     # LSTD
     experiments.run1(exp3, n=1, proc=proc)
     for _ in range(100):
         experiments.run2(exp3, n=1, m=100, proc=proc)
     experiments.run3(exp3, n=15, proc=proc)
-    exp2.plot_best()
+    experiments.plot_best(exp3)
+    experiments.plot_final_rewards(exp3)
     exp3.plot_final_rewards()
 
     graph.graph_sgd()
@@ -283,4 +282,9 @@ def run_all(proc=20):
 
 if __name__ == "__main__":
     utils.set_results_directory("/home/ml/hhuang63/results/final")
-    run_all(proc=15)
+    utils.skip_new_files(True)
+    #run_all(proc=15)
+    #graph.graph_sarsa_tb()
+    #graph.graph_lstd()
+    #experiments.plot_best(exp5)
+    experiments.plot_t_test(exp5)

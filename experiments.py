@@ -14,6 +14,8 @@ import traceback
 import random
 import fabulous
 from fabulous.color import bold
+import scipy
+import scipy.stats
 
 import utils
 import graph
@@ -62,7 +64,7 @@ def get_params_best(exp, directory, score_function, n=1, params={}):
     if type(params) is list:
         output = []
         for p in params:
-            output.append(get_params_best(exp, directory, score_function,n,p))
+            output += get_params_best(exp, directory, score_function,n,p)
         return output
     score = score_function(exp, directory)
     if len(params) > 0:
@@ -234,7 +236,8 @@ def plot_best(exp):
         param_filters = [{}]
 
     data = []
-    score_functions = [get_mean_rewards, get_final_rewards]
+    #score_functions = [get_mean_rewards, get_final_rewards]
+    score_functions = [get_mean_rewards]
     labels = ['mean reward', 'final reward']
     for sf,l in zip(score_functions,labels):
         for param_filter in param_filters:
@@ -248,6 +251,47 @@ def plot_best(exp):
             ylabel='Cumulative Reward')
 
     return data
+
+def plot_best_trials(exp, n):
+    directory=exp.get_directory()
+
+    params = get_params_best(exp, directory, get_mean_rewards, 1, [{}])[0][0]
+    x,ys,label = graph.get_data_individual(params,directory)
+    means = [np.mean(y) for y in ys]
+    data = [(x,y,None,'') for y in ys]
+    sorted_data = sorted(list(zip(data,means)),key=lambda a: a[1])
+    data = sorted_data[:n]+sorted_data[-n:]
+    data = [d[0] for d in data]
+    graph.graph_data(data, 'all-trials.png', directory, xlabel='Episodes',
+            ylabel='Cumulative Reward')
+
+def plot_t_test(exp):
+    directory=exp.get_directory()
+    param_filters = [{}]
+    if hasattr(exp,'get_param_filters'):
+        param_filters = exp.get_param_filters()
+    params = get_params_best(exp, directory, get_mean_rewards, 1, param_filters)
+    print(param_filters)
+    print(params)
+    data = []
+    for p in params:
+        x,ys,_ = graph.get_data_individual(p,directory)
+        data.append((x,ys))
+    output_data = []
+    all_ps = []
+    for d1,d2 in itertools.combinations(data,2):
+        x1,y1 = d1
+        x2,y2 = d2
+        #if any(x1 != x2):
+        #    print('Data mismatch')
+        #    continue
+        t = scipy.stats.ttest_ind(y1,y2,axis=0,equal_var=False)[1]
+        all_ps += t.tolist()
+        print(len(all_ps))
+        output_data.append((x1,t,None,''))
+    graph.graph_data(output_data, 't-test.png', directory, xlabel='Episodes', ylabel='t statistic')
+    graph.graph_data_histogram(all_ps, 't-test-hist.png',
+            directory,xlabel='p-value',ylabel='frequency')
 
 def plot_custom():
     from frozenlake import exp2

@@ -15,6 +15,7 @@ import operator
 
 START_TIME = time.strftime("%Y-%m-%d_%H-%M-%S")
 _results_dir = None
+_skip_new_files = False
 
 lock = threading.Lock()
 
@@ -60,6 +61,12 @@ def find_next_free_file(prefix, suffix, directory):
                 continue
             break
     return path, i
+
+def skip_new_files(skip=None):
+    global _skip_new_files
+    if skip is not None:
+        _skip_new_files = skip
+    return _skip_new_files
 
 # Data processing
 
@@ -148,13 +155,15 @@ def parse_results(directory, learned_threshold=None,
     # Get a list of all files in existence, and remove those that have already
     # been parsed
     files = []
-    if is_first_task():
+    if is_first_task() and not skip_new_files():
         for d,_,file_names in tqdm(os.walk(directory)):
             files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
         if len(files) != len(parsed_files):
             files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
         else:
             files = []
+    elif skip_new_files():
+        print("Skipping file parsing. New files not being parsed.")
     else:
         print("Skipping file parsing. Task ID does not match first task.")
 
@@ -272,8 +281,7 @@ def get_series_with_params(directory, params,
         series_filename="series.pkl",
         parsedfiles_filename="sparsedfiles.pkl"):
     series_fullpath = os.path.join(directory, series_filename)
-    parsedfiles_fullpath = os.path.join(directory, parsedfiles_filename)
-
+    parsedfiles_fullpath = os.path.join(directory, parsedfiles_filename) 
     # Get a list of all files that have already been parsed
     if os.path.isfile(parsedfiles_fullpath):
         with open(parsedfiles_fullpath, 'rb') as f:
@@ -284,13 +292,15 @@ def get_series_with_params(directory, params,
     # Get a list of all files in existence, and remove those that have already
     # been parsed
     files = []
-    if is_first_task():
+    if is_first_task() and not skip_new_files():
         for d,_,file_names in tqdm(os.walk(directory)):
             files += [os.path.join(d,f) for f in file_names if os.path.isfile(os.path.join(d,f))]
         if len(files) != len(parsed_files):
             files = [f for f in tqdm(files, desc='Removed parsed files') if f not in parsed_files]
         else:
             files = []
+    elif skip_new_files():
+        print("Skipping file parsing. New files not being parsed.")
     else:
         print("Skipping file parsing. Task ID does not match first task.")
 
