@@ -119,3 +119,9 @@ def get_plot_params_best():
     file_name = 'graph-best.png'
     label_template = 'SGD'
     return locals()
+
+def get_plot_params_gridsearch():
+    file_name = 'graph-gridsearch.png'
+    axis_params = ['sigma', 'lam', 'eps_b', 'eps_t']
+    axis_labels = ['$\sigma$', '$\lambda$', '$\epsilon_b$', '$\epsilon_t$']
+    return locals()

@@ -29,7 +29,7 @@ class LinearAgent(Agent):
         """
         obs = env.reset()
         obs = self.features(obs)
-        action = self.act(obs)
+        action = self.act(obs, testing=True)
 
         obs2 = None
         done = False
@@ -41,7 +41,7 @@ class LinearAgent(Agent):
 
             obs2, reward, done, _ = env.step(action)
             obs2 = self.features(obs2)
-            action2 = self.act(obs2)
+            action2 = self.act(obs2, testing=True)
             reward_sum += reward
 
             # Next time step

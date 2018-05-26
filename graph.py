@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import itertools
 
 import matplotlib
 matplotlib.use("Agg")
@@ -26,7 +27,6 @@ def get_data_individual(params, directory, label=''):
     x = [i*epoch for i in range(len(series[0]))]
 
     return (x, series, label)
-
 
 def graph_data(data, file_name, directory,
         ylims=None, xlabel='', ylabel=''):
@@ -56,11 +56,131 @@ def graph_data(data, file_name, directory,
 
 def graph_data_histogram(data, file_name, directory,
         xlabel='', ylabel=''):
-    fig, ax = plt.subplots(1,1)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    if type(data[0]) is not list:
+        fig, ax = plt.subplots(1,1)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
 
-    plt.hist(data, bins=20)
+        plt.hist(data, bins=20)
+        output = os.path.join(directory, file_name)
+        plt.savefig(output)
+        print("Graph saved at %s" % output)
+        plt.close(fig)
+    else:
+        ax0len = len(data)
+        ax1len = len(data[0])
+        fig, ax = plt.subplots(ax0len,ax1len,True,True)
+        for i in range(ax0len):
+            for j in range(ax1len):
+                if data[i][j] is None:
+                    continue
+                if type(data[i][j]) is str:
+                    ax[i][j].text(0,10,data[i][j])
+                    ax[i][j].tick_params(labelcolor='none', top='off', bottom='off', left='off', right='off')
+                    ax[i][j].grid(False)
+                    ax[i][j].axis('off')
+                    continue
+                ax[i][j].hist(data[i][j], bins=20)
+        # Common axis labels
+        fig.add_subplot(111, frameon=False)
+        plt.tick_params(labelcolor='none', top='off', bottom='off', left='off', right='off')
+        plt.grid(False)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        # Save file
+        output = os.path.join(directory, file_name)
+        plt.savefig(output)
+        print("Graph saved at %s" % output)
+        plt.close(fig)
+
+def graph_data_curves(data, file_name, directory,
+        xlabel='', ylabel=''):
+    raise NotImplementedError("TODO: This is just a copy and paste of the other thing for now.")
+    if type(data[0]) is not list:
+        fig, ax = plt.subplots(1,1)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+
+        plt.hist(data, bins=20)
+        output = os.path.join(directory, file_name)
+        plt.savefig(output)
+        print("Graph saved at %s" % output)
+        plt.close(fig)
+    else:
+        ax0len = len(data)
+        ax1len = len(data[0])
+        fig, ax = plt.subplots(ax0len,ax1len,True,True)
+        for i in range(ax0len):
+            for j in range(ax1len):
+                if data[i][j] is None:
+                    continue
+                if type(data[i][j]) is str:
+                    ax[i][j].text(0,10,data[i][j])
+                    ax[i][j].tick_params(labelcolor='none', top='off', bottom='off', left='off', right='off')
+                    ax[i][j].grid(False)
+                    ax[i][j].axis('off')
+                    continue
+                ax[i][j].hist(data[i][j], bins=20)
+        # Common axis labels
+        fig.add_subplot(111, frameon=False)
+        plt.tick_params(labelcolor='none', top='off', bottom='off', left='off', right='off')
+        plt.grid(False)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        # Save file
+        output = os.path.join(directory, file_name)
+        plt.savefig(output)
+        print("Graph saved at %s" % output)
+        plt.close(fig)
+
+def graph_matrix(file_name, directory,
+        axis_vals, values,
+        axis_labels=['majx','majy','minx','miny']):
+    majx_vals, majy_vals, minx_vals, miny_vals = axis_vals
+    cmap = matplotlib.cm.get_cmap('jet')
+    norm = matplotlib.colors.Normalize(vmin=np.min(values), vmax=np.max(values))
+    fig, ax = plt.subplots(len(majy_vals)+1,len(majx_vals)+1,True,True)
+    # Plot data
+    img = None
+    for i,j in itertools.product(range(len(majx_vals)),range(len(majy_vals))):
+        img = ax[j,i+1].imshow(values[i,j,:,:].transpose(),
+                interpolation='none',
+                cmap=cmap)
+        img.set_norm(norm)
+        ax[j,i+1].set_xlabel(axis_labels[2])
+        ax[j,i+1].set_ylabel(axis_labels[3])
+        ax[j,i+1].set_xticklabels(minx_vals)
+        ax[j,i+1].set_yticklabels(miny_vals)
+        ax[j,i+1].set_adjustable('box-forced')
+    # Major x-axis tick labels
+    for i in range(len(majx_vals)):
+        ax[-1,i+1].text(1,2,majx_vals[i])
+        ax[-1,i+1].tick_params(labelcolor='none',
+                top='off', bottom='off', left='off', right='off')
+        ax[-1,i+1].grid(False)
+        ax[-1,i+1].axis('off')
+    # Major y-axis tick labels
+    for j in range(len(majy_vals)):
+        ax[j,0].text(-1,2,majy_vals[j])
+        ax[j,0].tick_params(labelcolor='none',
+                top='off', bottom='off', left='off', right='off')
+        ax[j,0].grid(False)
+        ax[j,0].axis('off')
+    # Get rid of bottom-left graph
+    ax[-1,0].tick_params(labelcolor='none',
+            top='off', bottom='off', left='off', right='off')
+    ax[-1,0].grid(False)
+    ax[-1,0].axis('off')
+    # Major axis labels
+    fig.add_subplot(111, frameon=False)
+    plt.tick_params(labelcolor='none',
+            top='off', bottom='off', left='off', right='off')
+    plt.grid(False)
+    plt.xlabel(axis_labels[0])
+    plt.ylabel(axis_labels[1])
+    fig.colorbar(img,ax=ax)
+
+    # Save file
     output = os.path.join(directory, file_name)
     plt.savefig(output)
     print("Graph saved at %s" % output)

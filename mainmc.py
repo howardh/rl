@@ -28,8 +28,13 @@ def run_all(proc=20):
 
 if __name__ == "__main__":
     utils.set_results_directory("/home/ml/hhuang63/results/final")
+    #utils.skip_new_files(True)
     #utils.set_results_directory("/home/hhuang63/scratch/results/final")
     #run_all(1)
     #experiments.run1(exp3, n=1, proc=1)
     #experiments.run2(exp3, n=10, m=75, proc=1)
-    graph.graph_all()
+    #graph.graph_all()
+    #for _ in range(100):
+    #    experiments.run2(exp3, n=5, m=75, proc=30)
+    experiments.plot_gridsearch(exp2)
+    #utils.get_all_series(exp2.get_directory())

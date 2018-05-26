@@ -265,33 +265,65 @@ def plot_best_trials(exp, n):
     graph.graph_data(data, 'all-trials.png', directory, xlabel='Episodes',
             ylabel='Cumulative Reward')
 
-def plot_t_test(exp):
+def plot_t_test(exp,label_template=''):
     directory=exp.get_directory()
     param_filters = [{}]
     if hasattr(exp,'get_param_filters'):
         param_filters = exp.get_param_filters()
     params = get_params_best(exp, directory, get_mean_rewards, 1, param_filters)
-    print(param_filters)
-    print(params)
     data = []
     for p in params:
         x,ys,_ = graph.get_data_individual(p,directory)
-        data.append((x,ys))
+        data.append((x,ys,p))
     output_data = []
-    all_ps = []
-    for d1,d2 in itertools.combinations(data,2):
-        x1,y1 = d1
-        x2,y2 = d2
-        #if any(x1 != x2):
-        #    print('Data mismatch')
-        #    continue
+    all_ps = [[None]*len(data) for _ in range(len(data))]
+    for i1,i2 in itertools.combinations(range(len(data)),2):
+        x1,y1,_ = data[i1]
+        x2,y2,_ = data[i2]
         t = scipy.stats.ttest_ind(y1,y2,axis=0,equal_var=False)[1]
-        all_ps += t.tolist()
-        print(len(all_ps))
-        output_data.append((x1,t,None,''))
-    graph.graph_data(output_data, 't-test.png', directory, xlabel='Episodes', ylabel='t statistic')
+        all_ps[i1][i2] = t
+        all_ps[i2][i1] = t
+    for i in range(len(data)):
+        all_ps[i][i] = label_template.format(**data[i][2])
     graph.graph_data_histogram(all_ps, 't-test-hist.png',
             directory,xlabel='p-value',ylabel='frequency')
+    return
+
+def plot_gridsearch(exp):
+    """Plot a matrix of plots showing the average performance for each set of
+    parameters.
+    """
+    directory=exp.get_directory()
+
+    plot_param = exp.get_plot_params_gridsearch()
+    axis_params = plot_param['axis_params']
+    axis_labels = plot_param['axis_labels']
+
+    data = utils.get_all_series(directory)
+    all_params = dict([(k, sorted(list(set(data.index.get_level_values(k))))) for k in data.index.names])
+
+    axis_vals = [all_params[k] for k in axis_params]
+    vals = np.zeros([len(a) for a in axis_vals])
+    for ind_val in itertools.product(*[enumerate(av) for av in axis_vals]):
+        index = [i for i,v in ind_val]
+        val = [v for i,v in ind_val]
+        majx,majy,minx,miny = val
+        series = data.xs(val,level=axis_params)
+        def foo(row):
+            try:
+                return np.mean(row)
+            except TypeError as e:
+                print(row)
+                print([len(r) for r in row])
+                raise e
+        #means = series.apply(lambda row: np.mean(row))
+        means = series.apply(foo)
+        vals[index[0],index[1],index[2],index[3]] = means.max()
+
+    graph.graph_matrix('test.png', '/home/ml/hhuang63',
+            axis_vals, vals, axis_labels=axis_labels)
+
+    return
 
 def plot_custom():
     from frozenlake import exp2

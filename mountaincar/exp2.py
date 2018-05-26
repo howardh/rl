@@ -71,7 +71,7 @@ def run_trial(discount_factor, learning_rate, trace_factor, sigma, num_pos,
         tqdm.write("Diverged")
         pass # Diverged weights
 
-    while len(rewards) < (max_iters%epoch)+1: # Means it diverged at some point
+    while len(rewards) < (max_iters/epoch)+1: # Means it diverged at some point
         rewards.append([-200]*test_iters)
 
     data = (args, rewards, steps_to_learn)
@@ -119,4 +119,10 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best.png'
     label_template = 'SGD'
+    return locals()
+
+def get_plot_params_gridsearch():
+    file_name = 'graph-gridsearch.png'
+    axis_params = ['sigma', 'trace_factor', 'behaviour_eps', 'target_eps']
+    axis_labels = ['$\sigma$', '$\lambda$', '$\epsilon_b$', '$\epsilon_t$']
     return locals()

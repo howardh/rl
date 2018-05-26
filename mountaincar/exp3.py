@@ -68,9 +68,8 @@ def run_trial(discount_factor, initial_value, num_pos,
                 rewards.append(r)
             agent.run_episode(e)
 
-        while iters < max_iters: # Means it diverged at some point
-            iters += 1
-            rewards.append(None)
+        while len(rewards) < (max_iters/epoch)+1: # Means it diverged at some point
+            rewards.append([-200]*test_iters)
 
         data = (args, rewards, steps_to_learn)
         file_name, file_num = utils.find_next_free_file("results", "pkl",
@@ -124,4 +123,10 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best.png'
     label_template = 'LSTD'
+    return locals()
+
+def get_plot_params_gridsearch():
+    file_name = 'graph-gridsearch.png'
+    axis_params = ['sigma', 'trace_factor', 'behaviour_eps', 'target_eps']
+    axis_labels = ['$\sigma$', '$\lambda$', '$\epsilon_b$', '$\epsilon_t$']
     return locals()

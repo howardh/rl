@@ -12,6 +12,7 @@ import torch
 import dill
 import pandas
 import operator
+import traceback
 
 START_TIME = time.strftime("%Y-%m-%d_%H-%M-%S")
 _results_dir = None
@@ -72,7 +73,7 @@ def skip_new_files(skip=None):
 
 def collect_file_params(file_names):
     results = dict()
-    for file_name in tqdm(file_names):
+    for file_name in tqdm(file_names, desc='Collecting file parameters'):
         with open(file_name, 'rb') as f:
             try:
                 file_params,_,_ = dill.load(f)
@@ -236,48 +237,7 @@ def parse_results(directory, learned_threshold=None,
 
     return data
 
-def parse_graphing_results(directory):
-    # Load data
-    file_names = [os.path.join(directory,f) for f in tqdm(os.listdir(directory)) if os.path.isfile(os.path.join(directory,f))]
-    params = collect_file_params(file_names)
-    print(params)
-    sigmas = params['sigma']
-    data = dict()
-    times = dict()
-    for s in sigmas:
-        data[s] = []
-        times[s] = None
-    for file_name in tqdm(file_names, desc="Parsing File Contents"):
-        with open(os.path.join(directory,file_name), 'rb') as f:
-            try:
-                x = dill.load(f)
-            except Exception:
-                tqdm.write(file_name)
-                continue
-        diverged = None in x[1]
-        if diverged:
-            tqdm.write("Diverged %s" % file_name)
-            continue
-        else:
-            s = x[0]['sigma']
-            data[s].append(x[1])
-            if times[s] is None or len(times[s]) < len(x[1]):
-                times[s] = np.arange(len(x[1]))*x[0]['epoch']
-    for s in data.keys():
-        max_len = 0
-        for row in data[s]:
-            max_len = max(max_len, len(row))
-        data[s] = [d for d in data[s] if len(d) == max_len]
-    results = dict()
-    for s in data.keys():
-        x = np.mean(data[s], axis=2)
-        mean = np.mean(x, axis=0)
-        std = np.std(x, axis=0)
-        t = times[s]
-        results[s] = (t,mean,std)
-    return results
-
-def get_series_with_params(directory, params,
+def get_all_series(directory,
         series_filename="series.pkl",
         parsedfiles_filename="sparsedfiles.pkl"):
     series_fullpath = os.path.join(directory, series_filename)
@@ -363,6 +323,19 @@ def get_series_with_params(directory, params,
                     parsed_files.add(os.path.join(directory,file_name))
                     continue
             file_params = cast_params(file_params)
+            #file_params['eps_t'] = file_params['eps_b']
+            #with open(os.path.join(directory,file_name), 'wb') as f:
+            #    #tqdm.write('Rewriting %s.' % file_name)
+            #    dill.dump((file_params, series, time_to_learn), f)
+            #    #tqdm.write('Done')
+            #    continue
+            #if len(series) < file_params['max_iters']/file_params['epoch']+1:
+            #    while len(series) < file_params['max_iters']/file_params['epoch']+1:
+            #        series.append([-200]*file_params['test_iters'])
+            #    with open(os.path.join(directory,file_name), 'wb') as f:
+            #        tqdm.write('Rewriting %s.' % file_name)
+            #        dill.dump((file_params, series, time_to_learn), f)
+            #        tqdm.write('Done')
             index = tuple([file_params[k] for k in data.index.names])
             series = np.mean(series, axis=1).tolist()
             if type(data.loc[index]) is not list:
@@ -371,22 +344,30 @@ def get_series_with_params(directory, params,
             count += 1
             parsed_files.add(os.path.join(directory,file_name))
     except KeyboardInterrupt as e:
-        pass 
+        print("Keyboard Interrupt")
     except Exception as e:
+        print("Exception occured")
+        traceback.print_exc()
         print(e)
         print(file_params)
         print(index)
         print(series)
         raise e
-    print('%d files parsed' % count)
+    finally:
+        print('%d files parsed' % count)
 
-    if len(files) > 0:
-        with open(series_fullpath, 'wb') as f:
-            dill.dump(data, f)
-            print("Saved ", series_fullpath)
-        with open(parsedfiles_fullpath, 'wb') as f:
-            dill.dump(parsed_files, f)
-            print("Saved ", parsedfiles_fullpath)
+        if len(files) > 0:
+            with open(series_fullpath, 'wb') as f:
+                dill.dump(data, f)
+                print("Saved ", series_fullpath)
+            with open(parsedfiles_fullpath, 'wb') as f:
+                dill.dump(parsed_files, f)
+                print("Saved ", parsedfiles_fullpath)
+
+        return data
+
+def get_series_with_params(directory, params):
+    data = get_all_series(directory)
     keys = [k for k in params.keys()]
     vals = [params[k] for k in keys]
     if len(params) == 0:
@@ -397,49 +378,6 @@ def get_series_with_params(directory, params,
     for i in dataxs.index:
         all_series += dataxs.loc[i]
     return all_series
-
-def sort_data(data):
-    """
-    Return the data sorted by performance using two measures:
-    - Mean reward
-    - Time to learn
-    The best results (i.e. highest mean reward, or lowest time to learn) is
-    found at index 0, and the worst at index -1.
-    """
-    print("Sorting by MR")
-    sorted_by_mr = [(i,data.loc[i,'MRS']/data.loc[i,'Count']) for i in data.index]
-    sorted_by_mr = sorted(sorted_by_mr, key=operator.itemgetter(1))
-    sorted_by_mr.reverse()
-    print("Sorting by TTL")
-    sorted_by_ttl = [(i,data.loc[i,'TTLS']/data.loc[i,'Count']) for i in data.index]
-    sorted_by_ttl = sorted(sorted_by_ttl, key=operator.itemgetter(1))
-    return sorted_by_mr, sorted_by_ttl
-
-def combine_params_with_names(data, params):
-    """
-    Return a dictionary of keyworded parameters.
-
-    data: Pandas dataframe
-    params: An iterable of unlabelled parameters in the same order as the
-    dataframe indices
-    """
-    names = data.index.names
-    if len(names) != len(params):
-        raise Exception("Dataframe indices (%s) and length of parameters (%s) do not match." % (names, params))
-    return dict(zip(names, params))
-
-def get_best_params_by_sigma(directory, learned_threshold):
-    data = parse_results(directory, learned_threshold=learned_threshold)
-    sigmas = set(data.index.get_level_values('s'))
-    results = dict()
-    for s in sigmas:
-        df = data.xs(s,level='s')
-        mr, ttl = sort_data(df)
-        params = [eval(x) for x in ttl[0][0]]
-        params = combine_params_with_names(df,params)
-        params['s'] = eval(s)
-        results[s] = params
-    return results
 
 # Math
 

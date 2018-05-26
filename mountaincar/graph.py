@@ -18,4 +18,6 @@ def graph_all(directory=None):
     data2 = experiments.plot_best(exp2)
     data3 = experiments.plot_best(exp3)
     data = data2+data3
-    graph_data(data, "graph-all.png", get_directory(), ylims=[MIN_REWARD,MAX_REWARD])
+    graph_data(data, "graph-all.png", get_directory(),
+            ylims=[MIN_REWARD,MAX_REWARD],
+            xlabel='Episodes',ylabel='Cumulative Reward')
