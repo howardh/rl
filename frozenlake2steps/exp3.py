@@ -14,14 +14,14 @@ import sys
 
 from agent.lstd_agent import LSTDAgent
 
-import frozenlake2
-import frozenlake2.features
-import frozenlake2.utils
+import frozenlake2steps
+import frozenlake2steps.features
+import frozenlake2steps.utils
 
-from frozenlake2 import ENV_NAME
-from frozenlake2 import MAX_REWARD
-from frozenlake2 import MIN_REWARD
-from frozenlake2 import LEARNED_REWARD
+from frozenlake2steps import ENV_NAME
+from frozenlake2steps import MAX_REWARD
+from frozenlake2steps import MIN_REWARD
+from frozenlake2steps import LEARNED_REWARD
 
 import graph
 import utils
@@ -39,9 +39,9 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
     action_space = np.array([0,1,2,3])
     agent = LSTDAgent(
             action_space=action_space,
-            num_features=frozenlake.features.ONE_HOT_NUM_FEATURES,
+            num_features=frozenlake2steps.features.ONE_HOT_NUM_FEATURES,
             discount_factor=gamma,
-            features=frozenlake.features.one_hot,
+            features=frozenlake2steps.features.one_hot,
             use_importance_sampling=False,
             use_traces=True,
             trace_factor=lam,
@@ -61,7 +61,7 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
             if epoch is not None and iters % epoch == 0:
                 r = agent.test(e, test_iters, render=False, processors=1)
                 rewards.append(r)
-            agent.run_episode(e)
+            agent.run_step(e)
     except ValueError as e:
         tqdm.write(str(e))
         tqdm.write("Diverged")
@@ -89,8 +89,8 @@ def get_params_gridsearch():
     for vals in itertools.product(update_frequencies, behaviour_eps, target_eps, sigmas, trace_factors):
         d = dict(zip(keys,vals))
         d['gamma'] = 1
-        d['epoch'] = 10
-        d['max_iters'] = 2000
+        d['epoch'] = 50
+        d['max_iters'] = 5000
         d['test_iters'] = 50
         params.append(d)
     return params

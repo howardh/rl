@@ -320,7 +320,7 @@ def plot_gridsearch(exp):
         means = series.apply(foo)
         vals[index[0],index[1],index[2],index[3]] = means.max()
 
-    graph.graph_matrix('test.png', '/home/ml/hhuang63',
+    graph.graph_matrix('gridsearch.png', directory,
             axis_vals, vals, axis_labels=axis_labels)
 
     return

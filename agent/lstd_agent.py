@@ -83,16 +83,11 @@ class LSTDAgent(Agent):
             step_count += 1
 
             obs2, reward, done, _ = env.step(action)
-            time1 = timeit.default_timer()
             obs2 = self.features(obs2)
-            time2 = timeit.default_timer()
             action2 = self.act(obs2)
-            time3 = timeit.default_timer()
             reward_sum += reward
 
-            start_time = time3
             self.learner.observe_step(obs, action, reward, obs2, terminal=done)
-            end_time = timeit.default_timer()
 
             # Next time step
             obs = obs2

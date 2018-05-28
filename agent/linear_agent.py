@@ -19,6 +19,8 @@ class LinearAgent(Agent):
                 trace_type=trace_type
         )
         self.features = features
+        self.running_episode = False
+        self.prev_obs = None
 
     def test_once(self, env, max_steps=np.inf, render=False):
         """
@@ -50,6 +52,8 @@ class LinearAgent(Agent):
         return reward_sum
 
     def run_episode(self, env):
+        if self.running_episode:
+            raise ValueError("Cannot start new episode while one is already running through Agent.run_step()")
         obs = env.reset()
         obs = self.features(obs)
         action = self.act(obs)
@@ -73,3 +77,21 @@ class LinearAgent(Agent):
             obs = obs2
             action = action2
         return reward_sum, step_count
+
+    def run_step(self, env):
+        if not self.running_episode:
+            obs = env.reset()
+            obs = self.features(obs)
+        else:
+            obs = self.prev_obs
+
+        action = self.act(obs)
+
+        obs2, reward, done, _ = env.step(action)
+        obs2 = self.features(obs2)
+
+        self.learner.observe_step(obs, action, reward, obs2, terminal=done)
+
+        # Save data for next step
+        self.running_episode = not done
+        self.prev_obs = obs2

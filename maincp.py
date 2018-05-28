@@ -122,5 +122,5 @@ if __name__ == "__main__":
     #run_all(20)
     #experiments.plot_best_trials(exp1,3)
     #experiments.plot_best_trials(exp3,3)
-    #graph.graph_all()
+    graph.graph_all()
     experiments.plot_gridsearch(exp1)
