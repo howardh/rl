@@ -31,9 +31,11 @@ if __name__ == "__main__":
     utils.set_results_directory("/home/ml/hhuang63/results/final")
     #experiments.run3(exp2, n=30, proc=30, params=params)
     #run_all(10)
-    #graph.graph_all()
     #for _ in tqdm(range(100)):
     #    experiments.run2(exp2, n=10, m=10, proc=40)
-    #utils.skip_new_files(True)
+    utils.skip_new_files(True)
+    #graph.graph_all()
     #s=utils.get_all_series(exp2.get_directory())
     experiments.plot_gridsearch(exp2)
+    #experiments.plot_best_trials(exp2,3)
+    #experiments.plot_best_trials(exp3,3)

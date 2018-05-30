@@ -255,7 +255,7 @@ def plot_best(exp):
 def plot_best_trials(exp, n):
     directory=exp.get_directory()
 
-    params = get_params_best(exp, directory, get_mean_rewards, 1, [{}])[0][0]
+    params = get_params_best(exp, directory, get_mean_rewards, 1, [{}])[0]
     x,ys,label = graph.get_data_individual(params,directory)
     means = [np.mean(y) for y in ys]
     data = [(x,y,None,'') for y in ys]

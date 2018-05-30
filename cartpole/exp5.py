@@ -59,6 +59,6 @@ def get_plot_params_final_rewards():
 
 def get_plot_params_best():
     file_name = 'graph-best5.png'
-    label_template = 'LSTD sigma={sigma}'
+    label_template = 'LSTD Q($\sigma={sigma}$)'
     param_filters = [{'sigma': 0.0}, {'sigma': 1.0}]
     return locals()

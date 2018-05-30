@@ -16,7 +16,6 @@ from agent.lstd_agent import LSTDAgent
 
 import frozenlake2steps
 import frozenlake2steps.features
-import frozenlake2steps.utils
 
 from frozenlake2steps import ENV_NAME
 from frozenlake2steps import MAX_REWARD
