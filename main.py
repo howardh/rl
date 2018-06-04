@@ -288,4 +288,5 @@ if __name__ == "__main__":
     #graph.graph_lstd()
     #experiments.plot_best(exp5)
     #experiments.plot_t_test(exp5, 'Sigma={sigma}')
+    experiments.plot_gridsearch(exp2)
     experiments.plot_gridsearch(exp3)

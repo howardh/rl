@@ -204,7 +204,7 @@ class LSTDTraceLearner(LSTDLearner):
 
 class LSTDTraceQsLearner(LSTDLearner):
     def __init__(self, num_features, action_space, discount_factor,
-            trace_factor, sigma, trace_type='accumulating'):
+            trace_factor, sigma, trace_type='accumulating', decay=1):
         LSTDLearner.__init__(self, num_features=num_features, action_space=action_space, discount_factor=discount_factor)
 
         if trace_factor is None:
@@ -215,6 +215,7 @@ class LSTDTraceQsLearner(LSTDLearner):
         self.trace_factor = trace_factor
         self.sigma = sigma
         self.trace_type = trace_type
+        self.decay = decay
 
         # Trace vector
         self.e_mat = torch.zeros([1,self.num_features*len(self.action_space)])
@@ -271,6 +272,9 @@ class LSTDTraceQsLearner(LSTDLearner):
 
             self.e_mat *= 0
             self.prev_sars = None
+
+            self.a_mat *= self.decay
+            self.b_mat *= self.decay
         else:
             self.prev_sars = (state1, action1, reward2, state2)
 

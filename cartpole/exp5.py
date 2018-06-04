@@ -13,18 +13,14 @@ import sys
 import traceback
 import random
 
-from agent.discrete_agent import TabularAgent
-from agent.lstd_agent import LSTDAgent
+from . import ENV_NAME
+from . import MAX_REWARD
+from . import MIN_REWARD
+from . import LEARNED_REWARD
 
-import cartpole 
-from cartpole import ENV_NAME
-from cartpole import MAX_REWARD
-from cartpole import MIN_REWARD
-from cartpole import LEARNED_REWARD
-
-from cartpole import features
-from cartpole import utils
-from cartpole import exp3
+from . import features
+from . import utils
+from . import exp3
 
 import graph
 import utils

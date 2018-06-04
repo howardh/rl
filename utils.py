@@ -195,7 +195,12 @@ def parse_results(directory, learned_threshold=None,
             'lam': float,
             'eps_b': float,
             'eps_t': float,
-            'alpha': float}
+            'alpha': float,
+            'trace_factor': float,
+            'behaviour_eps': float,
+            'target_eps': float,
+            'learning_rate': float,
+            'decay': float}
     def cast_params(param_dict):
         for k in param_dict.keys():
             if k in types:
@@ -296,7 +301,8 @@ def get_all_series(directory,
             'trace_factor': float,
             'behaviour_eps': float,
             'target_eps': float,
-            'learning_rate': float}
+            'learning_rate': float,
+            'decay': float}
     def cast_params(param_dict):
         for k in param_dict.keys():
             if k in types:
