@@ -3,6 +3,7 @@ from tqdm import tqdm
 import frozenlake2
 from frozenlake2 import exp2
 from frozenlake2 import exp3
+from frozenlake2 import exp4
 from frozenlake2 import exp5
 from frozenlake2 import exp3decay
 from frozenlake2 import graph
@@ -37,10 +38,16 @@ if __name__ == "__main__":
     #for _ in tqdm(range(100)):
     #    experiments.run2(exp2, n=10, m=10, proc=40)
     #utils.skip_new_files(True)
+    while True:
+        experiments.run3(exp5, n=10, proc=20)
+        graph.graph_lstd()
     #while True:
-    #    experiments.run1(exp3decay, n=1, proc=20)
-    experiments.plot_gridsearch(exp3decay)
-    experiments.plot_best(exp3decay)
+    #    experiments.run3(exp4, n=10, proc=20)
+    #    graph.graph_sgd()
+    #experiments.plot_gridsearch(exp3decay)
+    #experiments.plot_best(exp3decay)
+    #graph.graph_sgd()
+    #graph.graph_lstd()
     #graph.graph_all()
     #s=utils.get_all_series(exp2.get_directory())
     #experiments.plot_gridsearch(exp2)

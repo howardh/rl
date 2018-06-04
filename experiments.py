@@ -60,7 +60,12 @@ def get_ucb1_final_reward(exp, directory):
     score = data.apply(ucb1, axis=1)
     return score
 
-def get_params_best(exp, directory, score_function, n=1, params={}):
+def get_params_best(exp, directory, score_function, n=1, params=None):
+    if params is None:
+        if hasattr(exp, 'get_param_filters'):
+            params = exp.get_param_filters()
+        else:
+            params = {}
     if type(params) is list:
         output = []
         for p in params:
@@ -133,7 +138,7 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
     utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
 def run3(exp, n=100, proc=10, params=None, directory=None,
-        by_mean_reward=True, by_final_reward=True):
+        by_mean_reward=True, by_final_reward=False):
     if directory is None:
         directory=exp.get_directory()
     if params is None:
@@ -228,25 +233,18 @@ def plot_best(exp):
     plot_params = exp.get_plot_params_best()
     file_name = plot_params['file_name']
     label_template = plot_params['label_template']
-    if 'param_filters' in plot_params:
-        param_filters = plot_params['param_filters']
-    else:
-        param_filters = [{}]
-    if len(param_filters) == 0:
-        param_filters = [{}]
 
     data = []
     #score_functions = [get_mean_rewards, get_final_rewards]
     score_functions = [get_mean_rewards]
     labels = ['mean reward', 'final reward']
     for sf,l in zip(score_functions,labels):
-        for param_filter in param_filters:
-            params = get_params_best(exp, directory, sf, 1, param_filter)[0]
+        params = get_params_best(exp, directory, sf, 1)
+        for p in params:
             print("Plotting params: ", params)
             data.append(graph.get_data(
-                params, 
-                directory,
-                label=label_template.format(**params)))
+                p, directory,
+                label=label_template.format(**p)))
     graph.graph_data(data, file_name, directory, xlabel='Episodes',
             ylabel='Cumulative Reward')
 

@@ -109,7 +109,6 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best.png'
     label_template = 'LSTD sigma={sigma}'
-    param_filters = []
     return locals()
 
 def get_plot_params_gridsearch():

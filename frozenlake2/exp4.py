@@ -12,31 +12,29 @@ import operator
 import pprint
 import random
 
-from agent.linear_agent import LinearAgent
-
-import cartpole
-from cartpole import ENV_NAME
-from cartpole import MAX_REWARD
-from cartpole import MIN_REWARD
-from cartpole import LEARNED_REWARD
-from cartpole import features
-from cartpole import utils
-from cartpole import exp1
+import frozenlake2
+from frozenlake2 import ENV_NAME
+from frozenlake2 import MAX_REWARD
+from frozenlake2 import MIN_REWARD
+from frozenlake2 import LEARNED_REWARD
+from frozenlake2 import features
+from frozenlake2 import utils
+from frozenlake2 import exp2
 
 import graph
 import utils
 
-run_trial = exp1.run_trial
+run_trial = exp2.run_trial
 
-get_directory = exp1.get_directory
+get_directory = exp2.get_directory
 
 def get_param_filters():
     return [{'sigma': 0.0}, {'sigma': 1.0}]
 
 def get_params_best(directory, score_function, n=1):
-    out0 = cartpole.experiments.get_params_best(
+    out0 = frozenlake2.experiments.get_params_best(
             directory, score_function, n, {'sigma': 0.0})
-    out1 = cartpole.experiments.get_params_best(
+    out1 = frozenlake2.experiments.get_params_best(
             directory, score_function, n, {'sigma': 1.0})
     return out0+out1
 
@@ -45,8 +43,7 @@ def get_params_gridsearch():
     target_eps = [0, 0.1, 0.2, 0.3, 0.4]
     trace_factors = [0, 0.25, 0.5, 0.75, 1]
     sigmas = [0, 1]
-    learning_rate = np.logspace(np.log10(10),np.log10(.0001),num=16,endpoint=True,base=10).tolist()
-    #learning_rate = np.logspace(np.log10(.001),np.log10(.00001),num=7,endpoint=True,base=10).tolist()
+    learning_rate = np.logspace(np.log10(1),np.log10(.001),num=10,endpoint=True,base=10).tolist()
 
     keys = ['eps_b', 'eps_t', 'sigma','lam', 'alpha']
     params = []
@@ -54,9 +51,9 @@ def get_params_gridsearch():
             trace_factors, learning_rate):
         d = dict(zip(keys,vals))
         d['gamma'] = 1
-        d['epoch'] = 50
-        d['max_iters'] = 5000
-        d['test_iters'] = 1
+        d['epoch'] = 10
+        d['max_iters'] = 2000
+        d['test_iters'] = 50
         params.append(d)
     return params
 

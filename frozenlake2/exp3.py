@@ -39,9 +39,9 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
     action_space = np.array([0,1,2,3])
     agent = LSTDAgent(
             action_space=action_space,
-            num_features=frozenlake.features.ONE_HOT_NUM_FEATURES,
+            num_features=frozenlake2.features.ONE_HOT_NUM_FEATURES,
             discount_factor=gamma,
-            features=frozenlake.features.one_hot,
+            features=frozenlake2.features.one_hot,
             use_importance_sampling=False,
             use_traces=True,
             trace_factor=lam,
@@ -109,8 +109,7 @@ def get_plot_params_final_rewards():
 
 def get_plot_params_best():
     file_name = 'graph-best.png'
-    label_template = 'LSTD sigma={sigma}'
-    param_filters = []
+    label_template = 'LSTD best $\sigma$'
     return locals()
 
 def get_plot_params_gridsearch():
