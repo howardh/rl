@@ -30,7 +30,9 @@ run_trial = exp3.run_trial
 get_directory = exp3.get_directory
 
 def get_param_filters():
-    #return [{'sigma': 0.0}, {'sigma': 0.25}, {'sigma': 0.5}, {'sigma': 0.75}, {'sigma': 1.0}]
+    #return [{'sigma': 0.5}, {'sigma': 0.75}]
+    #return [{'sigma': 0.25, 'lam':0.0}]
+    return [{'sigma': 0.0}, {'sigma': 0.25}, {'sigma': 0.5}, {'sigma': 0.75}, {'sigma': 1.0}]
     return [{'sigma': 0.0}, {'sigma': 1.0}]
 
 def get_params_gridsearch():

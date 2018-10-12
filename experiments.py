@@ -40,6 +40,16 @@ def get_final_rewards(exp, directory):
     fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
     return fr_data
 
+def get_mean_rewards_first100(exp, directory):
+    data = utils.get_all_series(directory)
+    #data = utils.parse_results(directory, exp.LEARNED_REWARD)
+    def foo(row):
+        row = np.array(row)
+        row = row[:,:100]
+        return float(np.mean(row))
+    mr_data = data.apply(foo)
+    return mr_data
+
 def get_ucb1_mean_reward(exp, directory):
     data = utils.parse_results(directory, exp.LEARNED_REWARD)
     count_total = data['Count'].sum()
@@ -80,6 +90,8 @@ def get_params_best(exp, directory, score_function, n=1, params=None):
         n = score.size
     if n == 1:
         output_params = [score.idxmax()]
+        print(params)
+        print(score.loc[output_params])
     else:
         score = score.sort_values(ascending=False)
         output_params = itertools.islice(score.index, n)
@@ -116,9 +128,13 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
     if directory is None:
         directory=exp.get_directory()
 
-    params1 = get_params_best(exp, directory, get_ucb1_mean_reward, m)
-    params2 = get_params_best(exp, directory, get_ucb1_final_reward, m)
-    params = params1+params2
+    params = []
+    param_filters = exp.get_plot_params_best()['param_filters']
+    for pf in param_filters:
+        params += get_params_best(exp, directory, get_ucb1_mean_reward, m, pf)
+        #params1 = get_params_best(exp, directory, get_ucb1_mean_reward, m, pf)
+        #params2 = get_params_best(exp, directory, get_ucb1_final_reward, m, pf)
+        #params += params1+params2
 
     print("-"*80)
     print("Further refining gridsearch, exploring with UCB1")
@@ -138,19 +154,21 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
     utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
 def run3(exp, n=100, proc=10, params=None, directory=None,
-        by_mean_reward=True, by_final_reward=False):
+        by_mean_reward=True, by_final_reward=False, score_functions=None):
     if directory is None:
         directory=exp.get_directory()
-    if params is None:
+    if score_functions is None:
+        score_functions = []
         if by_mean_reward:
-            params1 = get_params_best(exp, directory, get_mean_rewards, 1)
-        else:
-            params1 = []
+            score_functions.append(get_mean_rewards)
         if by_final_reward:
-            params2 = get_params_best(exp, directory, get_final_rewards, 1)
-        else:
-            params2 = []
-        params = params1+params2
+            score_functions.append(get_final_rewards)
+    if params is None:
+        param_filters = exp.get_plot_params_best()['param_filters']
+        params = []
+        for sf in score_functions:
+            for pf in param_filters:
+                params += get_params_best(exp, directory, sf, 1, pf)
 
     print("-"*80)
     print("Running more trials with the best parameters found so far.")
@@ -227,26 +245,26 @@ def plot_final_rewards(exp):
                 xlabel=xlabel, ylabel=ylabel)
     return data
 
-def plot_best(exp):
+def plot_best(exp, score_functions=[get_mean_rewards]):
     directory=exp.get_directory()
 
     plot_params = exp.get_plot_params_best()
     file_name = plot_params['file_name']
     label_template = plot_params['label_template']
+    param_filters = plot_params['param_filters']
 
     data = []
     #score_functions = [get_mean_rewards, get_final_rewards]
-    score_functions = [get_mean_rewards]
-    labels = ['mean reward', 'final reward']
-    for sf,l in zip(score_functions,labels):
-        params = get_params_best(exp, directory, sf, 1)
-        for p in params:
-            print("Plotting params: ", params)
-            data.append(graph.get_data(
-                p, directory,
-                label=label_template.format(**p)))
-    graph.graph_data(data, file_name, directory, xlabel='Episodes',
-            ylabel='Cumulative Reward')
+    for sf in score_functions:
+        for pf in param_filters:
+            params = get_params_best(exp, directory, sf, 1, pf)
+            for p in params:
+                print("Plotting params: ", params)
+                data.append(graph.get_data(
+                    p, directory,
+                    label=label_template.format(**p)))
+        graph.graph_data(data, file_name, directory, xlabel='Episodes',
+                ylabel='Cumulative Reward')
 
     return data
 
@@ -258,7 +276,8 @@ def plot_best_trials(exp, n):
     means = [np.mean(y) for y in ys]
     data = [(x,y,None,'') for y in ys]
     sorted_data = sorted(list(zip(data,means)),key=lambda a: a[1])
-    data = sorted_data[:n]+sorted_data[-n:]
+    #data = sorted_data[:n]+sorted_data[-n:]
+    data = sorted_data[-n:]
     data = [d[0] for d in data]
     graph.graph_data(data, 'all-trials.png', directory, xlabel='Episodes',
             ylabel='Cumulative Reward')
@@ -318,8 +337,11 @@ def plot_gridsearch(exp):
         means = series.apply(foo)
         vals[index[0],index[1],index[2],index[3]] = means.max()
 
+    #graph.graph_matrix('gridsearch.png', directory,
+    #        axis_vals, vals, axis_labels=axis_labels)
     graph.graph_matrix('gridsearch.png', directory,
-            axis_vals, vals, axis_labels=axis_labels)
+            axis_vals, vals, axis_labels=axis_labels,
+            min_val=exp.MIN_REWARD, max_val=exp.MAX_REWARD)
 
     return
 
@@ -367,3 +389,29 @@ def plot_custom_best_mean(exps, labels):
     output_directory = os.path.join(utils.get_results_directory(),__name__)
     graph.graph_data(data, 'foo.png', output_directory, xlabel='Episodes',
             ylabel='Cumulative Reward')
+
+# Misc
+def foo(exps,label_template=''):
+    data = []
+    for exp in exps:
+        directory=exp.get_directory()
+        param_filters = [{}]
+        params = get_params_best(exp, directory, get_mean_rewards, 1)
+        for p in params:
+            x,ys,_ = graph.get_data_individual(p,directory)
+            data.append((x,ys,p))
+    t = scipy.stats.ttest_ind(data[0][1],data[1][1],axis=0,equal_var=False)[1]
+    return data,t
+    #    output_data = []
+    #all_ps = [[None]*len(data) for _ in range(len(data))]
+    #for i1,i2 in itertools.combinations(range(len(data)),2):
+    #    x1,y1,_ = data[i1]
+    #    x2,y2,_ = data[i2]
+    #    t = scipy.stats.ttest_ind(y1,y2,axis=0,equal_var=False)[1]
+    #    all_ps[i1][i2] = t
+    #    all_ps[i2][i1] = t
+    #for i in range(len(data)):
+    #    all_ps[i][i] = label_template.format(**data[i][2])
+    #graph.graph_data_histogram(all_ps, 't-test-hist.png',
+    #        directory,xlabel='p-value',ylabel='frequency')
+    #return

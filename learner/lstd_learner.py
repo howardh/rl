@@ -55,7 +55,7 @@ class LSTDLearner(Learner):
         self.validate_state(state)
         # Get index of given action
         action_index = self.action_space.tolist().index(action)
-        result = torch.zeros([self.num_features*len(self.action_space),1]).float()
+        result = torch.zeros([int(self.num_features*len(self.action_space)),1]).float()
         start_index = action_index*self.num_features
         end_index = start_index+self.num_features
         result[start_index:end_index,0] = torch.from_numpy(state).float()
@@ -218,13 +218,13 @@ class LSTDTraceQsLearner(LSTDLearner):
         self.decay = decay
 
         # Trace vector
-        self.e_mat = torch.zeros([1,self.num_features*len(self.action_space)])
+        self.e_mat = torch.zeros([1,int(self.num_features*len(self.action_space))])
 
         self.prev_sars = None
 
     def get_all_state_action_pairs(self, state):
         num_actions = len(self.action_space)
-        results = torch.zeros([self.num_features*num_actions,num_actions])
+        results = torch.zeros([int(self.num_features*num_actions),num_actions])
         for a in range(num_actions):
             results[:,a:(a+1)] = self.combine_state_action(state, self.action_space.item(a))
         return results

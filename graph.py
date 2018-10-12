@@ -42,6 +42,7 @@ def graph_data(data, file_name, directory,
         ax.set_ylim(ylims)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
+    ax.grid()
 
     for x,mean,std,label in data:
         if std is not None:
@@ -135,10 +136,17 @@ def graph_data_curves(data, file_name, directory,
 
 def graph_matrix(file_name, directory,
         axis_vals, values,
-        axis_labels=['majx','majy','minx','miny']):
+        axis_labels=['majx','majy','minx','miny'],
+        min_val=None,max_val=None):
+    min_val=None
+    max_val=None
     majx_vals, majy_vals, minx_vals, miny_vals = axis_vals
+    if min_val == None:
+        min_val = np.min(values)
+    if max_val == None:
+        max_val = np.max(values)
     cmap = matplotlib.cm.get_cmap('jet')
-    norm = matplotlib.colors.Normalize(vmin=np.min(values), vmax=np.max(values))
+    norm = matplotlib.colors.Normalize(vmin=min_val, vmax=max_val)
     fig, ax = plt.subplots(len(majy_vals)+1,len(majx_vals)+1,True,True)
     # Plot data
     img = None
@@ -147,21 +155,27 @@ def graph_matrix(file_name, directory,
                 interpolation='none',
                 cmap=cmap)
         img.set_norm(norm)
-        ax[j,i+1].set_xlabel(axis_labels[2])
-        ax[j,i+1].set_ylabel(axis_labels[3])
+        if i == 0:
+            ax[j,i+1].set_ylabel(axis_labels[3])
+        if j+1 == len(majy_vals):
+            ax[j,i+1].set_xlabel(axis_labels[2])
         ax[j,i+1].set_xticklabels(minx_vals)
         ax[j,i+1].set_yticklabels(miny_vals)
         ax[j,i+1].set_adjustable('box-forced')
     # Major x-axis tick labels
     for i in range(len(majx_vals)):
-        ax[-1,i+1].text(1,2,majx_vals[i])
+        xlims = ax[-1,i+1].get_xlim()
+        ylims = ax[-1,i+1].get_ylim()
+        ax[-1,i+1].text((xlims[0]+xlims[1])/2,(ylims[0]+ylims[1])/2,majx_vals[i],horizontalalignment='center',verticalalignment='center')
         ax[-1,i+1].tick_params(labelcolor='none',
                 top='off', bottom='off', left='off', right='off')
         ax[-1,i+1].grid(False)
         ax[-1,i+1].axis('off')
     # Major y-axis tick labels
     for j in range(len(majy_vals)):
-        ax[j,0].text(-1,2,majy_vals[j])
+        xlims = ax[-1,i+1].get_xlim()
+        ylims = ax[-1,i+1].get_ylim()
+        ax[j,0].text((xlims[0]+xlims[1])/2,(ylims[0]+ylims[1])/2,majy_vals[j],horizontalalignment='center',verticalalignment='center')
         ax[j,0].tick_params(labelcolor='none',
                 top='off', bottom='off', left='off', right='off')
         ax[j,0].grid(False)

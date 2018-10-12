@@ -110,6 +110,7 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best.png'
     label_template = 'LSTD best $\sigma$'
+    label_template = 'LSTDQ($\sigma$)'
     return locals()
 
 def get_plot_params_gridsearch():

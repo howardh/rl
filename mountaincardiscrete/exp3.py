@@ -52,8 +52,8 @@ def run_trial(discount_factor, initial_value, num_divs,
         agent = LSTDAgent(
                 action_space=action_space,
                 discount_factor=discount_factor,
-                features=rbf,
-                num_features=num_pos*num_vel,
+                features=discretize,
+                num_features=int(np.prod(divs)),
                 use_traces=True,
                 trace_factor=trace_factor,
                 sigma=sigma
@@ -90,24 +90,25 @@ def get_directory():
 
 def get_params_gridsearch():
     directory = get_directory()
-    behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-    target_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    #behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    #target_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    behaviour_eps = [0, 0.2, 0.4, 0.6, 0.8, 1]
+    target_eps = [0, 0.1, 0.2, 0.3, 0.4]
     trace_factors = [0, 0.25, 0.5, 0.75, 1]
     sigmas = [0, 0.25, 0.5, 0.75, 1]
+    num_divs = [8,16,32,64]
 
-    keys = ['behaviour_eps', 'target_eps', 'sigma','trace_factor']
+    keys = ['behaviour_eps', 'target_eps', 'sigma','trace_factor', 'num_divs']
     params = []
-    for vals in itertools.product(behaviour_eps, target_eps, sigmas, trace_factors):
+    for vals in itertools.product(behaviour_eps, target_eps, sigmas, trace_factors,num_divs):
         d = dict(zip(keys,vals))
         d['discount_factor'] = 1
         d['initial_value'] = 0
-        d['num_pos'] = 8
-        d['num_vel'] = 8
         d['update_freq'] = 1
         d['epoch'] = 50
         d['max_iters'] = 3000
         d['test_iters'] = 1
-        d["directory"] = os.path.join(directory, "l%f"%d['trace_factor'])
+        d["directory"] = os.path.join(directory, "d%f"%d['num_divs'])
         params.append(d)
     return params
 

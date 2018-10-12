@@ -74,12 +74,12 @@ def skip_new_files(skip=None):
 def collect_file_params(file_names):
     results = dict()
     for file_name in tqdm(file_names, desc='Collecting file parameters'):
-        with open(file_name, 'rb') as f:
-            try:
+        try:
+            with open(file_name, 'rb') as f:
                 file_params,_,_ = dill.load(f)
-            except Exception as e:
-                tqdm.write("Skipping %s" % file_name)
-                continue
+        except Exception as e:
+            tqdm.write("Skipping %s" % file_name)
+            continue
         if file_params is None:
             continue
         for k,v in file_params.items():
@@ -209,13 +209,13 @@ def parse_results(directory, learned_threshold=None,
     try:
         print("%d files to process." % len(files))
         for file_name in tqdm(files, desc="Parsing File Contents"):
-            with open(os.path.join(directory,file_name), 'rb') as f:
-                try:
+            try:
+                with open(os.path.join(directory,file_name), 'rb') as f:
                     params, series, time_to_learn = dill.load(f)
-                except Exception as e:
-                    tqdm.write("Skipping %s" % file_name)
-                    parsed_files.append(file_name)
-                    continue
+            except Exception as e:
+                tqdm.write("Skipping %s" % file_name)
+                parsed_files.append(file_name)
+                continue
             params = cast_params(params)
             param_vals = tuple([params[k] for k in keys])
             series = np.mean(series, axis=1)

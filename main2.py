@@ -6,6 +6,7 @@ from frozenlake2 import exp3
 from frozenlake2 import exp4
 from frozenlake2 import exp5
 from frozenlake2 import exp3decay
+from frozenlake2 import exp5decay
 from frozenlake2 import graph
 
 import experiments
@@ -38,19 +39,37 @@ if __name__ == "__main__":
     #for _ in tqdm(range(100)):
     #    experiments.run2(exp2, n=10, m=10, proc=40)
     #utils.skip_new_files(True)
-    while True:
-        experiments.run3(exp5, n=10, proc=20)
-        graph.graph_lstd()
     #while True:
-    #    experiments.run3(exp4, n=10, proc=20)
+    #    experiments.run3(exp3, n=20, proc=1,
+    #            score_functions=[experiments.get_mean_rewards_first100])
+    #    graph.graph_lstd()
+    #    graph.graph_all()
+    #while True:
+    #    experiments.run3(exp4, n=20, proc=3)
+    #    experiments.run2(exp2, n=10, m=1, proc=40)
     #    graph.graph_sgd()
     #experiments.plot_gridsearch(exp3decay)
     #experiments.plot_best(exp3decay)
     #graph.graph_sgd()
+    #while True:
+    #    experiments.run3(exp5, n=5, proc=10)
+    #    #graph.graph_lstd()
+    #experiments.run3(exp5, n=300, proc=30)
     #graph.graph_lstd()
+    #graph.graph_sgd()
     #graph.graph_all()
     #s=utils.get_all_series(exp2.get_directory())
-    #experiments.plot_gridsearch(exp2)
+    #experiments.plot_gridsearch(exp3)
     #experiments.plot_best_trials(exp2,3)
     #experiments.plot_best_trials(exp3,3)
     #experiments.plot_best(exp5)
+    #experiments.plot_gridsearch(exp3decay)
+    #experiments.plot_best(exp3decay,
+    #        score_functions=[experiments.get_mean_rewards])
+    while True:
+        experiments.run1(exp3decay, n=1, proc=10)
+        experiments.run2(exp3decay, n=3, m=3, proc=10)
+        experiments.run3(exp3decay, n=50, proc=10)
+    #while True:
+    #    experiments.run3(exp5decay, n=5, proc=3)
+    #experiments.plot_best(exp5decay)

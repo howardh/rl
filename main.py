@@ -269,7 +269,7 @@ def run_all(proc=20):
 
     # LSTD
     experiments.run1(exp3, n=1, proc=proc)
-    for _ in range(100):
+    for _ in range(1):
         experiments.run2(exp3, n=1, m=100, proc=proc)
     experiments.run3(exp3, n=15, proc=proc)
     experiments.plot_best(exp3)
@@ -282,11 +282,17 @@ def run_all(proc=20):
 
 if __name__ == "__main__":
     utils.set_results_directory("/home/ml/hhuang63/results/final")
+    #while True:
+    #    #experiments.run1(exp2, n=1, proc=40)
+    #    #experiments.run2(exp2, n=10, m=10, proc=20)
+    #    experiments.run3(exp2, n=20, proc=20)
+    #    experiments.plot_best(exp2)
     utils.skip_new_files(True)
     #run_all(proc=15)
     #graph.graph_sarsa_tb()
+    graph.graph_sgd()
     #graph.graph_lstd()
     #experiments.plot_best(exp5)
     #experiments.plot_t_test(exp5, 'Sigma={sigma}')
-    experiments.plot_gridsearch(exp2)
-    experiments.plot_gridsearch(exp3)
+    #experiments.plot_gridsearch(exp2)
+    #experiments.plot_gridsearch(exp3)

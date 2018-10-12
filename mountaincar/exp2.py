@@ -124,6 +124,8 @@ def get_plot_params_best():
 
 def get_plot_params_gridsearch():
     file_name = 'graph-gridsearch.png'
-    axis_params = ['sigma', 'trace_factor', 'behaviour_eps', 'target_eps']
-    axis_labels = ['$\sigma$', '$\lambda$', '$\epsilon_b$', '$\epsilon_t$']
+    #axis_params = ['sigma', 'trace_factor', 'behaviour_eps', 'target_eps']
+    #axis_labels = ['$\sigma$', '$\lambda$', '$\epsilon_b$', '$\epsilon_t$']
+    axis_params = ['sigma', 'trace_factor', 'behaviour_eps', 'learning_rate']
+    axis_labels = ['$\sigma$', '$\lambda$', '$\epsilon_b$', '$\\alpha$']
     return locals()

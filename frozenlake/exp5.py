@@ -31,8 +31,8 @@ run_trial = exp3.run_trial
 get_directory = exp3.get_directory
 
 def get_param_filters():
-    return [{'sigma': 0.0},
-            {'sigma': 1.0}]
+    return [{'sigma': 0.5},
+            {'sigma': 0.75}]
     return [{'sigma': 0.0},
             {'sigma': 0.25},
             {'sigma': 0.5},
@@ -63,5 +63,4 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best5.png'
     label_template = 'LSTD sigma={sigma}'
-    param_filters = get_param_filters()
     return locals()

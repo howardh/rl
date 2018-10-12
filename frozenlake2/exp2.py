@@ -73,6 +73,14 @@ def run_trial(alpha, gamma, eps_b, eps_t, sigma, lam,
 def get_directory():
     return os.path.join(utils.get_results_directory(),__name__,"part1")
 
+def get_param_filters():
+    return [{'gamma': 1, 'lam': 0.0, 'epoch': 10, 'alpha': 0.4641588833612779,
+        'max_iters': 2000, 'eps_t': 0.0, 'sigma': 0.0, 'test_iters': 50,
+        'eps_b': 0.0}]
+    return [{}]
+    return [{'sigma': 0., 'alpha': 0.4641588833612779}]
+    return [{'alpha': 0.4641588833612779}]
+
 def get_params_gridsearch():
     behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
     target_eps = [0, 0.1, 0.2, 0.3, 0.4]
@@ -109,6 +117,7 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best.png'
     label_template = 'SGD best $\sigma$'
+    label_template = 'Q($\sigma$)'
     return locals()
 
 def get_plot_params_gridsearch():

@@ -76,7 +76,7 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, decay,
         dill.dump(data, f)
 
 def get_directory():
-    return os.path.join(utils.get_results_directory(),__name__,"decay")
+    return os.path.join(utils.get_results_directory(),__name__,"decay3")
 
 def get_params_gridsearch():
     #behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -84,16 +84,15 @@ def get_params_gridsearch():
     target_eps = [0, 0.1, 0.2, 0.3, 0.4]
     trace_factors = [0, 0.25, 0.5, 0.75, 1]
     sigmas = [0, 0.25, 0.5, 0.75, 1]
-    #decay = [1,0.8,0.6]
-    decay = [0.95,0.9]
+    decay = [1, 0.999, 0.995, 0.99, 0.95, 0.9]
 
     keys = ['eps_b', 'eps_t', 'sigma', 'lam','decay']
     params = []
     for vals in itertools.product(behaviour_eps, target_eps, sigmas, trace_factors, decay):
         d = dict(zip(keys,vals))
         d['gamma'] = 1
-        d['epoch'] = 10
-        d['max_iters'] = 2000
+        d['epoch'] = 1
+        d['max_iters'] = 500
         d['test_iters'] = 50
         d['upd_freq'] = 1
         params.append(d)
@@ -116,7 +115,7 @@ def get_plot_params_best():
     label_template = 'LSTD $\sigma={sigma}$, decay={decay}'
     #param_filters = []
     #param_filters = [{'decay': 1.0}, {'decay': 0.8}, {'decay': 0.6}]
-    param_filters = [{'decay': 1.0}, {'decay': 0.95}, {'decay': 0.9}]
+    param_filters = [{'decay': 1.0}, {'decay': 0.999}, {'decay': 0.995}, {'decay': 0.99}, {'decay': 0.95}, {'decay': 0.9}]
     return locals()
 
 def get_plot_params_gridsearch():

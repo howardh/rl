@@ -21,11 +21,13 @@ def graph_sgd(directory=None):
     graph_data(data, "graph-sgd.png", get_directory(), ylims=[MIN_REWARD,MAX_REWARD])
 
 def graph_lstd(directory=None):
-    data3 = experiments.plot_best(exp3)
+    #data3 = experiments.plot_best(exp3)
     data5 = experiments.plot_best(exp5)
-    data = data3+data5
+    #data = data3+data5
+    data = data5
     #n = 51
     #data = [(x[:n],m[:n],s[:n],l) for x,m,s,l in data]
+    data = [(x,m,None,l) for x,m,s,l in data]
     graph_data(data, "graph-lstd.png", get_directory(), ylims=[MIN_REWARD,MAX_REWARD])
 
 def graph_sarsa_tb(directory=None):

@@ -1,10 +1,10 @@
 import os
 
-import mountaincar
-from mountaincar import exp2
-from mountaincar import exp3
-from mountaincar import MAX_REWARD
-from mountaincar import MIN_REWARD
+import mountaincardiscrete
+from mountaincardiscrete import exp2
+from mountaincardiscrete import exp3
+from mountaincardiscrete import MAX_REWARD
+from mountaincardiscrete import MIN_REWARD
 
 import experiments
 import graph
