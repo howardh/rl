@@ -266,7 +266,7 @@ def plot_best(exp, score_functions=[get_mean_rewards]):
     plot_params = exp.get_plot_params_best()
     file_name = plot_params['file_name']
     label_template = plot_params['label_template']
-    param_filters = plot_params['param_filters']
+    param_filters = exp.get_param_filters()
 
     data = []
     #score_functions = [get_mean_rewards, get_final_rewards]
@@ -392,15 +392,29 @@ def plot_custom():
 # Plotting across experiments
 
 def plot_custom_best_mean(exps, labels):
+    plot_multiple_experiments(exps, labels, get_mean_rewards)
+
+def plot_multiple_experiments(exps, labels, score_function, x_range=[None,None]):
     data = []
     for exp,l in zip(exps,labels):
         directory = exp.get_directory()
-        params = get_params_best(exp, directory, get_mean_rewards, 1)[0]
+        params = get_params_best(exp, directory, score_function, 1)[0]
         print("Plotting params: ", params)
-        data.append(graph.get_data(
+        datum = graph.get_data(
             params, 
             directory,
-            label=l))
+            label=l)
+        x, mean, std, label = datum
+        x = np.array(x)
+        indices = x==x
+        if x_range[0] is not None:
+            indices = np.logical_and(indices, x >= x_range[0])
+        if x_range[1] is not None:
+            indices = np.logical_and(indices, x <= x_range[1])
+        x = x[indices]
+        mean = np.array(mean)[indices]
+        std = np.array(std)[indices]
+        data.append((x,mean,std,label))
     output_directory = os.path.join(utils.get_results_directory(),__name__)
     graph.graph_data(data, 'foo.png', output_directory, xlabel='Episodes',
             ylabel='Cumulative Reward')

@@ -3,6 +3,7 @@ import frozenlake.exp2
 import frozenlake.exp3
 import frozenlake2.exp2
 import frozenlake2.exp3
+import frozenlake2.exp3decay
 
 import cartpole
 import cartpole.exp1
@@ -15,10 +16,15 @@ import utils
 
 if __name__=='__main__':
     utils.set_results_directory("/home/ml/hhuang63/results/final")
-    #utils.skip_new_files(True)
-    experiments.plot_custom_best_mean(
-            [frozenlake.exp2, frozenlake2.exp2, frozenlake.exp3, frozenlake2.exp3],
-            ['SGD accumulating', 'SGD replacing', 'LSTD accumulating', 'LSTD replacing'])
+    utils.skip_new_files(True)
+    #experiments.plot_custom_best_mean(
+    #        [frozenlake.exp2, frozenlake2.exp2, frozenlake.exp3, frozenlake2.exp3],
+    #        ['SGD accumulating', 'SGD replacing', 'LSTD accumulating', 'LSTD replacing'])
     #experiments.plot_custom_best_mean(
     #        [cartpole.exp1, cartpole2.exp1, cartpole.exp3, cartpole2.exp3],
     #        ['SGD accumulating', 'SGD replacing', 'LSTD accumulating', 'LSTD replacing'])
+    experiments.plot_multiple_experiments(
+            [frozenlake2.exp2, frozenlake2.exp3decay],
+            ['SGD', 'LSTD+decay'],
+            experiments.get_mean_rewards_first100,
+            x_range=[None,500])

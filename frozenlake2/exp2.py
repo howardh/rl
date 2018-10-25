@@ -74,11 +74,11 @@ def get_directory():
     return os.path.join(utils.get_results_directory(),__name__,"part1")
 
 def get_param_filters():
-    return [{'gamma': 1, 'lam': 0.0, 'epoch': 10, 'alpha': 0.4641588833612779,
-        'max_iters': 2000, 'eps_t': 0.0, 'sigma': 0.0, 'test_iters': 50,
-        'eps_b': 0.0}]
+    #return [{'gamma': 1, 'lam': 0.0, 'epoch': 10, 'alpha': 0.4641588833612779,
+    #    'max_iters': 2000, 'eps_t': 0.0, 'sigma': 0.0, 'test_iters': 50,
+    #    'eps_b': 0.0}]
     return [{}]
-    return [{'sigma': 0., 'alpha': 0.4641588833612779}]
+    #return [{'sigma': 0., 'alpha': 0.4641588833612779}]
     return [{'alpha': 0.4641588833612779}]
 
 def get_params_gridsearch():
