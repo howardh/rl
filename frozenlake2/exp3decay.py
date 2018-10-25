@@ -116,6 +116,7 @@ def get_plot_params_best():
     #param_filters = []
     #param_filters = [{'decay': 1.0}, {'decay': 0.8}, {'decay': 0.6}]
     param_filters = [{'decay': 1.0}, {'decay': 0.999}, {'decay': 0.995}, {'decay': 0.99}, {'decay': 0.95}, {'decay': 0.9}]
+    param_filters = [{'decay': 1.0}, {'decay': 0.999}, {'decay': 0.995}, {'decay': 0.99}, {'decay': 0.9}]
     return locals()
 
 def get_plot_params_gridsearch():

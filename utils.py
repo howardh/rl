@@ -273,7 +273,13 @@ def get_all_series(directory,
     if os.path.isfile(series_fullpath):
         # A dataframe already exists, so load that instead of making a new one
         print("File exists. Loading %s..." % series_fullpath)
-        data = pandas.read_pickle(series_fullpath)
+        while True:
+            try:
+                data = pandas.read_pickle(series_fullpath)
+                break
+            except:
+                print('Failed to load file: %s. Retrying in 30s.' % series_fullpath)
+                time.sleep(30)
         keys = data.index.names
         all_params = dict([(k, set(data.index.get_level_values(k))) for k in keys])
     else:

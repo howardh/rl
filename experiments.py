@@ -70,6 +70,21 @@ def get_ucb1_final_reward(exp, directory):
     score = data.apply(ucb1, axis=1)
     return score
 
+def get_ucb1_mean_reward_first100(exp, directory):
+    data = utils.get_all_series(directory)
+    #data = utils.parse_results(directory, exp.LEARNED_REWARD)
+    count = data.apply(lambda x: len(x))
+    count_total = count.sum()
+    def ucb1(row):
+        row = np.array(row)
+        row = row[:,:100]
+        row_count = len(row)
+        a = float(np.mean(row))/row_count
+        b = np.sqrt(2*np.log(count_total)/row_count)
+        return a+b
+    score = data.apply(ucb1)
+    return score
+
 def get_params_best(exp, directory, score_function, n=1, params=None):
     if params is None:
         if hasattr(exp, 'get_param_filters'):
@@ -131,7 +146,7 @@ def run2(exp, n=1, m=10, proc=10, directory=None):
     params = []
     param_filters = exp.get_plot_params_best()['param_filters']
     for pf in param_filters:
-        params += get_params_best(exp, directory, get_ucb1_mean_reward, m, pf)
+        params += get_params_best(exp, directory, get_ucb1_mean_reward_first100, m, pf)
         #params1 = get_params_best(exp, directory, get_ucb1_mean_reward, m, pf)
         #params2 = get_params_best(exp, directory, get_ucb1_final_reward, m, pf)
         #params += params1+params2
