@@ -18,7 +18,8 @@ class LinearLearner(Learner):
         self.target_policy = self.get_epsilon_greedy(0)
         self.behaviour_policy = self.get_epsilon_greedy(0.1)
 
-        self.weights = torch.from_numpy(np.random.rand(len(self.action_space), self.num_features)).float().cuda()
+        #self.weights = torch.from_numpy(np.random.rand(len(self.action_space), self.num_features)).float().cuda()
+        self.weights = torch.zeros((len(self.action_space), self.num_features)).float().cuda()
         self.traces = torch.zeros(self.weights.size()).float().cuda()
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):

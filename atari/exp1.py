@@ -48,7 +48,7 @@ def run_trial(alpha, gamma, eps_b, eps_t, sigma, lam,
             if epoch is not None and iters % epoch == 0:
                 r = agent.test(e, test_iters, render=False, processors=1)
                 rewards.append(r)
-                tqdm.write('Reward: %s' % r)
+                tqdm.write('Reward: %s %s' % (np.mean(r), r))
             agent.run_episode(e)
     except ValueError as e:
         tqdm.write(str(e))

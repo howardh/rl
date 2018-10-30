@@ -40,6 +40,18 @@ def get_final_rewards(exp, directory):
     fr_data = data.apply(lambda row: row.MaxS/row.Count, axis=1)
     return fr_data
 
+def get_mean_rewards_first_n(n):
+    def bar(exp, directory):
+        data = utils.get_all_series(directory)
+        #data = utils.parse_results(directory, exp.LEARNED_REWARD)
+        def foo(row):
+            row = np.array(row)
+            row = row[:,:n]
+            return float(np.mean(row))
+        mr_data = data.apply(foo)
+        return mr_data
+    return bar
+
 def get_mean_rewards_first100(exp, directory):
     data = utils.get_all_series(directory)
     #data = utils.parse_results(directory, exp.LEARNED_REWARD)
@@ -69,6 +81,22 @@ def get_ucb1_final_reward(exp, directory):
         return a+b
     score = data.apply(ucb1, axis=1)
     return score
+
+def get_ucb1_mean_reward_first_n(n=None):
+    def foo(exp, directory):
+        data = utils.get_all_series(directory)
+        count = data.apply(lambda x: len(x))
+        count_total = count.sum()
+        def ucb1(row):
+            row = np.array(row)
+            row = row[:,:n]
+            row_count = len(row)
+            a = float(np.mean(row))/row_count
+            b = np.sqrt(2*np.log(count_total)/row_count)
+            return a+b
+        score = data.apply(ucb1)
+        return score
+    return foo
 
 def get_ucb1_mean_reward_first100(exp, directory):
     data = utils.get_all_series(directory)
@@ -139,17 +167,16 @@ def run1(exp, n=1, proc=10, directory=None):
     random.shuffle(params)
     utils.cc(exp.run_trial, params, proc=proc, keyworded=True)
 
-def run2(exp, n=1, m=10, proc=10, directory=None):
+def run2(exp, n=1, m=10, proc=10, directory=None,
+        score_functions=[get_ucb1_mean_reward]):
     if directory is None:
         directory=exp.get_directory()
 
     params = []
     param_filters = exp.get_plot_params_best()['param_filters']
     for pf in param_filters:
-        params += get_params_best(exp, directory, get_ucb1_mean_reward_first100, m, pf)
-        #params1 = get_params_best(exp, directory, get_ucb1_mean_reward, m, pf)
-        #params2 = get_params_best(exp, directory, get_ucb1_final_reward, m, pf)
-        #params += params1+params2
+        for sf in score_functions:
+            params += get_params_best(exp, directory, sf, m, pf)
 
     print("-"*80)
     print("Further refining gridsearch, exploring with UCB1")
