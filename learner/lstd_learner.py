@@ -233,7 +233,7 @@ class LSTDTraceQsLearner(LSTDLearner):
         self.validate_state(state1)
         self.validate_state(state2)
         if self.prev_sars is not None:
-            if any(state1 != self.prev_sars[3]):
+            if (state1 != self.prev_sars[3]).any():
                 raise ValueError("States from the last two state-action pairs don't match up. Expected %s, but received %s." % (self.prev_sars[3], state1))
             state0,action0,reward1,_ = self.prev_sars
 

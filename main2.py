@@ -71,11 +71,11 @@ if __name__ == "__main__":
     while True:
         #experiments.run1(exp3decay, n=1, proc=3)
         #experiments.run2(exp3decay, n=1, m=10, proc=3)
-        experiments.run3(exp3decay, n=3, proc=10)
+        #experiments.run3(exp3decay, n=3, proc=10)
         #experiments.plot_best(exp3decay,
         #        score_functions=[experiments.get_mean_rewards])
-        #experiments.run3(exp3decay, n=3, proc=3,
-        #        score_functions=[experiments.get_mean_rewards_first100])
+        experiments.run3(exp3decay, n=3, proc=10,
+                score_functions=[experiments.get_mean_rewards_first100])
         experiments.plot_best(exp3decay,
                 score_functions=[experiments.get_mean_rewards_first100])
     #while True:

@@ -110,13 +110,17 @@ def get_plot_params_final_rewards():
     ylabel = 'Cumulative reward'
     return locals()
 
-def get_plot_params_best():
-    file_name = 'graph-best.png'
-    label_template = 'LSTD $\sigma={sigma}$, decay={decay}'
+def get_param_filters():
     #param_filters = []
     #param_filters = [{'decay': 1.0}, {'decay': 0.8}, {'decay': 0.6}]
     param_filters = [{'decay': 1.0}, {'decay': 0.999}, {'decay': 0.995}, {'decay': 0.99}, {'decay': 0.95}, {'decay': 0.9}]
-    param_filters = [{'decay': 1.0}, {'decay': 0.999}, {'decay': 0.995}, {'decay': 0.99}, {'decay': 0.9}]
+    param_filters = [{'decay': 0.999}, {'decay': 0.995}, {'decay': 0.99}, {'decay': 0.9}]
+    return param_filters
+
+def get_plot_params_best():
+    file_name = 'graph-best.png'
+    label_template = 'LSTD $\sigma={sigma}$, decay={decay}'
+    param_filters = get_param_filters()
     return locals()
 
 def get_plot_params_gridsearch():

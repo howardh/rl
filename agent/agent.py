@@ -1,8 +1,9 @@
+import os
+os.environ['GYM_NO_LOGGER_SETUP'] = "1"
 import numpy as np
 import re
 import itertools
 import gym
-gym.undo_logger_setup()
 
 class Agent(object):
     """
