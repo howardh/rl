@@ -84,7 +84,8 @@ def get_params_gridsearch():
     target_eps = [0, 0.1, 0.2, 0.3, 0.4]
     trace_factors = [0, 0.25, 0.5, 0.75, 1]
     sigmas = [0, 0.25, 0.5, 0.75, 1]
-    decay = [1, 0.999, 0.995, 0.99, 0.95, 0.9]
+    #decay = [1, 0.999, 0.995, 0.99, 0.95, 0.9]
+    decay = [0.9, 0.5, 0.1]
 
     keys = ['eps_b', 'eps_t', 'sigma', 'lam','decay']
     params = []
