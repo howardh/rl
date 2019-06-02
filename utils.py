@@ -33,6 +33,8 @@ def get_results_directory():
         return os.path.join("/home/ml/hhuang63/results",START_TIME)
     if host_name.find('gra') == 0 or host_name.find('cdr') == 0:
         return os.path.join("/home/hhuang63/scratch/results",START_TIME)
+    if host_name.find('howard-pc') == 0:
+        return os.path.join("/home/howard/tmp/results",START_TIME)
     raise NotImplementedError("No default path defined for %s" % host_name)
 
 def set_results_directory(d):

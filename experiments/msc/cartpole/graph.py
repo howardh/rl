@@ -1,12 +1,12 @@
 import os
 
-import cartpole
-from cartpole import exp1
-from cartpole import exp3
-from cartpole import exp4
-from cartpole import exp5
-from cartpole import MAX_REWARD
-from cartpole import MIN_REWARD
+#import cartpole
+from . import exp1
+from . import exp3
+from . import exp4
+from . import exp5
+from . import MAX_REWARD
+from . import MIN_REWARD
 
 import experiments
 import graph

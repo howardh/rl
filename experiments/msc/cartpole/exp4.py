@@ -14,14 +14,14 @@ import random
 
 from agent.linear_agent import LinearAgent
 
-import cartpole
-from cartpole import ENV_NAME
-from cartpole import MAX_REWARD
-from cartpole import MIN_REWARD
-from cartpole import LEARNED_REWARD
-from cartpole import features
-from cartpole import utils
-from cartpole import exp1
+#import . as cartpole
+from . import ENV_NAME
+from . import MAX_REWARD
+from . import MIN_REWARD
+from . import LEARNED_REWARD
+from . import features
+from . import utils
+from . import exp1
 
 import graph
 import utils
