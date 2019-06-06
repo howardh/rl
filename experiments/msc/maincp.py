@@ -100,16 +100,16 @@ def run_all(proc=20):
 
     # LSTD
     experiments.run1(exp3, n=1, proc=proc)
-    for _ in range(100):
-        experiments.run2(exp3, n=1, m=100, proc=proc)
-    experiments.run3(exp3, n=100, proc=proc)
+    for _ in range(1):
+        experiments.run2(exp3, n=1, m=1, proc=proc)
+    experiments.run3(exp3, n=1, proc=proc)
     experiments.plot_best(exp3)
     experiments.plot_final_rewards(exp3)
 
-    experiments.run3(exp4, n=100, proc=proc)
+    experiments.run3(exp4, n=1, proc=proc)
     experiments.plot_best(exp4)
 
-    experiments.run3(exp5, n=100, proc=proc)
+    experiments.run3(exp5, n=1, proc=proc)
     experiments.plot_best(exp5)
 
     graph.graph_sgd()

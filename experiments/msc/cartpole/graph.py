@@ -8,7 +8,7 @@ from . import exp5
 from . import MAX_REWARD
 from . import MIN_REWARD
 
-import experiments
+import experiments.msc as experiments
 import graph
 from graph import graph_data
 import utils

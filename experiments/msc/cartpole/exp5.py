@@ -34,10 +34,15 @@ def get_param_filters():
     return [{'sigma': 0.0}, {'sigma': 1.0}]
 
 def get_params_gridsearch():
-    update_frequencies = [1,50,200]
-    behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-    target_eps = [0, 0.1, 0.2, 0.3, 0.4]
-    trace_factors = [0, 0.25, 0.5, 0.75, 1]
+    #update_frequencies = [1,50,200]
+    #behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    #target_eps = [0, 0.1, 0.2, 0.3, 0.4]
+    #trace_factors = [0, 0.25, 0.5, 0.75, 1]
+    #sigmas = [0, 1]
+    update_frequencies = [1]
+    behaviour_eps = [0]
+    target_eps = [0]
+    trace_factors = [0]
     sigmas = [0, 1]
 
     keys = ['upd_freq','eps_b', 'eps_t', 'sigma','lam']
@@ -57,4 +62,8 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best5.png'
     label_template = 'LSTD Q($\sigma={sigma}$)'
+    param_filters = []
     return locals()
+
+def get_param_filters():
+    return [()]

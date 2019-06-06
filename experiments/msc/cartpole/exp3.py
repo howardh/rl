@@ -16,7 +16,6 @@ import random
 from agent.discrete_agent import TabularAgent
 from agent.lstd_agent import LSTDAgent
 
-#import . as cartpole 
 from . import ENV_NAME
 from . import MAX_REWARD
 from . import MIN_REWARD
@@ -37,13 +36,13 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam, directory=None,
     args = locals()
     env_name = ENV_NAME
     e = gym.make(env_name)
+    e = features.Identity2(e)
 
     action_space = np.array([0,1])
     agent = LSTDAgent(
             action_space=action_space,
-            num_features=cartpole.features.IDENTITY_NUM_FEATURES,
+            num_features=e.observation_space.shape[0],
             discount_factor=gamma,
-            features=cartpole.features.identity2,
             use_importance_sampling=False,
             use_traces=True,
             trace_factor=lam,
@@ -87,11 +86,16 @@ def get_directory():
     return os.path.join(utils.get_results_directory(),__name__,"part1")
 
 def get_params_gridsearch():
-    update_frequencies = [1,50,200]
-    behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-    target_eps = [0, 0.1, 0.2, 0.3, 0.4]
-    trace_factors = [0, 0.25, 0.5, 0.75, 1]
-    sigmas = [0, 0.25, 0.5, 0.75, 1]
+    update_frequencies = [1]
+    behaviour_eps = [0, 0.5]
+    target_eps = [0]
+    trace_factors = [0]
+    sigmas = [0]
+    #update_frequencies = [1,50,200]
+    #behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    #target_eps = [0, 0.1, 0.2, 0.3, 0.4]
+    #trace_factors = [0, 0.25, 0.5, 0.75, 1]
+    #sigmas = [0, 0.25, 0.5, 0.75, 1]
 
     keys = ['upd_freq','eps_b', 'eps_t', 'sigma','lam']
     params = []
@@ -119,6 +123,7 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best.png'
     label_template = 'LSTD'
+    param_filters = []
     return locals()
 
 def get_plot_params_gridsearch():
@@ -126,3 +131,6 @@ def get_plot_params_gridsearch():
     axis_params = ['sigma', 'lam', 'eps_b', 'eps_t']
     axis_labels = ['$\sigma$', '$\lambda$', '$\epsilon_b$', '$\epsilon_t$']
     return locals()
+
+def get_param_filters():
+    return [()]

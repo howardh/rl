@@ -58,7 +58,7 @@ class LSTDLearner(Learner):
         result = torch.zeros([int(self.num_features*len(self.action_space)),1]).float()
         start_index = action_index*self.num_features
         end_index = start_index+self.num_features
-        result[start_index:end_index,0] = torch.from_numpy(state).float()
+        result[start_index:end_index,:] = torch.from_numpy(state).float()
         if self.cuda:
             result = result.cuda()
         return result

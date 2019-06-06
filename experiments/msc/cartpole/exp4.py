@@ -42,11 +42,15 @@ def get_params_best(directory, score_function, n=1):
     return out0+out1
 
 def get_params_gridsearch():
-    behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-    target_eps = [0, 0.1, 0.2, 0.3, 0.4]
-    trace_factors = [0, 0.25, 0.5, 0.75, 1]
-    sigmas = [0, 1]
-    learning_rate = np.logspace(np.log10(10),np.log10(.0001),num=16,endpoint=True,base=10).tolist()
+    behaviour_eps = [0.5]
+    target_eps = [0, 0.1]
+    trace_factors = [0]
+    #behaviour_eps = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+    #target_eps = [0, 0.1, 0.2, 0.3, 0.4]
+    #trace_factors = [0, 0.25, 0.5, 0.75, 1]
+    sigmas = [0]
+    #learning_rate = np.logspace(np.log10(10),np.log10(.0001),num=16,endpoint=True,base=10).tolist()
+    learning_rate = [.1,.01]
     #learning_rate = np.logspace(np.log10(.001),np.log10(.00001),num=7,endpoint=True,base=10).tolist()
 
     keys = ['eps_b', 'eps_t', 'sigma','lam', 'alpha']
@@ -67,4 +71,8 @@ def get_plot_params_final_rewards():
 def get_plot_params_best():
     file_name = 'graph-best4.png'
     label_template = 'SGD Q($\sigma={sigma}$)'
+    param_filters = []
     return locals()
+
+def get_param_filters():
+    return [()]

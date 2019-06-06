@@ -180,6 +180,8 @@ def parse_results(directory, learned_threshold=None,
     else:
         # Create new dataframe
         # Parse set of parameters
+        if len(files) == 0:
+            raise Exception('No files found. Are you sure you ran the experiment?')
         all_params = collect_file_params(files)
         del all_params['directory']
         kv_pairs = list(all_params.items())

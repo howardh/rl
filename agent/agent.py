@@ -98,3 +98,53 @@ class Agent(object):
                 return output
             rewards = pool.map(test, range(iterations))
             return rewards
+
+    def run_episode(self, env):
+        obs = env.reset()
+        action = self.act(obs)
+
+        obs2 = None
+        done = False
+        step_count = 0
+        reward_sum = 0
+        # Run an episode
+        while not done:
+            step_count += 1
+
+            obs2, reward2, done, _ = env.step(action)
+            action2 = self.act(obs2)
+            reward_sum += reward2
+
+            self.learner.observe_step(obs, action, reward2, obs2, terminal=done)
+
+            # Next time step
+            obs = obs2
+            action = action2
+        return reward_sum, step_count
+
+    def run_steps(self, env, num_steps):
+        obs = self.features(obs)
+        action = self.act(obs)
+
+        reward_sum = 0
+        # Run steps
+        for step_count in range(1,num_steps+1):
+            obs2, reward, done, _ = env.step(action)
+            obs2 = self.features(obs2)
+            action2 = self.act(obs2)
+            reward_sum += reward
+
+            self.learner.observe_step(obs, action, reward, obs2, terminal=done)
+
+            # Next time step
+            if done:
+                obs = env.reset()
+                obs = self.features(obs)
+                action = self.act(obs)
+                obs2 = None
+                done = False
+            else:
+                obs = obs2
+                action = action2
+
+        return reward_sum, num_steps

@@ -1,5 +1,6 @@
 import numpy as np
 import itertools
+import gym
 
 IDENTITY_NUM_FEATURES = 5
 
@@ -64,3 +65,23 @@ def radial_basis(x):
     centres = itertools.product(np.linspace(-1,1,4), repeat=4)
     # compute value
     return np.array([_gaussian(state, c, .3) for c in centres])
+
+class Identity(gym.ObservationWrapper):
+    def __init__(self, env):
+        super(Identity, self).__init__(env)
+        self.observation_space = gym.spaces.Box(
+                low=np.array([-np.inf]*4+[1]),
+                high=np.array([np.inf]*4+[1]),
+                dtype=np.uint8)
+    def observation(self, obs):
+        return identity2(obs)
+
+class Identity2(gym.ObservationWrapper):
+    def __init__(self, env):
+        super(Identity2, self).__init__(env)
+        self.observation_space = gym.spaces.Box(
+                low=np.array([-np.inf]*4+[1]),
+                high=np.array([np.inf]*4+[1]),
+                dtype=np.uint8)
+    def observation(self, obs):
+        return identity2(obs)
