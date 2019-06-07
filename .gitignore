@@ -1,3 +1,4 @@
+ENV
 .cs_files
 results
 results/**
@@ -5,3 +6,4 @@ results/**
 **/*.swo
 **/__pycache__
 **/*.pyc
+**/Session.vim
