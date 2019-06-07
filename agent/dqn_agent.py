@@ -85,12 +85,14 @@ class DQNAgent(Agent):
         self.running_episode = False
         self.prev_obs = None
         self.replay_buffer = ReplayBuffer(50000)
-        self.q_net = QNetwork(action_space.n)
-        self.q_net_target = QNetwork(action_space.n)
+        self.q_net = QNetwork(action_space.n).to(device)
+        self.q_net_target = QNetwork(action_space.n).to(device)
         self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
 
     def to(self,device):
         self.device = device
+        self.q_net.to(device)
+        self.q_net_target.to(device)
 
     def observe_step(self,obs0, action0, reward1, obs1, terminal=False):
         obs0 = torch.Tensor(obs0)
@@ -109,7 +111,10 @@ class DQNAgent(Agent):
             if i >= iterations:
                 break
             # Fix data types
+            s0 = s0.to(self.device)
+            a0 = a0.to(self.device)
             r1 = r1.float().to(self.device)
+            s1 = s1.to(self.device)
             t = t.float().to(self.device)
             # Value estimate
             action_values = self.q_net(s1)
@@ -127,7 +132,7 @@ class DQNAgent(Agent):
 
     def act(self, observation, testing=False):
         """Return a random action according to the current behaviour policy"""
-        observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84)
+        observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
         vals = self.q_net(observation)
         policy = get_greedy_epsilon_policy(0.1)
         probs = policy(vals)
