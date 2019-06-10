@@ -267,9 +267,9 @@ def run_trial(gamma, alpha, eps_b, eps_t, directory=None,
         dill.dump(data, f)
 
 def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
-        max_steps=5000, epoch=50, test_iters=1, verbose=False):
+        env_name = 'Breakout-v0', batch_size=32, max_steps=5000, epoch=50,
+        test_iters=1, verbose=False):
     args = locals()
-    env_name = 'Breakout-v0'
     env = gym.make(env_name)
     env = AtariPreprocessing(env)
     env = FrameStack(env,4)
@@ -306,6 +306,9 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
                 if verbose:
                     tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
 
+            # Linearly Anneal epsilon
+            agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/1000000,1))*(1-eps_b)+eps_b)
+
             # Run step
             if done:
                 obs = env.reset()
@@ -315,7 +318,7 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
             agent.observe_step(obs, action, reward2, obs2, terminal=done)
 
             # Update weights
-            agent.train(batch_size=32,iterations=1)
+            agent.train(batch_size=batch_size,iterations=1)
 
             # Next time step
             obs = obs2
