@@ -54,9 +54,9 @@ class QNetwork(torch.nn.Module):
             torch.nn.ReLU()
         )
         self.fc = torch.nn.Sequential(
-            torch.nn.Linear(in_features=32*9*9,out_features=int(32*9*9/2)),
+            torch.nn.Linear(in_features=32*9*9,out_features=256),
             torch.nn.ReLU(),
-            torch.nn.Linear(in_features=int(32*9*9/2),out_features=num_actions),
+            torch.nn.Linear(in_features=256,out_features=num_actions),
         )
     def forward(self, obs):
         x = obs

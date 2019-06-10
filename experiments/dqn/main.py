@@ -4,6 +4,7 @@ import gym
 from gym.spaces import Box
 from gym.wrappers import TimeLimit
 import torch
+from tqdm import tqdm
 
 from agent.dqn_agent import DQNAgent
 from agent.dqn_agent import get_greedy_epsilon_policy
@@ -266,7 +267,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, directory=None,
         dill.dump(data, f)
 
 def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
-        max_steps=5000, epoch=50, test_iters=1):
+        max_steps=5000, epoch=50, test_iters=1, verbose=False):
     args = locals()
     env_name = 'Breakout-v0'
     env = gym.make(env_name)
@@ -294,12 +295,16 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
     rewards = []
     try:
         done = True
-        for steps in range(0,max_steps+1):
+        step_range = range(0,max_steps+1)
+        if verbose:
+            step_range = tqdm(step_range)
+        for steps in step_range:
             # Run tests
             if steps % epoch == 0:
                 r = agent.test(test_env, test_iters, render=False, processors=1)
                 rewards.append(r)
-                print('steps %d \t Reward: %f' % (steps, np.mean(r)))
+                if verbose:
+                    tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
 
             # Run step
             if done:
@@ -315,10 +320,11 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
             # Next time step
             obs = obs2
     except ValueError as e:
-        tqdm.write(str(e))
-        tqdm.write("Diverged")
+        if verbose:
+            tqdm.write(str(e))
+            tqdm.write("Diverged")
 
-    while len(rewards) < (max_iters/epoch)+1: # Means it diverged at some point
+    while len(rewards) < (max_steps/epoch)+1: # Means it diverged at some point
         rewards.append([0]*test_iters)
 
     data = (args, rewards, steps_to_learn)
