@@ -68,8 +68,9 @@ class QNetwork(torch.nn.Module):
 def get_greedy_epsilon_policy(eps):
     def foo(values):
         batch_size, num_actions = values.size()
-        dist = torch.ones_like(values)*(eps/(num_actions-1))
-        dist[range(batch_size),values.argmax(1)] = 1-eps
+        probs = torch.ones_like(values)*(eps/(num_actions-1))
+        probs[range(batch_size),values.argmax(1)] = 1-eps
+        dist = torch.distributions.Categorical(probs)
         return dist
     return foo
 
@@ -77,10 +78,12 @@ def greedy_action(values):
     return values.argmax(1)
 
 class DQNAgent(Agent):
-    def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu')):
+    def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0)):
         self.discount_factor = discount_factor
         self.polyak_rate = polyak_rate
         self.device = device
+        self.behaviour_policy = behaviour_policy
+        self.target_policy = target_policy
 
         self.running_episode = False
         self.prev_obs = None
@@ -134,36 +137,9 @@ class DQNAgent(Agent):
         """Return a random action according to the current behaviour policy"""
         observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
         vals = self.q_net(observation)
-        policy = get_greedy_epsilon_policy(0.1)
-        probs = policy(vals)
-        dist = torch.distributions.Categorical(probs)
-        # TODO: Testing and behaviour policy
-        #if testing:
-        #    dist = self.learner.get_target_policy(observation)
-        #else:
-        #    dist = self.learner.get_behaviour_policy(observation)
-        #return np.random.choice(len(dist), 1, p=dist)[0]
+        if testing:
+            policy = self.target_policy
+        else:
+            policy = self.behaviour_policy
+        dist = policy(vals)
         return dist.sample()
-
-    def run_episode(self, env):
-        obs = env.reset()
-        action = self.act(obs)
-
-        obs2 = None
-        done = False
-        step_count = 0
-        reward_sum = 0
-        # Run an episode
-        while not done:
-            step_count += 1
-
-            obs2, reward2, done, _ = env.step(action)
-            action2 = self.act(obs2)
-            reward_sum += reward2
-
-            self.observe_step(obs, action, reward2, obs2, terminal=done)
-
-            # Next time step
-            obs = obs2
-            action = action2
-        return reward_sum, step_count
