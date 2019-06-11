@@ -266,7 +266,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, directory=None,
     with open(file_name, "wb") as f:
         dill.dump(data, f)
 
-def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
+def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
         env_name = 'Breakout-v0', batch_size=32, max_steps=5000, epoch=50,
         test_iters=1, verbose=False):
     args = locals()
@@ -287,6 +287,7 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
             observation_space=env.observation_space,
             learning_rate=alpha,
             discount_factor=gamma,
+            polyak_rate=tau,
             device=device,
             behaviour_policy=get_greedy_epsilon_policy(eps_b),
             target_policy=get_greedy_epsilon_policy(eps_t)
