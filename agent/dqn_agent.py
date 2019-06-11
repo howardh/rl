@@ -110,9 +110,7 @@ class DQNAgent(Agent):
         gamma = self.discount_factor
         tau = self.polyak_rate
         optimizer = self.optimizer
-        for i,(s0,a0,r1,s1,t) in enumerate(dataloader):
-            if i >= iterations:
-                break
+        for i,(s0,a0,r1,s1,t) in zip(range(iterations),dataloader):
             # Fix data types
             s0 = s0.to(self.device)
             a0 = a0.to(self.device)

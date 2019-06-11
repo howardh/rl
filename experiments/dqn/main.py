@@ -293,11 +293,11 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
     )
 
     rewards = []
+    done = True
+    step_range = range(0,max_steps+1)
+    if verbose:
+        step_range = tqdm(step_range)
     try:
-        done = True
-        step_range = range(0,max_steps+1)
-        if verbose:
-            step_range = tqdm(step_range)
         for steps in step_range:
             # Run tests
             if steps % epoch == 0:
@@ -330,7 +330,7 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, directory=None,
     while len(rewards) < (max_steps/epoch)+1: # Means it diverged at some point
         rewards.append([0]*test_iters)
 
-    data = (args, rewards, steps_to_learn)
+    data = (args, rewards)
     file_name, file_num = utils.find_next_free_file("results", "pkl", directory)
     with open(file_name, "wb") as f:
         dill.dump(data, f)
