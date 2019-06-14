@@ -267,8 +267,8 @@ def run_trial(gamma, alpha, eps_b, eps_t, directory=None,
         dill.dump(data, f)
 
 def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
-        env_name = 'Breakout-v0', batch_size=32, max_steps=5000, epoch=50,
-        test_iters=1, verbose=False):
+        env_name = 'Breakout-v0', batch_size=32, min_replay_buffer_size=10000,
+        max_steps=5000, epoch=50, test_iters=1, verbose=False):
     args = locals()
     env = gym.make(env_name)
     env = AtariPreprocessing(env)
@@ -319,7 +319,8 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
             agent.observe_step(obs, action, reward2, obs2, terminal=done)
 
             # Update weights
-            agent.train(batch_size=batch_size,iterations=1)
+            if steps >= min_replay_buffer_size:
+                agent.train(batch_size=batch_size,iterations=1)
 
             # Next time step
             obs = obs2
