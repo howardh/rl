@@ -1,17 +1,14 @@
 import numpy as np
 from tqdm import tqdm
 import torch
-import torch.utils.data
 import gym
+import copy
 
 import numpy as np
 
 from agent.agent import Agent
 from . import ReplayBuffer
-
-class ObservationStackingWrapper(gym.Wrapper):
-    def __init__(self):
-        pass
+from .policy import get_greedy_epsilon_policy, greedy_action
 
 class QNetwork(torch.nn.Module):
     def __init__(self, num_actions):
@@ -36,20 +33,8 @@ class QNetwork(torch.nn.Module):
         x = self.fc(x)
         return x
 
-def get_greedy_epsilon_policy(eps):
-    def foo(values):
-        batch_size, num_actions = values.size()
-        probs = torch.ones_like(values)*(eps/(num_actions-1))
-        probs[range(batch_size),values.argmax(1)] = 1-eps
-        dist = torch.distributions.Categorical(probs)
-        return dist
-    return foo
-
-def greedy_action(values):
-    return values.argmax(1)
-
 class DQNAgent(Agent):
-    def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0)):
+    def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), q_net=None):
         self.discount_factor = discount_factor
         self.polyak_rate = polyak_rate
         self.device = device
@@ -59,8 +44,11 @@ class DQNAgent(Agent):
         self.running_episode = False
         self.prev_obs = None
         self.replay_buffer = ReplayBuffer(50000)
-        self.q_net = QNetwork(action_space.n).to(device)
-        self.q_net_target = QNetwork(action_space.n).to(device)
+        if q_net is None:
+            self.q_net = QNetwork(action_space.n).to(device)
+        else:
+            self.q_net = q_net
+        self.q_net_target = copy.deepcopy(self.q_net)
         self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
 
     def to(self,device):
