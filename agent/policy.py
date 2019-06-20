@@ -1,5 +1,7 @@
 import torch
 
+# State-Action Value
+
 def get_greedy_epsilon_policy(eps):
     def foo(values):
         batch_size, num_actions = values.size()
@@ -11,3 +13,7 @@ def get_greedy_epsilon_policy(eps):
 
 def greedy_action(values):
     return values.argmax(1)
+
+# Continuous action
+
+# Continuous action distribution
