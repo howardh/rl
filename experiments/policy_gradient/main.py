@@ -6,7 +6,10 @@ from tqdm import tqdm
 from agent.ddpg_agent import DDPGAgent
 from agent.policy import get_greedy_epsilon_policy
 
-from environment.wrappers import AtariPreprocessing, FrameStack
+try:
+    import roboschool
+except:
+    print('Roboschool unavailable')
 
 def run_trial(gamma, actor_lr, critic_lr, polyak_rate=1e-3, noise_std=0.1,
         directory=None, env_name='MountainCarContinuous-v0',
