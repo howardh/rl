@@ -17,5 +17,5 @@ import utils
 
 from experiments.policy_gradient.main import run_trial, run_trial_steps
 directory = os.path.join(utils.get_results_directory(),"ddpg")
-#run_trial(gamma=0.9,actor_lr=1e-4,critic_lr=1e-3,polyak_rate=1e-3,directory=directory,env_name='MountainCarContinuous-v0',epoch=1,verbose=True)
-run_trial_steps(gamma=0.9,actor_lr=1e-4,critic_lr=1e-3,polyak_rate=1e-3,directory=directory,env_name='MountainCarContinuous-v0',epoch=1000,verbose=True)
+run_trial(gamma=0.9,actor_lr=1e-4,critic_lr=1e-3,polyak_rate=1e-3,directory=directory,env_name='MountainCarContinuous-v0',epoch=1,verbose=True)
+#run_trial_steps(gamma=0.9,actor_lr=1e-4,critic_lr=1e-3,polyak_rate=1e-3,directory=directory,env_name='RoboschoolHalfCheetah-v1',epoch=1000,min_replay_buffer_size=0,verbose=True)

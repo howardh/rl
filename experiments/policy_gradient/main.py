@@ -6,6 +6,9 @@ from tqdm import tqdm
 from agent.ddpg_agent import DDPGAgent
 from agent.policy import get_greedy_epsilon_policy
 
+import utils
+import dill
+
 try:
     import roboschool
 except:
@@ -129,6 +132,7 @@ def run_trial_steps(gamma, actor_lr, critic_lr, noise_std=0.1,
         if verbose:
             tqdm.write(str(e))
             tqdm.write("Diverged")
+        raise e
 
     while len(rewards) < (max_steps/epoch)+1: # Means it diverged at some point
         rewards.append([0]*test_iters)

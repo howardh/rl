@@ -75,11 +75,15 @@ class DDPGAgent(Agent):
         else:
             self.actor = actor
         self.actor_target = copy.deepcopy(self.actor)
+        self.actor.to(self.device)
+        self.actor_target.to(self.device)
         if critic is None:
             self.critic = QNetwork(observation_space.shape[0], action_space.shape[0])
         else:
             self.critic = critic
         self.critic_target = copy.deepcopy(self.critic)
+        self.critic.to(self.device)
+        self.critic_target.to(self.device)
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
@@ -138,9 +142,9 @@ class DDPGAgent(Agent):
         observation = torch.tensor(observation, dtype=torch.float).view(-1,self.observation_space.shape[0]).to(self.device)
         if testing:
             if self.testing_noise:
-                noise = self.testing_noise.sample([1,self.action_space.shape[0]])
+                noise = self.testing_noise.sample([1,self.action_space.shape[0]]).to(self.device)
         else:
             if self.training_noise:
-                noise = self.training_noise.sample([1,self.action_space.shape[0]])
+                noise = self.training_noise.sample([1,self.action_space.shape[0]]).to(self.device)
         action = self.actor(observation, noise).detach()
-        return action
+        return action.cpu()[0].numpy()
