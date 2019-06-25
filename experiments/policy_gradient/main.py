@@ -14,8 +14,20 @@ try:
 except:
     print('Roboschool unavailable')
 
+class BestModelSaver():
+    def __init__(self):
+        self.best_model = None
+        self.best_performance = None
+    def record_performance(self, model, performance):
+        if self.best_performance is None or self.best_performance < performance:
+            self.best_model = model.state_dict()
+            self.best_performance = performance
+    def save_model(self, file_name):
+        torch.save(self.best_model, file_name)
+
 def run_trial(gamma, actor_lr, critic_lr, polyak_rate=1e-3, noise_std=0.1,
-        directory=None, env_name='MountainCarContinuous-v0',
+        results_directory=None, model_directory=None,
+        env_name='MountainCarContinuous-v0',
         max_iters=5000, epoch=50, test_iters=1,verbose=False):
     args = locals()
     env = gym.make(env_name)
@@ -35,6 +47,7 @@ def run_trial(gamma, actor_lr, critic_lr, polyak_rate=1e-3, noise_std=0.1,
             training_noise=torch.distributions.Normal(0,noise_std),
             testing_noise=torch.distributions.Normal(0,0.01)
     )
+    best_model_saver = BestModelSaver()
 
     rewards = []
     try:
@@ -43,7 +56,9 @@ def run_trial(gamma, actor_lr, critic_lr, polyak_rate=1e-3, noise_std=0.1,
             if iters % epoch == 0:
                 r = agent.test(env, test_iters, render=False, processors=1)
                 rewards.append(r)
-                print('iter %d \t Reward: %f' % (iters, np.mean(r)))
+                if verbose:
+                    tqdm.write('iter %d \t Reward: %f' % (iters, np.mean(r)))
+                best_model_saver.record_performance(agent.actor, np.mean(r))
             # Run an episode
             obs = env.reset()
             action = agent.act(obs)
@@ -64,19 +79,30 @@ def run_trial(gamma, actor_lr, critic_lr, polyak_rate=1e-3, noise_std=0.1,
                 obs = obs2
                 action = action2
     except ValueError as e:
-        tqdm.write(str(e))
-        tqdm.write("Diverged")
+        if verbose:
+            tqdm.write(str(e))
+            tqdm.write("Diverged")
 
-    while len(rewards) < (max_iters/epoch)+1: # Means it diverged at some point
-        rewards.append([0]*test_iters)
-
-    data = (args, rewards, steps_to_learn)
-    file_name, file_num = utils.find_next_free_file("results", "pkl", directory)
-    with open(file_name, "wb") as f:
-        dill.dump(data, f)
+    # Save best model
+    if model_directory is not None:
+        model_file_name, file_num = utils.find_next_free_file(
+                "model", "pt", model_directory)
+        best_model_saver.save_model(model_file_name)
+    # Save rewards
+    if results_directory is not None:
+        data = {
+                'args': args,
+                'rewards': rewards,
+                'model_file_name': model_file_name
+        }
+        file_name, file_num = utils.find_next_free_file(
+                "results", "pkl", results_directory)
+        with open(file_name, "wb") as f:
+            dill.dump(data, f)
 
 def run_trial_steps(gamma, actor_lr, critic_lr, noise_std=0.1,
-        polyak_rate=1e-3, directory=None, env_name='MountainCarContinuous-v0',
+        polyak_rate=1e-3, results_directory=None, model_directory=None,
+        env_name='MountainCarContinuous-v0',
         batch_size=32, min_replay_buffer_size=10000,
         max_steps=5000, epoch=50, test_iters=1, verbose=False):
     args = locals()
@@ -99,6 +125,7 @@ def run_trial_steps(gamma, actor_lr, critic_lr, noise_std=0.1,
             training_noise=torch.distributions.Normal(0,noise_std),
             testing_noise=torch.distributions.Normal(0,0.01)
     )
+    best_model_saver = BestModelSaver()
 
     rewards = []
     done = True
@@ -113,6 +140,7 @@ def run_trial_steps(gamma, actor_lr, critic_lr, noise_std=0.1,
                 rewards.append(r)
                 if verbose:
                     tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
+                best_model_saver.record_performance(agent.actor, np.mean(r))
 
             # Run step
             if done:
@@ -132,12 +160,20 @@ def run_trial_steps(gamma, actor_lr, critic_lr, noise_std=0.1,
         if verbose:
             tqdm.write(str(e))
             tqdm.write("Diverged")
-        raise e
 
-    while len(rewards) < (max_steps/epoch)+1: # Means it diverged at some point
-        rewards.append([0]*test_iters)
-
-    data = (args, rewards)
-    file_name, file_num = utils.find_next_free_file("results", "pkl", directory)
-    with open(file_name, "wb") as f:
-        dill.dump(data, f)
+    # Save best model
+    if model_directory is not None:
+        model_file_name, file_num = utils.find_next_free_file(
+                "model", "pt", model_directory)
+        best_model_saver.save_model(model_file_name)
+    # Save rewards
+    if results_directory is not None:
+        data = {
+                'args': args,
+                'rewards': rewards,
+                'model_file_name': model_file_name
+        }
+        file_name, file_num = utils.find_next_free_file(
+                "results", "pkl", results_directory)
+        with open(file_name, "wb") as f:
+            dill.dump(data, f)
