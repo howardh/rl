@@ -58,7 +58,7 @@ def run_trial(gamma, actor_lr, critic_lr, polyak_rate=1e-3, noise_std=0.1,
                 rewards.append(r)
                 if verbose:
                     tqdm.write('iter %d \t Reward: %f' % (iters, np.mean(r)))
-                best_model_saver.record_performance(agent.actor, np.mean(r))
+                best_model_saver.record_performance(agent.critic, np.mean(r))
             # Run an episode
             obs = env.reset()
             action = agent.act(obs)
@@ -140,7 +140,7 @@ def run_trial_steps(gamma, actor_lr, critic_lr, noise_std=0.1,
                 rewards.append(r)
                 if verbose:
                     tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
-                best_model_saver.record_performance(agent.actor, np.mean(r))
+                best_model_saver.record_performance(agent.critic, np.mean(r))
 
             # Run step
             if done:
@@ -177,3 +177,59 @@ def run_trial_steps(gamma, actor_lr, critic_lr, noise_std=0.1,
                 "results", "pkl", results_directory)
         with open(file_name, "wb") as f:
             dill.dump(data, f)
+
+class PartialQNetwork(torch.nn.Module):
+    def __init__(self, obs_size, action_size):
+        super(PartialQNetwork, self).__init__()
+        self.fc1 = torch.nn.Linear(in_features=obs_size,out_features=400)
+        self.fc2 = torch.nn.Linear(in_features=400+action_size,out_features=300)
+        self.relu = torch.nn.LeakyReLU()
+
+    def forward(self, state, action):
+        a = action
+        x = state
+        x = self.relu(self.fc1(x))
+        x = torch.cat([x,a],1)
+        x = self.relu(self.fc2(x))
+        return x
+
+def load_partial_policy_model(file_name):
+    pass
+
+def load_partial_q_model(file_name, env):
+    state_dict = torch.load(file_name)
+    q_net = PartialQNetwork(env.observation_space.shape[0], env.action_space.shape[0])
+    q_net.load_state_dict(state_dict, strict=False)
+    return q_net
+
+def find_linear_mapping(model1, model2, env, policy=None, max_steps=100):
+    # Acquire data using given policy
+    model1_representations = []
+    model2_representations = []
+
+    done = True
+    step_range = range(0,max_steps+1)
+    for steps in step_range:
+        # Reset if episode is over
+        if done:
+            obs = env.reset()
+            obs = torch.tensor(obs, dtype=torch.float).unsqueeze(0)
+        # Select action based on policy
+        if policy is None:
+            action = env.action_space.sample()
+        else:
+            action = policy(obs)
+        action = torch.tensor(action, dtype=torch.float).unsqueeze(0)
+        # Save representations
+        model1_representations.append(model1(obs,action).detach().numpy())
+        model2_representations.append(model2(obs,action).detach().numpy())
+        # Take step
+        obs, _, done, _ = env.step(action)
+        obs = torch.tensor(obs, dtype=torch.float).unsqueeze(0)
+
+    # Find linear mapping
+    # Want to find some matrix A such that |m1*A-m2| is minimized. A=m2*m1^+?
+    m1 = torch.tensor(np.array(model1_representations)).squeeze()
+    m2 = torch.tensor(np.array(model2_representations)).squeeze()
+    a = m1.pinverse().mm(m2)
+    print((m1.mm(a)-m2).abs().mean())
