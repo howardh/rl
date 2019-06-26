@@ -228,8 +228,10 @@ def find_linear_mapping(model1, model2, env, policy=None, max_steps=100):
         obs = torch.tensor(obs, dtype=torch.float).unsqueeze(0)
 
     # Find linear mapping
-    # Want to find some matrix A such that |m1*A-m2| is minimized. A=m2*m1^+?
+    # Want to find some matrix A such that |m1*A-m2| is minimized. A=(m1^+)*m2?
     m1 = torch.tensor(np.array(model1_representations)).squeeze()
     m2 = torch.tensor(np.array(model2_representations)).squeeze()
     a = m1.pinverse().mm(m2)
-    print((m1.mm(a)-m2).abs().mean())
+    diff = (m1.mm(a)-m2).abs().mean()
+    print('Mean difference: %f' % diff)
+    return diff
