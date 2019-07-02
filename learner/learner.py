@@ -7,6 +7,7 @@ import timeit
 import dill
 import concurrent.futures
 import utils
+import gym
 
 #from enum import auto
 
@@ -56,7 +57,10 @@ class Learner(object):
 
     def get_all_state_action_values(self, state):
         """Return an np.array with the values of each action at the given state"""
-        return np.array([self.get_state_action_value(state, action) for action in self.action_space])
+        if type(self.action_space) is gym.spaces.Discrete:
+            return np.array([self.get_state_action_value(state, action) for action in range(self.action_space.n)])
+        else:
+            raise TypeError('Cannot compute state action values for all actions for an action space of type %s.' % type(self.action_space))
 
     def get_behaviour_policy(self, state):
         """Return a probability distribution over actions"""

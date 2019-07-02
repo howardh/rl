@@ -8,6 +8,7 @@ import concurrent.futures
 import operator
 import itertools
 import timeit
+import torch
 
 import numpy as np
 
@@ -23,13 +24,15 @@ from learner.lstd_learner import SparseLSTDLearner
 
 class LSTDAgent(Agent):
 
-    def __init__(self, num_features, action_space, discount_factor,
+    def __init__(self, observation_space, action_space, discount_factor,
             use_traces=False, trace_factor=None, trace_type='accumulating',
             use_importance_sampling=False, sigma=1, features=lambda x: x,
-            sparse=False, cuda=False, lspi=False, decay=1):
+            sparse=False, cuda=False, lspi=False, decay=1,
+            behaviour_policy=None, target_policy=None, 
+            device=torch.device('cpu')):
         if lspi:
             self.learner = LSPILearner(
-                    num_features=num_features,
+                    num_features=observation_space.shape[0],
                     action_space=action_space,
                     discount_factor=discount_factor,
             )
@@ -37,7 +40,7 @@ class LSTDAgent(Agent):
             if use_traces:
                 #print("Initializing LSTD agent with Q(sigma=%f)" % sigma)
                 self.learner = LSTDTraceQsLearner(
-                        num_features=num_features,
+                        observation_space=observation_space,
                         action_space=action_space,
                         discount_factor=discount_factor,
                         trace_factor=trace_factor,
@@ -49,14 +52,14 @@ class LSTDAgent(Agent):
                 #print("Initializing LSTD agent")
                 if sparse:
                     self.learner = SparseLSTDLearner(
-                            num_features=num_features,
+                            num_features=observation_space.shape[0],
                             action_space=action_space,
                             discount_factor=discount_factor,
                             use_importance_sampling=use_importance_sampling
                     )
                 else:
                     self.learner = LSTDLearner(
-                            num_features=num_features,
+                            observation_space=observation_space,
                             action_space=action_space,
                             discount_factor=discount_factor,
                             use_importance_sampling=use_importance_sampling,

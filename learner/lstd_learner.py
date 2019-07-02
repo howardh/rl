@@ -2,6 +2,7 @@ import numpy as np
 import torch
 torch.set_num_threads(1) # torch.svd takes up multiple cores
 import itertools
+import gym
 
 import utils
 
@@ -22,21 +23,27 @@ class LSTDLearner(Learner):
     action_space
     """
 
-    def __init__(self, num_features, action_space, discount_factor,
+    def __init__(self, observation_space, action_space, discount_factor,
             use_importance_sampling=False, cuda=False):
         Learner.__init__(self)
 
         self.cuda = cuda
         self.use_importance_sampling = use_importance_sampling
         self.discount_factor = discount_factor
-        self.num_features = num_features
+
+        self.observation_space = observation_space
+        self.num_features = observation_space.shape[0]
         self.action_space = action_space
+        if type(action_space) is gym.spaces.Discrete:
+            self.num_actions = action_space.n
+        elif type(action_space) is gym.spaces.Box:
+            self.num_actions = action_space.shape[0]
 
-        self.a_mat = np.matrix(np.zeros([self.num_features*len(self.action_space)]*2))
-        self.b_mat = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
+        self.a_mat = np.matrix(np.zeros([self.num_features*self.num_actions]*2))
+        self.b_mat = np.matrix(np.zeros([self.num_features*self.num_actions,1]))
 
-        self.weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
-        self.old_weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
+        self.weights = np.matrix(np.zeros([self.num_features*self.num_actions,1]))
+        self.old_weights = np.matrix(np.zeros([self.num_features*self.num_actions,1]))
 
         self.a_mat = torch.from_numpy(self.a_mat).float()
         self.b_mat = torch.from_numpy(self.b_mat).float()
@@ -54,11 +61,10 @@ class LSTDLearner(Learner):
     def combine_state_action(self, state, action):
         self.validate_state(state)
         # Get index of given action
-        action_index = self.action_space.tolist().index(action)
-        result = torch.zeros([int(self.num_features*len(self.action_space)),1]).float()
-        start_index = action_index*self.num_features
+        result = torch.zeros([int(self.num_features*self.num_actions),1]).float()
+        start_index = action*self.num_features
         end_index = start_index+self.num_features
-        result[start_index:end_index,:] = torch.from_numpy(state).float()
+        result[start_index:end_index,0] = torch.from_numpy(state).float()
         if self.cuda:
             result = result.cuda()
         return result
@@ -66,7 +72,7 @@ class LSTDLearner(Learner):
     def combine_state_target_action(self, state):
         """Return a state-action pair corresponding to the given state, associated with the action(s) under the target policy"""
         policy = self.get_target_policy(state)
-        result = torch.zeros([self.num_features*len(self.action_space),1]).float()
+        result = torch.zeros([self.num_features*self.num_actions,1]).float()
         for a in range(len(policy)):
             start_index = a*self.num_features
             end_index = start_index+self.num_features
@@ -203,9 +209,9 @@ class LSTDTraceLearner(LSTDLearner):
 
 
 class LSTDTraceQsLearner(LSTDLearner):
-    def __init__(self, num_features, action_space, discount_factor,
+    def __init__(self, observation_space, action_space, discount_factor,
             trace_factor, sigma, trace_type='accumulating', decay=1):
-        LSTDLearner.__init__(self, num_features=num_features, action_space=action_space, discount_factor=discount_factor)
+        LSTDLearner.__init__(self, observation_space=observation_space, action_space=action_space, discount_factor=discount_factor)
 
         if trace_factor is None:
             raise TypeError("Missing Trace Factor.")
@@ -218,15 +224,15 @@ class LSTDTraceQsLearner(LSTDLearner):
         self.decay = decay
 
         # Trace vector
-        self.e_mat = torch.zeros([1,int(self.num_features*len(self.action_space))])
+        self.e_mat = torch.zeros([1,int(self.num_features*self.num_actions)])
 
         self.prev_sars = None
 
     def get_all_state_action_pairs(self, state):
-        num_actions = len(self.action_space)
+        num_actions = self.num_actions
         results = torch.zeros([int(self.num_features*num_actions),num_actions])
         for a in range(num_actions):
-            results[:,a:(a+1)] = self.combine_state_action(state, self.action_space.item(a))
+            results[:,a:(a+1)] = self.combine_state_action(state, a)
         return results
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
@@ -244,8 +250,8 @@ class LSTDTraceQsLearner(LSTDLearner):
             x0 = self.combine_state_action(state0, action0)
             x1 = self.combine_state_action(state1, action1)
             x1_all = self.get_all_state_action_pairs(state1)
-            pi0 = torch.from_numpy(self.get_target_policy(state0)).float().view(len(self.action_space),1)
-            pi1 = torch.from_numpy(self.get_target_policy(state1)).float().view(len(self.action_space),1)
+            pi0 = torch.from_numpy(self.get_target_policy(state0)).float().view(self.num_actions,1)
+            pi1 = torch.from_numpy(self.get_target_policy(state1)).float().view(self.num_actions,1)
 
             #self.e_mat = lam*gamma*((1-sigma)*pi0.view(-1)[action0]+sigma)*self.e_mat + x0.t()
             self.e_mat *= lam*gamma*((1-sigma)*pi0.view(-1)[action0]+sigma)
