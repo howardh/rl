@@ -77,11 +77,10 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
                 new_a_mat = agent.learner.a_mat.clone()
                 new_b_mat = agent.learner.b_mat.clone()
                 # Collect data
-                r = range(points_per_step)
+                r = np.arange(0,1,1/points_per_step)
                 if verbose:
                     r = tqdm(r)
-                for _ in r:
-                    l = torch.rand(1).item()
+                for l in r:
                     agent.learner.a_mat = (1-l)*initial_a_mat+l*new_a_mat
                     agent.learner.b_mat = (1-l)*initial_b_mat+l*new_b_mat
                     agent.update_weights()
