@@ -54,6 +54,7 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
     # Keyed on number of transitions we're adding to the matrix
     weighting_data = dict()
     optimal_lambdas = dict()
+    y_max = 0
 
     done = True
     step_range = range(0,max_steps+1)
@@ -94,9 +95,11 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
                     agent.update_weights()
                     r = agent.test(test_env, test_iters, render=False, processors=1)
                     weighting_data[num_additional_steps].append([l,r[0]])
-                # Find parabola of best fit and get optimal weighting
+                # Split data
                 x = [x for x,y in weighting_data[num_additional_steps]]
                 y = [y for x,y in weighting_data[num_additional_steps]]
+                y_max = max(y_max, max(y))
+                # Find parabola of best fit and get optimal weighting
                 a,b,c = np.polyfit(x,y,2)
                 if a > 0:
                     # Upright parabola
@@ -115,6 +118,8 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
                 optimal_lambdas[num_additional_steps] = optimal_lambda
                 # Save plot
                 if plot_results:
+                    # Settings
+                    plt.ylim(top = y_max+1)
                     # Scatter plot
                     plt.scatter(x,y)
                     # Polynomial of best fit
