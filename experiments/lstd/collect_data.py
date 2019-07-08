@@ -6,6 +6,7 @@ from tqdm import tqdm
 import torch
 import dill
 import os
+import shelve
 
 from agent.lstd_agent import LSTDAgent
 from agent.policy import get_greedy_epsilon_policy
@@ -14,6 +15,12 @@ import utils
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
+
+def compute_k_means(x, y, k, n):
+    keys = [slice(i,i+k) for i in range(0,len(x)-k,n)]
+    key_means = [np.mean(x[k]) for k in keys]
+    vals = [np.mean(y[k]) for k in keys]
+    return key_means, vals
 
 def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
         directory=None, min_steps=1000, max_steps=5000, points_per_step=500,
@@ -45,7 +52,7 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
     new_a_mat = None
     new_b_mat = None
     # Keyed on number of transitions we're adding to the matrix
-    weighting_data = defaultdict(lambda: [])
+    weighting_data = dict()
     optimal_lambdas = dict()
 
     done = True
@@ -73,6 +80,7 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
             # Compute optimal weighting
             if steps > min_steps:
                 num_additional_steps = steps-min_steps
+                weighting_data[num_additional_steps] = []
                 # Save matrices
                 new_a_mat = agent.learner.a_mat.clone()
                 new_b_mat = agent.learner.b_mat.clone()
@@ -107,10 +115,16 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
                 optimal_lambdas[num_additional_steps] = optimal_lambda
                 # Save plot
                 if plot_results:
+                    # Scatter plot
                     plt.scatter(x,y)
+                    # Polynomial of best fit
                     poly_x = np.arange(0,1,0.01)
                     poly_y = [a*(x**2)+b*x+c for x in poly_x]
-                    plt.plot(poly_x,poly_y,'r')
+                    plt.plot(poly_x,poly_y,'g')
+                    # k-means plot
+                    k_means_x, k_means_y = compute_k_means(x,y,200,5)
+                    plt.plot(k_means_x,k_means_y,'r')
+                    # Draw plots
                     plot_dir = directory
                     if not os.path.exists(plot_dir):
                         os.makedirs(plot_dir)
