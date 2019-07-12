@@ -129,6 +129,9 @@ def run_trial(gamma, upd_freq, eps_b, eps_t, sigma, lam,
                     # k-means plot
                     k_means_x, k_means_y = compute_k_means(x,y,200,5)
                     plt.plot(k_means_x,k_means_y,'r')
+                    # k-means max
+                    max_x = k_means_x[np.argmax(k_means_y)]
+                    plt.axvline(max_x)
                     # Draw plots
                     plot_dir = directory
                     if not os.path.exists(plot_dir):
