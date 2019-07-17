@@ -7,20 +7,21 @@ from torch.autograd import Variable
         
 class LinearLearner(Learner):
     def __init__(self, num_features, action_space, discount_factor,
-            learning_rate, trace_factor=0, replacing_traces=False):
+            learning_rate, trace_factor=0, replacing_traces=False, device=torch.device('cpu')):
         self.num_features = num_features
         self.action_space = action_space
         self.discount_factor = discount_factor
         self.trace_factor = trace_factor
         self.learning_rate = learning_rate
         self.replacing_traces = replacing_traces
+        self.device = device
 
         self.target_policy = self.get_epsilon_greedy(0)
         self.behaviour_policy = self.get_epsilon_greedy(0.1)
 
-        #self.weights = torch.from_numpy(np.random.rand(len(self.action_space), self.num_features)).float().cuda()
-        self.weights = torch.zeros((len(self.action_space), self.num_features)).float().cuda()
-        self.traces = torch.zeros(self.weights.size()).float().cuda()
+        #self.weights = torch.from_numpy(np.random.rand(len(self.action_space), self.num_features)).float().to(device)
+        self.weights = torch.zeros((len(self.action_space), self.num_features)).float().to(device)
+        self.traces = torch.zeros(self.weights.size()).float().to(device)
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         """
@@ -40,9 +41,9 @@ class LinearLearner(Learner):
         gamma = self.discount_factor
         lam = self.trace_factor
         target = reward2 + gamma * self.get_state_value(state2)
-        target = torch.from_numpy(np.array([target])).float().cuda()
+        target = torch.from_numpy(np.array([target])).float().to(self.device)
 
-        state_tensor = torch.from_numpy(state1).float().cuda()
+        state_tensor = torch.from_numpy(state1).float().to(self.device)
         output = torch.dot(self.weights[action1,:],state_tensor)
 
         delta = target-output
@@ -59,14 +60,14 @@ class LinearLearner(Learner):
 
     def get_state_action_value(self, state, action):
         """Return the value of the given state-action pair"""
-        state_tensor = torch.from_numpy(state).float().cuda()
+        state_tensor = torch.from_numpy(state).float().to(self.device)
         output = torch.dot(self.weights[action,:],state_tensor)
         return output
 
 class LinearQsLearner(Learner):
     def __init__(self, num_features, action_space, discount_factor,
-            learning_rate, trace_factor=0, sigma=0, trace_type='accumulating'):
-        self.cuda = False
+            learning_rate, trace_factor=0, sigma=0, trace_type='accumulating', device=torch.device('cpu')):
+        self.device = device
         self.num_features = num_features
         self.action_space = action_space
         self.discount_factor = discount_factor
@@ -80,11 +81,8 @@ class LinearQsLearner(Learner):
         self.target_policy = self.get_epsilon_greedy(0)
         self.behaviour_policy = self.get_epsilon_greedy(0.1)
 
-        self.weights = torch.from_numpy(np.random.rand(len(self.action_space), self.num_features)).float()
-        self.traces = torch.zeros(self.weights.size()).float()
-        if self.cuda:
-            self.weights = self.weights.cuda()
-            self.traces = self.traces.cuda()
+        self.weights = torch.from_numpy(np.random.rand(len(self.action_space), self.num_features)).float().to(device)
+        self.traces = torch.zeros(self.weights.size()).float().to(device)
 
         self.prev_sars = None
 
@@ -117,13 +115,9 @@ class LinearQsLearner(Learner):
             except Warning as w:
                 print("BROKEN!")
                 print(w)
-            target = torch.from_numpy(np.array([target])).float()
-            if self.cuda:
-                target = target.cuda()
+            target = torch.from_numpy(np.array([target])).float().to(self.device)
 
-            state_tensor = torch.from_numpy(state0).float()
-            if self.cuda:
-                state_tensor = state_tensor.cuda()
+            state_tensor = torch.from_numpy(state0).float().to(self.device)
             output = torch.dot(self.weights[action0,:],state_tensor.view(-1))
 
             delta = target-output
@@ -144,13 +138,9 @@ class LinearQsLearner(Learner):
             state0, action0, reward1, _ = self.prev_sars
 
             target = reward1
-            target = torch.from_numpy(np.array([target])).float()
-            if self.cuda:
-                target = target.cuda()
+            target = torch.from_numpy(np.array([target])).float().to(self.device)
 
-            state_tensor = torch.from_numpy(state0).float()
-            if self.cuda:
-                state_tensor = state_tensor.cuda()
+            state_tensor = torch.from_numpy(state0).float().to(self.device)
             output = torch.dot(self.weights[action0,:],state_tensor.view(-1))
 
             delta = target-output
@@ -170,8 +160,6 @@ class LinearQsLearner(Learner):
 
     def get_state_action_value(self, state, action):
         """Return the value of the given state-action pair"""
-        state_tensor = torch.from_numpy(state).float()
-        if self.cuda:
-            state_tensor = state_tensor.cuda()
+        state_tensor = torch.from_numpy(state).float().to(self.device)
         output = torch.dot(self.weights[action,:],state_tensor.view(-1))
         return output
