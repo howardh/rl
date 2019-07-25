@@ -199,3 +199,11 @@ class FrameStack(gym.ObservationWrapper):
         observation = self.env.reset(**kwargs)
         [self.frames.append(observation) for _ in range(self.num_stack)]
         return self._get_observation()
+
+class DiscreteObservationToBox(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.observation_space = Box(low=np.array([0]), high=np.array([env.observation_space.n-1]))
+
+    def observation(self, obs):
+        return np.array([obs])

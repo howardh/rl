@@ -92,11 +92,12 @@ class DQNAgent(Agent):
 
     def act(self, observation, testing=False):
         """Return a random action according to the current behaviour policy"""
-        observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
+        #observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
+        observation = torch.tensor(observation, dtype=torch.float).unsqueeze(0)
         vals = self.q_net(observation)
         if testing:
             policy = self.target_policy
         else:
             policy = self.behaviour_policy
         dist = policy(vals)
-        return dist.sample()
+        return dist.sample().item()
