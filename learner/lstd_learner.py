@@ -32,16 +32,10 @@ class LSTDLearner(Learner):
         self.num_features = num_features
         self.action_space = action_space
 
-        self.a_mat = np.matrix(np.zeros([self.num_features*len(self.action_space)]*2))
-        self.b_mat = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
-
-        self.weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
-        self.old_weights = np.matrix(np.zeros([self.num_features*len(self.action_space),1]))
-
-        self.a_mat = torch.from_numpy(self.a_mat).float()
-        self.b_mat = torch.from_numpy(self.b_mat).float()
-        self.weights = torch.from_numpy(self.weights).float()
-        self.old_weights = torch.from_numpy(self.old_weights).float()
+        self.a_mat = torch.zeros([self.num_features*len(self.action_space)]*2).float()
+        self.b_mat = torch.zeros([self.num_features*len(self.action_space),1]).float()
+        self.weights = torch.zeros([self.num_features*len(self.action_space),1]).float()
+        self.old_weights = torch.zeros([self.num_features*len(self.action_space),1]).float()
 
         if self.cuda:
             self.a_mat = self.a_mat.cuda()

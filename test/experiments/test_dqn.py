@@ -1,5 +1,4 @@
 import pytest
-import testfixtures
 
 from experiments.dqn.main import run_trial_steps as run_trial, run_trial_steps
 

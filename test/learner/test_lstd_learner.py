@@ -42,7 +42,7 @@ class TestLSTDLearner(unittest.TestCase):
         term = True
         self.learner.observe_step(s1,a1,r,s2,term)
         a_mat = self.learner.a_mat.numpy()
-        expected_a_mat = np.matrix([
+        expected_a_mat = np.array([
             [1,0,0, 0,0,0],
             [0,0,0, 0,0,0],
             [0,0,0, 0,0,0],
