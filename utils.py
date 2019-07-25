@@ -142,6 +142,8 @@ def parse_file(file_name, threshold=None, delete_invalid=False):
         times = [epoch*i for i in range(len(means))]
         return (times,series), means, threshold_met
 
+    raise Exception('Invalid file name. Expected a csv or pkl file.')
+
 def parse_results(directory, learned_threshold=None,
         dataframe_filename = "dataframe.pkl",
         parsedfiles_filename = "parsedfiles.pkl"):

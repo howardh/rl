@@ -23,7 +23,7 @@ class RBFFunction(torch.autograd.Function):
         # df/dc = w*exp(-s*(c-x)^2)*(-s)*2*(c-x)
         # df/dw = exp(-s*(c-x)^2)
         # f(r) = w*exp(-s*r^2)
-        x,c,w,s,y = self.saved_variables
+        x,c,w,s,y = self.saved_tensors
         v = self.unweighted_rbf
         x = x.data
         c = c.data
