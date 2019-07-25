@@ -5,7 +5,6 @@ dist: xenial
 # command to install dependencies
 install:
   - pip install --progress-bar off -r requirements.txt
-  - pip install --progress-bar off testfixtures
 # command to run tests
 script:
   - pytest
