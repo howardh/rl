@@ -91,17 +91,8 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
             tqdm.write("Diverged")
             raise e
 
-    while len(rewards) < (max_steps/epoch)+1: # Means it diverged at some point
-        rewards.append([0]*test_iters)
-
-    data = (args, rewards)
-
-    if directory is not None:
-        file_name, file_num = utils.find_next_free_file("results", "pkl", directory)
-        with open(file_name, "wb") as f:
-            dill.dump(data, f)
-
-    return data
+    utils.save_results(args, rewards, directory=directory)
+    return (args, rewards)
 
 def run_gridsearch():
     directory = os.path.join(utils.get_results_directory(),__name__)
@@ -118,7 +109,7 @@ def run_gridsearch():
             'epoch': [1000],
             'test_iters': [5],
             'verbose': [False],
-            'net_structure': [[2,3,4]],
+            'net_structure': [(2,3,4)],
             'directory': [directory]
     }
     params = {
@@ -134,9 +125,48 @@ def run_gridsearch():
             'epoch': [100],
             'test_iters': [5],
             'verbose': [True],
-            'net_structure': [[]],
+            'net_structure': [()],
             'directory': [directory]
     }
     funcs = utils.gridsearch(params, run_trial_steps)
     utils.cc(funcs)
     return utils.get_all_results(directory)
+
+def run():
+    # Run gridsearch
+    results = run_gridsearch()
+    # Look through params for best performance
+    def reduce(results,s=[]):
+        return s + [results]
+    directory = os.path.join(utils.get_results_directory(),__name__)
+    results = utils.get_all_results_reduce(directory, reduce, [])
+    performance = {}
+    for k,v in results.items():
+        """
+        v =
+        - Trial1
+            - Epoch 1
+                - Test iter 1
+                - Test iter 2
+                - ...
+            - Epoch 2
+                - ...
+            - ...
+        - Trial 2
+            - etc.
+        """
+        # Average all iterations under an epoch
+        # Do a cumulative mean over all epochs
+        # Take a max over the cumulative means for each trial
+        # Take a mean over all max cum means over all trials
+        max_means = []
+        for trial in v:
+            mean_rewards = [np.mean(epoch) for epoch in trial]
+            cum_mean = np.cumsum(mean_rewards)/np.arange(1,len(mean_rewards)+1)
+            max_mean = np.max(cum_mean)
+            max_means.append(max_mean)
+        mean_max_mean = np.mean(max_means)
+        performance[k] = mean_max_mean
+    best_param, best_performance = max(performance.items(), key=lambda x: x[1])
+    print('Best parameter set:', best_param)
+    print('Best performance:', best_performance)

@@ -154,3 +154,48 @@ def test_save_results_and_get_results_exact_match(tmpdir):
     results = list(results)
     assert len(results) == 1
     assert [1,2,3] in results
+
+def test_find_best_params(tmpdir):
+    # Note: This is not a proper test.
+    # The code in here are stuff that should be in separate functions, which are then tested.
+    utils.save_results({'a': 1, 'b': 1}, [[1,1],[2],[3]], directory=str(tmpdir))
+    utils.save_results({'a': 1, 'b': 1}, [1,1,1], directory=str(tmpdir))
+    utils.save_results({'a': 1, 'b': 2}, [4,5,6], directory=str(tmpdir))
+    utils.save_results({'a': 2, 'b': 1}, [1,1,1], directory=str(tmpdir))
+    utils.save_results({'a': 2, 'b': 2}, [4,3,2], directory=str(tmpdir))
+    def reduce(results,s=[]):
+        return s + [results]
+    results = utils.get_all_results_reduce(str(tmpdir), reduce, [])
+    performance = {}
+    for k,v in results.items():
+        """
+        v =
+        - Trial1
+            - Epoch 1
+                - Test iter 1
+                - Test iter 2
+                - ...
+            - Epoch 2
+                - ...
+            - ...
+        - Trial 2
+            - etc.
+        """
+        # Average all iterations under an epoch
+        # Do a cumulative mean over all epochs
+        # Take a max over the cumulative means for each trial
+        # Take a mean over all max cum means over all trials
+        max_means = []
+        for trial in v:
+            mean_rewards = [np.mean(epoch) for epoch in trial]
+            cum_mean = np.cumsum(mean_rewards)/np.arange(1,len(mean_rewards)+1)
+            max_mean = np.max(cum_mean)
+            max_means.append(max_mean)
+        mean_max_mean = np.mean(max_means)
+        performance[k] = mean_max_mean
+
+    assert len(performance) == 4
+    assert performance[frozenset({'a': 1, 'b': 1}.items())] == ((1+2+3)/3+3/3)/2
+    assert performance[frozenset({'a': 1, 'b': 2}.items())] == (4+5+6)/3
+    assert performance[frozenset({'a': 2, 'b': 1}.items())] == 1
+    assert performance[frozenset({'a': 2, 'b': 2}.items())] == 4

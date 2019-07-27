@@ -114,7 +114,6 @@ def get_all_results_reduce(directory, func, initial):
     return results
 
 def sort_parameters(directory, func, initial):
-    raise NotImplementedError()
     get_all_results_reduce(directory, func, initial)
 
 # Data processing
