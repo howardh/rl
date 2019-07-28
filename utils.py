@@ -552,12 +552,14 @@ def cc(funcs, proc=1):
         from pathos.multiprocessing import ProcessPool
         pp = ProcessPool(nodes=proc)
         results = []
-        for f in tqdm(list(funcs), desc="Executing jobs"):
+        for f in tqdm(list(funcs), desc="Creating jobs"):
             results.append(pp.apipe(f))
+        pbar = tqdm(total=len(results), desc="Job completion")
         while len(results) > 0:
-            while not results[0].ready(): # TODO: Progress bar
-                time.sleep(1)
-            results = results[1:]
+            count = [r.ready() for r in results].count(True)
+            pbar.update(count)
+            results = [r for r in results if not r.ready()]
+            time.sleep(1)
 
 # Compute Canada
 

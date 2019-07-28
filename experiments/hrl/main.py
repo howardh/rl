@@ -93,7 +93,7 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
     utils.save_results(args, rewards, directory=directory)
     return (args, rewards)
 
-def run_gridsearch():
+def run_gridsearch(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = {
             'gamma': [1],
@@ -123,19 +123,19 @@ def run_gridsearch():
             'max_steps': [1000],
             'epoch': [100],
             'test_iters': [5],
-            'verbose': [True],
+            'verbose': [False],
             'net_structure': [()],
             'directory': [directory]
     }
     funcs = utils.gridsearch(params, run_trial_steps)
-    utils.cc(funcs)
+    utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
 
-def run():
+def run(proc=2):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
-    results = run_gridsearch()
+    results = run_gridsearch(proc=proc)
     # Look through params for best performance
     def reduce(results,s=[]):
         return s + [results]
