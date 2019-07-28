@@ -13,6 +13,7 @@ import dill
 import pandas
 import operator
 import traceback
+import itertools
 
 START_TIME = time.strftime("%Y-%m-%d_%H-%M-%S")
 _results_dir = None
@@ -22,20 +23,23 @@ lock = threading.Lock()
 
 # File IO
 
+def get_results_root_directory():
+    host_name = os.uname()[1]
+    if host_name == "agent-server-1" or host_name == "agent-server-2":
+        return "/NOBACKUP/hhuang63/results"
+    if host_name == "garden-path" or host_name == "ppl-3":
+        return "/home/ml/hhuang63/results"
+    if host_name.find('gra') == 0 or host_name.find('cdr') == 0:
+        return "/home/hhuang63/scratch/results"
+    if host_name.find('howard-pc') == 0:
+        return "/home/howard/tmp/results"
+    raise NotImplementedError("No default path defined for %s" % host_name)
+
 def get_results_directory():
     global _results_dir
     if _results_dir is not None:
         return _results_dir
-    host_name = os.uname()[1]
-    if host_name == "agent-server-1" or host_name == "agent-server-2":
-        return os.path.join("/NOBACKUP/hhuang63/results3",START_TIME)
-    if host_name == "garden-path" or host_name == "ppl-3":
-        return os.path.join("/home/ml/hhuang63/results",START_TIME)
-    if host_name.find('gra') == 0 or host_name.find('cdr') == 0:
-        return os.path.join("/home/hhuang63/scratch/results",START_TIME)
-    if host_name.find('howard-pc') == 0:
-        return os.path.join("/home/howard/tmp/results",START_TIME)
-    raise NotImplementedError("No default path defined for %s" % host_name)
+    return os.path.join(get_results_root_directory(),START_TIME)
 
 def set_results_directory(d):
     global _results_dir
@@ -70,6 +74,50 @@ def skip_new_files(skip=None):
     if skip is not None:
         _skip_new_files = skip
     return _skip_new_files
+
+# Data Storage
+
+def save_results(params, results, directory):
+    data = (params, results)
+    file_name, file_num = find_next_free_file("results", "pkl", directory)
+    with open(file_name, "wb") as f:
+        dill.dump(data, f)
+
+def get_all_results(directory):
+    for d,_,file_names in tqdm(os.walk(directory)):
+        for fn in file_names:
+            with open(os.path.join(d,fn), 'rb') as f:
+                yield dill.load(f)
+
+def get_results(params, directory, match_exactly=False):
+    """ Return a generator containing all results whose parameters match the provided parameters
+    """
+    for p,r in get_all_results(directory):
+        if match_exactly:
+            cond = len(params) == len(p) and all((k in p and p[k]==v for k,v in params.items()))
+        else:
+            cond = all((k in p and p[k]==v for k,v in params.items()))
+        if cond:
+            yield r
+
+def get_results_reduce(params, directory, func, initial):
+    total = initial
+    for r in get_results(params, directory):
+        total = func(r, total)
+    return total
+
+def get_all_results_reduce(directory, func, initial):
+    results = {}
+    for p,r in get_all_results(directory):
+        key = frozenset(p.items())
+        if key in results:
+            results[key] = func(r, results[key])
+        else:
+            results[key] = func(r, initial)
+    return results
+
+def sort_parameters(directory, func, initial):
+    get_all_results_reduce(directory, func, initial)
 
 # Data processing
 
@@ -185,7 +233,8 @@ def parse_results(directory, learned_threshold=None,
         if len(files) == 0:
             raise Exception('No files found. Are you sure you ran the experiment?')
         all_params = collect_file_params(files)
-        del all_params['directory']
+        if 'directory' in all_params:
+            del all_params['directory']
         kv_pairs = list(all_params.items())
         vals = [v for k,v in kv_pairs]
         keys = [k for k,v in kv_pairs]
@@ -495,6 +544,23 @@ def cc3(fn, params, proc=10, keyworded=False):
     except Exception as e:
         print("Something broke")
 
+def cc(funcs, proc=1):
+    if proc == 1:
+        for f in tqdm(list(funcs), desc="Executing jobs"):
+            f()
+    else:
+        from pathos.multiprocessing import ProcessPool
+        pp = ProcessPool(nodes=proc)
+        results = []
+        for f in tqdm(list(funcs), desc="Creating jobs"):
+            results.append(pp.apipe(f))
+        pbar = tqdm(total=len(results), desc="Job completion")
+        while len(results) > 0:
+            count = [r.ready() for r in results].count(True)
+            pbar.update(count)
+            results = [r for r in results if not r.ready()]
+            time.sleep(1)
+
 # Compute Canada
 
 def split_params(params):
@@ -523,3 +589,22 @@ def is_first_task():
     except KeyError:
         # If we're not on compute canada, then everything is fine
         return True
+
+# Experiment Execution
+
+def gridsearch(parameters, func, repetitions=1, shuffle=False):
+    """ Output a generator containing a function call for each 
+    """
+    keys = list(parameters.keys())
+    values = [parameters[k] for k in keys]
+
+    params = itertools.product(*values)
+    params = (zip(keys,p) for p in params)
+    params = itertools.repeat(params, repetitions)
+    params = itertools.chain(*list(params))
+    params = list(params)
+    params = split_params(params)
+    if shuffle:
+        random.shuffle(params)
+    params = [dict(p) for p in params]
+    return [lambda p=p: func(**p) for p in params]
