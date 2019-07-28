@@ -549,7 +549,15 @@ def cc(funcs, proc=1):
         for f in tqdm(list(funcs), desc="Executing jobs"):
             f()
     else:
-        raise NotImplementedError('Multiprocessing is not implemented. I don\'t know how to make this work.')
+        from pathos.multiprocessing import ProcessPool
+        pp = ProcessPool(nodes=proc)
+        results = []
+        for f in tqdm(list(funcs), desc="Executing jobs"):
+            results.append(pp.apipe(f))
+        while len(results) > 0:
+            while not results[0].ready(): # TODO: Progress bar
+                time.sleep(1)
+            results = results[1:]
 
 # Compute Canada
 

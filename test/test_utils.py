@@ -43,27 +43,51 @@ def test_solve():
 #        self.assertAlmostEqual(output[2], 20)
 #
 
-def test_gridsearch():
-    called_params = []
+def test_gridsearch_single_process(tmpdir):
     def foo(**kwargs):
-        called_params.append(kwargs)
+        utils.save_results(kwargs,None,str(tmpdir))
     params = {
             'a': [1,2,3],
             'b': [4,5,6]
     }
     funcs = utils.gridsearch(params, foo)
-    utils.cc(funcs)
+    utils.cc(funcs, proc=1)
+    results = utils.get_all_results(str(tmpdir))
+    results = list(results)
 
-    assert len(called_params) == 3*3
-    assert {'a': 1, 'b': 4} in called_params
-    assert {'a': 1, 'b': 5} in called_params
-    assert {'a': 1, 'b': 6} in called_params
-    assert {'a': 2, 'b': 4} in called_params
-    assert {'a': 2, 'b': 5} in called_params
-    assert {'a': 2, 'b': 6} in called_params
-    assert {'a': 3, 'b': 4} in called_params
-    assert {'a': 3, 'b': 5} in called_params
-    assert {'a': 3, 'b': 6} in called_params
+    assert len(results) == 3*3
+    assert ({'a': 1, 'b': 4},None) in results
+    assert ({'a': 1, 'b': 5},None) in results
+    assert ({'a': 1, 'b': 6},None) in results
+    assert ({'a': 2, 'b': 4},None) in results
+    assert ({'a': 2, 'b': 5},None) in results
+    assert ({'a': 2, 'b': 6},None) in results
+    assert ({'a': 3, 'b': 4},None) in results
+    assert ({'a': 3, 'b': 5},None) in results
+    assert ({'a': 3, 'b': 6},None) in results
+
+def test_gridsearch_multi_process(tmpdir):
+    def foo(**kwargs):
+        utils.save_results(kwargs,None,str(tmpdir))
+    params = {
+            'a': [1,2,3],
+            'b': [4,5,6]
+    }
+    funcs = utils.gridsearch(params, foo)
+    utils.cc(funcs, proc=2)
+    results = utils.get_all_results(str(tmpdir))
+    results = list(results)
+
+    assert len(results) == 3*3
+    assert ({'a': 1, 'b': 4},None) in results
+    assert ({'a': 1, 'b': 5},None) in results
+    assert ({'a': 1, 'b': 6},None) in results
+    assert ({'a': 2, 'b': 4},None) in results
+    assert ({'a': 2, 'b': 5},None) in results
+    assert ({'a': 2, 'b': 6},None) in results
+    assert ({'a': 3, 'b': 4},None) in results
+    assert ({'a': 3, 'b': 5},None) in results
+    assert ({'a': 3, 'b': 6},None) in results
 
 def test_gridsearch_strings():
     called_params = []
