@@ -1,4 +1,5 @@
 import collections
+import torch
 import numpy as np
 from enum import Enum
 import scipy.sparse
@@ -9,6 +10,7 @@ import concurrent.futures
 import utils
 
 #from enum import auto
+from agent.policy import get_greedy_epsilon_policy
 
 class Learner(object):
     """
@@ -25,8 +27,6 @@ class Learner(object):
 
     def __init__(self):
         self.action_space = None
-        self.target_policy = self.get_epsilon_greedy(0)
-        self.behaviour_policy = self.get_epsilon_greedy(0.1)
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         """
@@ -47,8 +47,8 @@ class Learner(object):
     def get_state_value(self, state):
         """Return the value of the given state"""
         values = self.get_all_state_action_values(state)
-        policy = self.target_policy(state)
-        return np.dot(values,policy)
+        policy = self.target_policy(values)
+        return (values @ policy.probs.t()).item()
 
     def get_state_action_value(self, state, action):
         """Return the value of the given state-action pair"""
@@ -56,7 +56,7 @@ class Learner(object):
 
     def get_all_state_action_values(self, state):
         """Return an np.array with the values of each action at the given state"""
-        return np.array([self.get_state_action_value(state, action) for action in self.action_space])
+        return torch.tensor([[self.get_state_action_value(state, action) for action in range(self.action_space.n)]]).float()
 
     def get_behaviour_policy(self, state):
         """Return a probability distribution over actions"""
@@ -64,7 +64,8 @@ class Learner(object):
 
     def get_target_policy(self, state):
         """Return a probability distribution over actions"""
-        return self.target_policy(state)
+        values = self.get_all_state_action_values(state)
+        return self.target_policy(values)
 
     def set_target_policy(self, policy):
         """
@@ -76,16 +77,6 @@ class Learner(object):
     def set_behaviour_policy(self, policy):
         self.behaviour_policy = policy
 
-    def get_epsilon_greedy(self, epsilon):
-        def f(state):
-            w = self.get_all_state_action_values(state)
-            m = np.argmax(w)
-            max_count = sum([x == w[m] for x in w])
-            if len(w) == max_count:
-                return np.array(len(w)*[1.0/len(w)])
-            return np.array([(1-epsilon)/max_count if x == w[m] else epsilon/(len(w)-max_count) for x in w])
-        return f
-    
     def get_softmax(self, temperature):
         def f(state):
             w = self.get_all_state_action_values(state)
@@ -132,14 +123,16 @@ class TabularLearner(Learner):
 class TabularQsLearner(Learner):
 
     def __init__(self, action_space, discount_factor, learning_rate,
-            trace_factor=0, sigma=0, initial_value=0):
-        Learner.__init__(self)
+            trace_factor=0, sigma=0, initial_value=0,
+            target_policy=get_greedy_epsilon_policy(0)):
+        super().__init__()
         self.action_space = action_space
         self.discount_factor = discount_factor
         self.learning_rate = learning_rate
         self.initial_value = initial_value
         self.trace_factor = trace_factor
         self.sigma = sigma
+        self.target_policy = target_policy
         
         self.q = collections.defaultdict(lambda: self.initial_value)
         self.old_q = self.q.copy()
@@ -161,7 +154,7 @@ class TabularQsLearner(Learner):
             delta = reward1 + gamma*(sigma*q+(1-sigma)*v) - self.get_state_action_value(state0, action0)
 
             # Trace
-            p = self.get_target_policy(state0)[action0] # TODO: Should this be state0 or state1?
+            p = self.get_target_policy(state0).probs[0,action0] # TODO: Should this be state0 or state1?
             decay = gamma*lam*((1-sigma)*p+sigma)
             for k in self.e.keys():
                 self.e[k] *= decay
@@ -182,7 +175,7 @@ class TabularQsLearner(Learner):
             delta = reward1 - self.get_state_action_value(state0, action0)
 
             # Trace
-            p = self.get_target_policy(state0)[action0] # TODO: Should this be state0 or state1?
+            p = self.get_target_policy(state0).probs[0,action0] # TODO: Should this be state0 or state1?
             decay = gamma*lam*((1-sigma)*p+sigma)
             for k in self.e.keys():
                 self.e[k] *= decay
