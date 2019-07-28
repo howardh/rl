@@ -23,20 +23,23 @@ lock = threading.Lock()
 
 # File IO
 
+def get_results_root_directory():
+    host_name = os.uname()[1]
+    if host_name == "agent-server-1" or host_name == "agent-server-2":
+        return "/NOBACKUP/hhuang63/results"
+    if host_name == "garden-path" or host_name == "ppl-3":
+        return "/home/ml/hhuang63/results"
+    if host_name.find('gra') == 0 or host_name.find('cdr') == 0:
+        return "/home/hhuang63/scratch/results"
+    if host_name.find('howard-pc') == 0:
+        return "/home/howard/tmp/results"
+    raise NotImplementedError("No default path defined for %s" % host_name)
+
 def get_results_directory():
     global _results_dir
     if _results_dir is not None:
         return _results_dir
-    host_name = os.uname()[1]
-    if host_name == "agent-server-1" or host_name == "agent-server-2":
-        return os.path.join("/NOBACKUP/hhuang63/results3",START_TIME)
-    if host_name == "garden-path" or host_name == "ppl-3":
-        return os.path.join("/home/ml/hhuang63/results",START_TIME)
-    if host_name.find('gra') == 0 or host_name.find('cdr') == 0:
-        return os.path.join("/home/hhuang63/scratch/results",START_TIME)
-    if host_name.find('howard-pc') == 0:
-        return os.path.join("/home/howard/tmp/results",START_TIME)
-    raise NotImplementedError("No default path defined for %s" % host_name)
+    return os.path.join(get_results_root_directory(),START_TIME)
 
 def set_results_directory(d):
     global _results_dir

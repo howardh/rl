@@ -23,7 +23,6 @@ class QFunction(torch.nn.Module):
             in_f = out_f
         layers.append(torch.nn.Linear(in_features=in_f,out_features=4))
         self.seq = torch.nn.Sequential(*layers)
-        print(self.seq)
     def forward(self, x):
         return self.seq(x)
 
@@ -112,7 +111,7 @@ def run_gridsearch():
             'net_structure': [(2,3,4)],
             'directory': [directory]
     }
-    params = {
+    params = { # For testing purposes. Remove later.
             'gamma': [1],
             'alpha': [0.1],
             'eps_b': [0, 0.1],
@@ -133,6 +132,8 @@ def run_gridsearch():
     return utils.get_all_results(directory)
 
 def run():
+    utils.set_results_directory(
+            os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
     results = run_gridsearch()
     # Look through params for best performance
