@@ -27,6 +27,8 @@ class Learner(object):
 
     def __init__(self):
         self.action_space = None
+        self.behaviour_policy = get_greedy_epsilon_policy(0)
+        self.target_policy = get_greedy_epsilon_policy(0)
 
     def observe_step(self, state1, action1, reward2, state2, terminal=False):
         """
