@@ -141,33 +141,60 @@ def run(proc=2):
         return s + [results]
     directory = os.path.join(utils.get_results_directory(),__name__)
     results = utils.get_all_results_reduce(directory, reduce, [])
-    performance = {}
-    for k,v in results.items():
-        """
-        v =
-        - Trial1
-            - Epoch 1
-                - Test iter 1
-                - Test iter 2
+    def compute_performance_max_cum_mean(results):
+        performance = {}
+        for k,v in results.items():
+            """
+            v =
+            - Trial1
+                - Epoch 1
+                    - Test iter 1
+                    - Test iter 2
+                    - ...
+                - Epoch 2
+                    - ...
                 - ...
-            - Epoch 2
-                - ...
-            - ...
-        - Trial 2
-            - etc.
-        """
-        # Average all iterations under an epoch
-        # Do a cumulative mean over all epochs
-        # Take a max over the cumulative means for each trial
-        # Take a mean over all max cum means over all trials
-        max_means = []
-        for trial in v:
-            mean_rewards = [np.mean(epoch) for epoch in trial]
-            cum_mean = np.cumsum(mean_rewards)/np.arange(1,len(mean_rewards)+1)
-            max_mean = np.max(cum_mean)
-            max_means.append(max_mean)
-        mean_max_mean = np.mean(max_means)
-        performance[k] = mean_max_mean
+            - Trial 2
+                - etc.
+            """
+            # Average all iterations under an epoch
+            # Do a cumulative mean over all epochs
+            # Take a max over the cumulative means for each trial
+            # Take a mean over all max cum means over all trials
+            max_means = []
+            for trial in v:
+                mean_rewards = [np.mean(epoch) for epoch in trial]
+                cum_mean = np.cumsum(mean_rewards)/np.arange(1,len(mean_rewards)+1)
+                max_mean = np.max(cum_mean)
+                max_means.append(max_mean)
+            mean_max_mean = np.mean(max_means)
+            performance[k] = mean_max_mean
+        return performance
+    def compute_performance_abs_max(results):
+        performance = {}
+        for k,v in results.items():
+            max_means = []
+            for trial in v:
+                max_rewards = [np.max(epoch) for epoch in trial]
+                max_means.append(np.mean(max_rewards))
+            mean_max_mean = np.mean(max_means)
+            performance[k] = mean_max_mean
+        return performance
+
+    print('-'*80)
+
+    performance = compute_performance_abs_max(results)
     best_param, best_performance = max(performance.items(), key=lambda x: x[1])
+    print('Performance by best performance reached at any point')
     print('Best parameter set:', best_param)
     print('Best performance:', best_performance)
+
+    print('-'*80)
+
+    performance = compute_performance_max_cum_mean(results)
+    best_param, best_performance = max(performance.items(), key=lambda x: x[1])
+    print('Performance by sample complexity')
+    print('Best parameter set:', best_param)
+    print('Best performance:', best_performance)
+
+    print('-'*80)
