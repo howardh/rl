@@ -197,3 +197,28 @@ def run(proc=2):
     print('Best performance:', best_performance)
 
     print('-'*80)
+
+    # Plot average performance over time
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+    plot_dir = os.path.join(utils.get_results_root_directory(),'plots',__name__)
+    if not os.path.isdir(plot_dir):
+        os.makedirs(plot_dir)
+    file_mapping = {}
+    for i,(k,v) in enumerate(results.items()):
+        trial_rewards = []
+        for trial in v:
+            trial_rewards.append([np.mean(epoch) for epoch in trial])
+        params = dict(k)
+        y = np.mean(trial_rewards,axis=0)
+        x = list(range(0,params['max_steps']+1,params['epoch']))
+
+        plt.figure()
+        plt.plot(x,y)
+        file_name = os.path.join(plot_dir,'%d.png'%i)
+        plt.savefig(file_name)
+        plt.close()
+
+        print('Saved', file_name)
+        file_mapping[k] = file_name
