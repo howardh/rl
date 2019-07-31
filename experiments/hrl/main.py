@@ -135,12 +135,13 @@ def run(proc=2):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
-    results = run_gridsearch(proc=proc)
+    run_gridsearch(proc=proc)
     # Look through params for best performance
     def reduce(results,s=[]):
         return s + [results]
     directory = os.path.join(utils.get_results_directory(),__name__)
     results = utils.get_all_results_reduce(directory, reduce, [])
+
     def compute_performance_max_cum_mean(results):
         performance = {}
         for k,v in results.items():
@@ -173,12 +174,10 @@ def run(proc=2):
     def compute_performance_abs_max(results):
         performance = {}
         for k,v in results.items():
-            max_means = []
+            trial_rewards = []
             for trial in v:
-                max_rewards = [np.max(epoch) for epoch in trial]
-                max_means.append(np.mean(max_rewards))
-            mean_max_mean = np.mean(max_means)
-            performance[k] = mean_max_mean
+                trial_rewards.append([np.mean(epoch) for epoch in trial])
+            performance[k] = np.max(np.mean(trial_rewards,axis=0))
         return performance
 
     print('-'*80)
