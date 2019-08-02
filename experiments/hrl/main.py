@@ -140,7 +140,7 @@ def run(proc=2):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
-    #run_gridsearch(proc=proc)
+    run_gridsearch(proc=proc)
     # Look through params for best performance
     def reduce(results,s=[]):
         return s + [results]
@@ -227,13 +227,21 @@ def run(proc=2):
         max_y = max(max_y, np.max(y1), np.max(y2))
 
     for i,(k,(x,y1,y2)) in enumerate(plot_data.items()):
-        plt.figure()
-        plt.plot(x,y1)
-        plt.plot(x,y2)
-        plt.ylim([0,max_y])
+        fig, (ax1, ax2) = plt.subplots(1,2)
+        fig.set_size_inches(10,4)
+        # Plot
+        ax1.plot(x,y1)
+        ax1.plot(x,y2)
+        ax1.set_ylim([0,max_y])
+        ax1.set_title('[Insert Title Here]')
+        ax1.grid(True,which='both',axis='both',color='grey')
+        # Show params
+        ax2.set_axis_off()
+        for j,(pname,pval) in enumerate(sorted(dict(k).items(), key=lambda x: x[0], reverse=True)):
+            ax2.text(0,j/len(k),'%s: %s' % (pname, pval))
         file_name = os.path.join(plot_dir,'%d.png'%i)
-        plt.savefig(file_name)
-        plt.close()
+        fig.savefig(file_name)
+        plt.close(fig)
 
         print('Saved', file_name)
         file_mapping[k] = file_name
