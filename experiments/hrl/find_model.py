@@ -114,3 +114,5 @@ def run():
         performance[m] = np.mean([test_model(m,10000) for _ in range(10)])
     for x in sorted(list(performance.items()), key=lambda x: x[1]):
         print(x)
+
+    # TODO: Test the model on the environment

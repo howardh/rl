@@ -58,10 +58,7 @@ class Agent(object):
         """
         reward_sum = 0
         obs = env.reset()
-        done = False
-        steps = 0
-        while not done:
-            steps += 1
+        for steps in itertools.count():
             if steps > max_steps:
                 break
             action = self.act(obs, testing=True)
@@ -69,6 +66,8 @@ class Agent(object):
             reward_sum += reward
             if render:
                 env.render()
+            if done:
+                break
         return reward_sum
         
     def test(self, env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
@@ -86,18 +85,8 @@ class Agent(object):
                 rewards.append(self.test_once(env, render=render, max_steps=max_steps))
             return rewards
         else:
-            from pathos.multiprocessing import ProcessPool
-            import logging
-            pool = ProcessPool(processors)
-            env_name = env.spec.id
-            envs = [gym.make(env_name) for _ in range(processors)]
-            def test(proc_id):
-                e = envs.pop()
-                output = self.test_once(e, max_steps=max_steps)
-                envs.append(e)
-                return output
-            rewards = pool.map(test, range(iterations))
-            return rewards
+            # TODO: Outdated code. Redo with utils functions.
+            raise NotImplementedError('Outdated code removed.')
 
     def run_episode(self, env):
         obs = env.reset()

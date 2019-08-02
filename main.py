@@ -1,3 +1,3 @@
-from experiments.hrl.find_model import run
+from experiments.hrl.main import run
 
-agent = run()
+agent = run(1)

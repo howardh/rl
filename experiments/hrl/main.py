@@ -54,6 +54,7 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
     )
 
     rewards = []
+    state_action_values = []
     done = True
     step_range = range(0,max_steps+1)
     if verbose:
@@ -62,8 +63,9 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
         for steps in step_range:
             # Run tests
             if steps % epoch == 0:
-                r = agent.test(test_env, test_iters, render=False, processors=1)
+                r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
                 rewards.append(r)
+                state_action_values.append(sa_vals)
                 if verbose:
                     tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
 
@@ -90,8 +92,11 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
             tqdm.write("Diverged")
             raise e
 
-    utils.save_results(args, rewards, directory=directory)
-    return (args, rewards)
+    utils.save_results(
+            args,
+            {'rewards': rewards, 'state_action_values': state_action_values},
+            directory=directory)
+    return (args, rewards, state_action_values)
 
 def run_gridsearch(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
@@ -123,7 +128,7 @@ def run_gridsearch(proc=1):
             'max_steps': [1000],
             'epoch': [100],
             'test_iters': [5],
-            'verbose': [False],
+            'verbose': [True],
             'net_structure': [()],
             'directory': [directory]
     }
@@ -135,7 +140,7 @@ def run(proc=2):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
-    run_gridsearch(proc=proc)
+    #run_gridsearch(proc=proc)
     # Look through params for best performance
     def reduce(results,s=[]):
         return s + [results]
@@ -164,7 +169,7 @@ def run(proc=2):
             # Take a mean over all max cum means over all trials
             max_means = []
             for trial in v:
-                mean_rewards = [np.mean(epoch) for epoch in trial]
+                mean_rewards = [np.mean(epoch) for epoch in trial['rewards']]
                 cum_mean = np.cumsum(mean_rewards)/np.arange(1,len(mean_rewards)+1)
                 max_mean = np.max(cum_mean)
                 max_means.append(max_mean)
@@ -176,7 +181,7 @@ def run(proc=2):
         for k,v in results.items():
             trial_rewards = []
             for trial in v:
-                trial_rewards.append([np.mean(epoch) for epoch in trial])
+                trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
             performance[k] = np.max(np.mean(trial_rewards,axis=0))
         return performance
 
@@ -206,16 +211,26 @@ def run(proc=2):
     if not os.path.isdir(plot_dir):
         os.makedirs(plot_dir)
     file_mapping = {}
+    plot_data = {}
+    max_y = 0
     for i,(k,v) in enumerate(results.items()):
         trial_rewards = []
+        trial_predicted_values = []
         for trial in v:
-            trial_rewards.append([np.mean(epoch) for epoch in trial])
+            trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
+            trial_predicted_values.append([np.mean(epoch) for epoch in trial['state_action_values']])
         params = dict(k)
-        y = np.mean(trial_rewards,axis=0)
+        y1 = np.mean(trial_rewards,axis=0)
+        y2 = np.mean(trial_predicted_values,axis=0)
         x = list(range(0,params['max_steps']+1,params['epoch']))
+        plot_data[k] = (x,y1,y2)
+        max_y = max(max_y, np.max(y1), np.max(y2))
 
+    for i,(k,(x,y1,y2)) in enumerate(plot_data.items()):
         plt.figure()
-        plt.plot(x,y)
+        plt.plot(x,y1)
+        plt.plot(x,y2)
+        plt.ylim([0,max_y])
         file_name = os.path.join(plot_dir,'%d.png'%i)
         plt.savefig(file_name)
         plt.close()

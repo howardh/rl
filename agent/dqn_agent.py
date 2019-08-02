@@ -3,6 +3,7 @@ from tqdm import tqdm
 import torch
 import gym
 import copy
+import itertools
 
 import numpy as np
 
@@ -101,3 +102,34 @@ class DQNAgent(Agent):
             policy = self.behaviour_policy
         dist = policy(vals)
         return dist.sample().item()
+
+    def get_state_action_value(self, observation, action):
+        observation = torch.tensor(observation, dtype=torch.float).unsqueeze(0)
+        vals = self.q_net(observation).squeeze()
+        return vals[action].item()
+
+    def test_once(self, env, max_steps=np.inf, render=False):
+        reward_sum = 0
+        sa_vals = []
+        obs = env.reset()
+        for steps in itertools.count():
+            if steps > max_steps:
+                break
+            action = self.act(obs, testing=True)
+            sa_vals.append(self.get_state_action_value(obs,action))
+            obs, reward, done, _ = env.step(action)
+            reward_sum += reward
+            if render:
+                env.render()
+            if done:
+                break
+        return reward_sum, np.mean(sa_vals)
+
+    def test(self, env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
+        rewards = []
+        sa_vals = []
+        for i in range(iterations):
+            r,sav = self.test_once(env, render=render, max_steps=max_steps)
+            rewards.append(r)
+            sa_vals.append(sav)
+        return rewards, sa_vals
