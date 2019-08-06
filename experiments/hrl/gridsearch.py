@@ -12,7 +12,7 @@ import utils
 
 from .model import QFunction
 
-def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
+def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         net_structure=[2,3,4],
         env_name='FrozenLake-v0', batch_size=32, min_replay_buffer_size=1000,
         max_steps=5000, epoch=50, test_iters=1, verbose=False):
@@ -102,7 +102,7 @@ def run_gridsearch(proc=1):
             'net_structure': [(10,10)],
             'directory': [directory]
     }
-    funcs = utils.gridsearch(params, run_trial_steps)
+    funcs = utils.gridsearch(params, run_trial)
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
 

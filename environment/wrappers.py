@@ -200,6 +200,8 @@ class FrameStack(gym.ObservationWrapper):
         [self.frames.append(observation) for _ in range(self.num_stack)]
         return self._get_observation()
 
+
+
 class DiscreteObservationToBox(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
@@ -207,3 +209,11 @@ class DiscreteObservationToBox(gym.ObservationWrapper):
 
     def observation(self, obs):
         return np.array([obs])
+
+class FrozenLakeToCoords(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.observation_space = Box(low=np.array([0]), high=np.array([3]))
+
+    def observation(self, obs):
+        return np.array([obs%4,int(obs/4)])
