@@ -102,41 +102,42 @@ def run_gridsearch(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = {
             'gamma': [1],
-            'alpha': np.logspace(np.log10(10),np.log10(.0001),num=16,endpoint=True,base=10).tolist(),
+            #'alpha': np.logspace(np.log10(10),np.log10(.0001),num=16,endpoint=True,base=10).tolist(),
+            'alpha': [0.1,0.01,0.001],
             'eps_b': [0, 0.1],
             'eps_t': [0],
-            'tau': [0.001, 1],
+            'tau': [0.1, 0.01, 0.001],
             'env_name': ['FrozenLake-v0'],
-            'batch_size': [32],
+            'batch_size': [32, 64, 128, 256],
             'min_replay_buffer_size': [10000],
-            'max_steps': [1000000],
+            'max_steps': [100000],
             'epoch': [1000],
             'test_iters': [5],
             'verbose': [False],
-            'net_structure': [(2,3,4)],
+            'net_structure': [(10,10)],
             'directory': [directory]
     }
-    params = { # For testing purposes. Remove later.
-            'gamma': [1],
-            'alpha': [0.1],
-            'eps_b': [0, 0.1],
-            'eps_t': [0],
-            'tau': [0.001, 1],
-            'env_name': ['FrozenLake-v0'],
-            'batch_size': [32],
-            'min_replay_buffer_size': [100],
-            'max_steps': [1000],
-            'epoch': [100],
-            'test_iters': [5],
-            'verbose': [True],
-            'net_structure': [()],
-            'directory': [directory]
-    }
+    #params = { # For testing purposes. Remove later.
+    #        'gamma': [1],
+    #        'alpha': [0.1],
+    #        'eps_b': [0, 0.1],
+    #        'eps_t': [0],
+    #        'tau': [0.001, 1],
+    #        'env_name': ['FrozenLake-v0'],
+    #        'batch_size': [32],
+    #        'min_replay_buffer_size': [100],
+    #        'max_steps': [1000],
+    #        'epoch': [100],
+    #        'test_iters': [5],
+    #        'verbose': [False],
+    #        'net_structure': [()],
+    #        'directory': [directory]
+    #}
     funcs = utils.gridsearch(params, run_trial_steps)
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
 
-def run(proc=2):
+def run(proc=3):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
@@ -232,7 +233,7 @@ def run(proc=2):
         # Plot
         ax1.plot(x,y1)
         ax1.plot(x,y2)
-        ax1.set_ylim([0,max_y])
+        ax1.set_ylim([0,1])
         ax1.set_title('[Insert Title Here]')
         ax1.grid(True,which='both',axis='both',color='grey')
         # Show params
