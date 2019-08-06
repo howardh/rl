@@ -1,4 +1,3 @@
-#from experiments.hrl.main import run
-from experiments.hrl.long_trial_average import run
+from experiments.hrl.long_trial_coords import run
 
 run()
