@@ -56,6 +56,6 @@ def run(proc=3,n=10):
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    funcs = [lambda: gridsearch.run_trial(gamma=1,alpha=0.001,eps_b=0.1,eps_t=0,tau=0.01,net_structure=(10,10),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory,max_steps=1000000) for _ in range(n)]
+    funcs = [lambda: gridsearch.run_trial(gamma=1,alpha=0.001,eps_b=0.1,eps_t=0,tau=0.01,net_structure=(10,10),batch_size=256,epoch=1000,test_iters=10,verbose=False,directory=directory,max_steps=1000000) for _ in range(n)]
     utils.cc(funcs,proc=proc)
     plot(results_directory=directory,plot_directory=plot_directory)
