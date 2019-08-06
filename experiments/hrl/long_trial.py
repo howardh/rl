@@ -11,21 +11,9 @@ from agent.policy import get_greedy_epsilon_policy
 
 from environment.wrappers import DiscreteObservationToBox
 
-import utils
+from .model import QFunction
 
-class QFunction(torch.nn.Module):
-    def __init__(self, layer_sizes = [2,3,4]):
-        super().__init__()
-        layers = []
-        in_f = 1
-        for out_f in layer_sizes:
-            layers.append(torch.nn.Linear(in_features=in_f,out_features=out_f))
-            layers.append(torch.nn.LeakyReLU())
-            in_f = out_f
-        layers.append(torch.nn.Linear(in_features=in_f,out_features=4))
-        self.seq = torch.nn.Sequential(*layers)
-    def forward(self, x):
-        return self.seq(x)
+import utils
 
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         net_structure=[2,3,4],
