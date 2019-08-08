@@ -100,5 +100,5 @@ def run():
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    run_trial(gamma=1,alpha=0.001,eps_b=0.1,eps_t=0,tau=0.01,net_structure=(10,10),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
+    run_trial(gamma=1,alpha=0.01,eps_b=0,eps_t=0,tau=0.01,net_structure=(10,10),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
     plot(results_directory=directory,plot_directory=plot_directory)
