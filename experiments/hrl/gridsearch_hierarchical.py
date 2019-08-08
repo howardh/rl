@@ -142,10 +142,11 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             tqdm.write("Diverged")
             raise e
 
-    utils.save_results(
-            args,
-            {'rewards': rewards, 'state_action_values': state_action_values, 'state_option_values': state_option_values},
-            directory=directory)
+    data = {'rewards': rewards, 
+            'state_action_values': state_action_values,
+            'state_option_values': state_option_values,
+            'entropies': entropies},
+    utils.save_results(args, data, directory=directory)
     return (args, rewards, state_action_values)
 
 def run_gridsearch(proc=1):
@@ -246,27 +247,28 @@ def run(proc=3):
     if not os.path.isdir(plot_dir):
         os.makedirs(plot_dir)
     file_mapping = {}
-    plot_data = {}
-    max_y = 0
     for i,(k,v) in enumerate(results.items()):
         trial_rewards = []
-        trial_predicted_values = []
+        trial_predicted_sa_values = []
+        trial_predicted_so_values = []
+        trial_entropies = []
         for trial in v:
             trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
-            trial_predicted_values.append([np.mean(epoch) for epoch in trial['state_action_values']])
+            trial_predicted_sa_values.append([np.mean(epoch) for epoch in trial['state_action_values']])
+            trial_predicted_so_values.append([np.mean(epoch) for epoch in trial['state_option_values']])
         params = dict(k)
         y1 = np.mean(trial_rewards,axis=0)
-        y2 = np.mean(trial_predicted_values,axis=0)
+        y2 = np.mean(trial_predicted_sa_values,axis=0)
+        y3 = np.mean(trial_predicted_so_values,axis=0)
         x = list(range(0,params['max_steps']+1,params['epoch']))
-        plot_data[k] = (x,y1,y2)
-        max_y = max(max_y, np.max(y1), np.max(y2))
 
-    for i,(k,(x,y1,y2)) in enumerate(plot_data.items()):
+        # Create figure
         fig, (ax1, ax2) = plt.subplots(1,2)
         fig.set_size_inches(10,4)
         # Plot
         ax1.plot(x,y1)
         ax1.plot(x,y2)
+        ax1.plot(x,y3)
         ax1.set_ylim([0,1])
         ax1.set_title('[Insert Title Here]')
         ax1.grid(True,which='both',axis='both',color='grey')
