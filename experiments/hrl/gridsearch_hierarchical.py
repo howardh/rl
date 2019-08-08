@@ -43,7 +43,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         )
     options = [create_option() for _ in range(num_options)]
     agent = DQNAgent(
-            action_space=env.action_space,
+            action_space=gym.spaces.Discrete(num_options),
             observation_space=env.observation_space,
             learning_rate=alpha,
             discount_factor=gamma,
@@ -51,7 +51,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             device=device,
             behaviour_policy=get_greedy_epsilon_policy(eps_b),
             target_policy=get_greedy_epsilon_policy(eps_t),
-            q_net=QFunction(layer_sizes=net_structure,input_size=2)
+            q_net=QFunction(layer_sizes=net_structure,input_size=2,output_size=num_options)
     )
 
     def test(env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
@@ -164,7 +164,7 @@ def run_gridsearch(proc=1):
             'test_iters': [5],
             'verbose': [False],
             'net_structure': [(5,),(10,)],
-            'num_options': [2,4,8]
+            'num_options': [2,4,8],
             'directory': [directory]
     }
     funcs = utils.gridsearch(params, run_trial)
@@ -174,7 +174,6 @@ def run_gridsearch(proc=1):
 def run(proc=3):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
-    return
     # Run gridsearch
     run_gridsearch(proc=proc)
     # Look through params for best performance

@@ -213,7 +213,7 @@ class DiscreteObservationToBox(gym.ObservationWrapper):
 class FrozenLakeToCoords(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
-        self.observation_space = Box(low=np.array([0,0]), high=np.array([3,3]))
+        self.observation_space = Box(low=np.array([0,0]), high=np.array([3,3]), dtype=np.float)
 
     def observation(self, obs):
         return np.array([obs%4,int(obs/4)])
