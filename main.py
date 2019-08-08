@@ -1,3 +1,3 @@
-from experiments.hrl.long_trial_coords import run
+from experiments.hrl.gridsearch_hierarchical import run
 
 run()
