@@ -253,7 +253,7 @@ def run(proc=3):
             # Take a max over the cumulative means for each trial
             # Take a mean over all max cum means over all trials
             max_means = []
-            for trial in v:
+            for (trial,) in v:
                 mean_rewards = [np.mean(epoch) for epoch in trial['rewards']]
                 cum_mean = np.cumsum(mean_rewards)/np.arange(1,len(mean_rewards)+1)
                 max_mean = np.max(cum_mean)
@@ -265,7 +265,7 @@ def run(proc=3):
         performance = {}
         for k,v in results.items():
             trial_rewards = []
-            for trial in v:
+            for (trial,) in v:
                 trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
             performance[k] = np.max(np.mean(trial_rewards,axis=0))
         return performance
@@ -301,7 +301,7 @@ def run(proc=3):
         trial_predicted_sa_values = []
         trial_predicted_so_values = []
         trial_entropies = []
-        for trial in v:
+        for (trial,) in v:
             trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
             trial_predicted_sa_values.append([np.mean(epoch) for epoch in trial['state_action_values']])
             trial_predicted_so_values.append([np.mean(epoch) for epoch in trial['state_option_values']])
