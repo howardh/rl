@@ -7,12 +7,59 @@ import os
 import itertools
 
 #from agent.hierarchical_dqn_agent import HierarchicalDQNAgent
-from agent.dqn_agent import DQNAgent
-from agent.policy import get_greedy_epsilon_policy
+from agent.dqn_agent import DQNAgent, HierarchicalDQNAgent
+from agent.policy import get_greedy_epsilon_policy, greedy_action
 from environment.wrappers import FrozenLakeToCoords
 import utils
 
 from .model import QFunction
+
+class HRLWrapper(gym.Wrapper):
+    def __init__(self, env, options, test=False):
+        super().__init__(env)
+        self.options = options
+        self.test = test
+        #self.discount_factor = discount_factor
+        #self.rewards_since_last = None
+        #self.last_option = None
+        self.current_obs = None
+        #self.prev_transition = [None]*len(options)
+
+    def step(self, action):
+        option = self.options[action]
+        # Select primitive action from option
+        primitive_action = option.act(self.current_obs)
+        # Transition
+        obs, reward, done, info = self.env.step(primitive_action)
+        # Save transitions
+        if not self.test:
+            self.options[action].observe_step(self.current_obs,primitive_action,reward,obs,done)
+        # Save current obs
+        self.current_obs = obs
+        return obs, reward, done, info
+
+    def step2(self, action):
+        option = self.options[action]
+        # Select primitive action from option
+        primitive_action = option.act(self.current_obs)
+        # Transition
+        obs, reward, done, info = self.env.step(primitive_action)
+        # Save transitions
+        if self.prev_transition[action] is not None:
+            o1,a,rs,o2,t = self.prev_transition[action]
+            g = self.discount_factor**len(rs)
+            rs_discounted_sum = sum((r*self.discount_factor**i for i,r in enumerate(rs)))
+            option[action].observe_step(o1,a,rs_discounted_sum,o2,t,g)
+        self.prev_transition[action] = (self.current_obs,primitive_action,[],obs,done)
+        # Update target for each option
+        for _,_,r,_,_ in self.prev_transition:
+            r.append(reward)
+        self.current_obs = obs
+        return obs, reward, done, info
+
+    def reset(self, **kwargs):
+        self.current_obs = self.env.reset(**kwargs)
+        return self.current_obs
 
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         net_structure=[2,3,4], num_options=4,
@@ -30,7 +77,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         device = torch.device('cpu')
 
     def create_option():
-        return DQNAgent(
+        return HierarchicalDQNAgent(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
                 learning_rate=alpha,
@@ -54,6 +101,15 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             q_net=QFunction(layer_sizes=net_structure,input_size=2,output_size=num_options)
     )
 
+    env = HRLWrapper(env, options, test=False)
+    test_env = HRLWrapper(test_env, options, test=True)
+
+    def value_function(states):
+        action_values = agent.q_net(states)
+        optimal_actions = greedy_action(action_values)
+        values = [options[o].q_net(s).max() for s,o in zip(states,optimal_actions)]
+        return torch.tensor(values)
+
     def test(env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
         def test_once(env, max_steps=np.inf, render=False):
             reward_sum = 0
@@ -65,12 +121,9 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             for steps in itertools.count():
                 if steps > max_steps:
                     break
-                option_freq[o] += 1
-                a = options[o].act(obs, testing=True)
-                sa_vals.append(options[o].get_state_action_value(obs,a))
                 o = agent.act(obs, testing=True)
                 so_vals.append(agent.get_state_action_value(obs,o))
-                obs, reward, done, _ = env.step(a)
+                obs, reward, done, _ = env.step(o)
                 reward_sum += reward
                 if render:
                     env.render()
@@ -119,20 +172,16 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             # Run step
             if done:
                 obs = env.reset()
-                option = agent.act(obs)
-            action = options[option].act(obs)
+            action = agent.act(obs)
 
             obs2, reward2, done, _ = env.step(action)
-            options[option].observe_step(obs, action, reward2, obs2, terminal=done)
-            agent.observe_step(obs, option, reward2, obs2, terminal=done)
-
-            option = agent.act(obs)
+            agent.observe_step(obs, action, reward2, obs2, terminal=done)
 
             # Update weights
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
                 for o in options:
-                    o.train(batch_size=batch_size,iterations=1)
+                    o.train(batch_size=batch_size,iterations=1,value_function=value_function)
 
             # Next time step
             obs = obs2
@@ -140,7 +189,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         if verbose:
             tqdm.write(str(e))
             tqdm.write("Diverged")
-            raise e
+            raise
 
     data = {'rewards': rewards, 
             'state_action_values': state_action_values,

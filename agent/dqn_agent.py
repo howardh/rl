@@ -133,3 +133,35 @@ class DQNAgent(Agent):
             rewards.append(r)
             sa_vals.append(sav)
         return rewards, sa_vals
+
+class HierarchicalDQNAgent(DQNAgent):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def train(self, batch_size, iterations, value_function):
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=batch_size, shuffle=True)
+        gamma = self.discount_factor
+        tau = self.polyak_rate
+        optimizer = self.optimizer
+        for i,(s0,a0,r1,s1,t) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0 = s0.to(self.device)
+            a0 = a0.to(self.device)
+            r1 = r1.float().to(self.device)
+            s1 = s1.to(self.device)
+            t = t.float().to(self.device)
+            # Value estimate
+            y = r1+gamma*value_function(s1)*(1-t)
+            y = y.detach()
+            # Update Q network
+            optimizer.zero_grad()
+            loss = ((y-self.q_net(s0)[range(batch_size),a0.flatten()])**2).mean()
+            loss.backward()
+            optimizer.step()
+
+            # Update target weights
+            for p1,p2 in zip(self.q_net_target.parameters(), self.q_net.parameters()):
+                p1.data = (1-tau)*p1+tau*p2

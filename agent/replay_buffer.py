@@ -30,3 +30,23 @@ class ReplayBuffer(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         return self.buffer[index]
+
+class HRLReplayBuffer(torch.utils.data.Dataset):
+    def __init__(self, max_size):
+        self.buffer = []
+        self.max_size = max_size
+        self.index = 0
+
+    def add_transition(self, obs0, action0, reward, obs, terminal=False, discount=0):
+        transition = (obs0, action0, reward, obs, terminal, discount)
+        if len(self.buffer) < self.max_size:
+            self.buffer.append(transition)
+        else:
+            self.buffer[self.index] = transition
+            self.index = (self.index+1)%self.max_size
+
+    def __len__(self):
+        return len(self.buffer)
+
+    def __getitem__(self, index):
+        return self.buffer[index]
