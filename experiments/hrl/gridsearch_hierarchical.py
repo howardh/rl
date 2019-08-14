@@ -164,8 +164,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
                 if verbose:
                     tqdm.write('steps %d \t Reward: %f \t SA-V: %f \t SO-V: %f \t Ent: %f' % (steps, np.mean(r), np.mean(sa_vals), np.mean(so_vals), np.mean(e)))
 
-            # Linearly Anneal epsilon
-            agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/1000000,1))*(1-eps_b)+eps_b)
+            # Linearly Anneal epsilon (Options only)
             for o in options:
                 o.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/1000000,1))*(1-eps_b)+eps_b)
 
@@ -178,10 +177,12 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             agent.observe_step(obs, action, reward2, obs2, terminal=done)
 
             # Update weights
-            if steps >= min_replay_buffer_size:
-                agent.train(batch_size=batch_size,iterations=1)
-                for o in options:
-                    o.train(batch_size=batch_size,iterations=1,value_function=value_function)
+            #if steps >= min_replay_buffer_size:
+            #    agent.train(batch_size=batch_size,iterations=1)
+            for o in options:
+                if len(o.replay_buffer) < min_replay_buffer_size:
+                    continue
+                o.train(batch_size=batch_size,iterations=1,value_function=value_function)
 
             # Next time step
             obs = obs2
