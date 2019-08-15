@@ -25,10 +25,12 @@ class HRLWrapper(gym.Wrapper):
         self.current_obs = None
         #self.prev_transition = [None]*len(options)
 
-    def step(self, action):
+    def step(self, action, save_sa_val=False):
         option = self.options[action]
         # Select primitive action from option
         primitive_action = option.act(self.current_obs)
+        # Save state-action value
+        self.last_sa_value = option.last_vals.squeeze()[primitive_action].item()
         # Transition
         obs, reward, done, info = self.env.step(primitive_action)
         # Save transitions
@@ -123,7 +125,8 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
                     break
                 o = agent.act(obs, testing=True)
                 so_vals.append(agent.get_state_action_value(obs,o))
-                obs, reward, done, _ = env.step(o)
+                obs, reward, done, _ = env.step(o, save_sa_val=True)
+                sa_vals.append(env.last_sa_value)
                 reward_sum += reward
                 if render:
                     env.render()

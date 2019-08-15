@@ -96,6 +96,7 @@ class DQNAgent(Agent):
         #observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
         observation = torch.tensor(observation, dtype=torch.float).unsqueeze(0)
         vals = self.q_net(observation)
+        self.last_vals = vals
         if testing:
             policy = self.target_policy
         else:
