@@ -203,18 +203,18 @@ def run_gridsearch(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = {
             'gamma': [1],
-            'alpha': [0.1,0.01,0.001],
-            'eps_b': [0, 0.1],
+            'alpha': [0.01],
+            'eps_b': [0],
             'eps_t': [0],
-            'tau': [0.01, 0.001],
+            'tau': [0.01],
             'env_name': ['FrozenLake-v0'],
-            'batch_size': [32, 64, 128, 256],
+            'batch_size': [256],
             'min_replay_buffer_size': [10000],
             'max_steps': [100000],
             'epoch': [1000],
             'test_iters': [5],
             'verbose': [False],
-            'net_structure': [(5,),(10,)],
+            'net_structure': [(10,10),(8,8),(6,6),(4,4),(2,2),(10,),(8,),(6,)],
             'num_options': [2,4,8],
             'directory': [directory]
     }
