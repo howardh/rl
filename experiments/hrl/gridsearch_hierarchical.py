@@ -19,13 +19,14 @@ class HRLWrapper(gym.Wrapper):
         super().__init__(env)
         self.options = options
         self.test = test
+        self.action_space = gym.spaces.Discrete(len(options))
         #self.discount_factor = discount_factor
         #self.rewards_since_last = None
         #self.last_option = None
         self.current_obs = None
         #self.prev_transition = [None]*len(options)
 
-    def step(self, action, save_sa_val=False):
+    def step(self, action):
         option = self.options[action]
         # Select primitive action from option
         primitive_action = option.act(self.current_obs)
@@ -115,7 +116,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
     def test(env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
         def test_once(env, max_steps=np.inf, render=False):
             reward_sum = 0
-            sa_vals = []
+            sa_vals = [[] for _ in range(env.action_space.n)]
             so_vals = []
             option_freq = np.array([0]*num_options)
             obs = env.reset()
@@ -125,8 +126,8 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
                     break
                 o = agent.act(obs, testing=True)
                 so_vals.append(agent.get_state_action_value(obs,o))
-                obs, reward, done, _ = env.step(o, save_sa_val=True)
-                sa_vals.append(env.last_sa_value)
+                obs, reward, done, _ = env.step(o)
+                sa_vals[o].append(env.last_sa_value)
                 reward_sum += reward
                 if render:
                     env.render()
@@ -134,7 +135,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
                     break
             prob = option_freq/option_freq.sum()
             entropy = -sum([p*np.log(p) if p > 0 else 0 for p in prob])
-            return reward_sum, np.mean(sa_vals), np.mean(so_vals), entropy
+            return reward_sum, [np.mean(v) for v in sa_vals], np.mean(so_vals), entropy
         rewards = []
         sa_vals = []
         so_vals = []
@@ -221,6 +222,23 @@ def run_gridsearch(proc=1):
             'num_options': [2,4,8],
             'directory': [directory]
     }
+    params = {
+            'gamma': [1],
+            'alpha': [0.01],
+            'eps_b': [0],
+            'eps_t': [0],
+            'tau': [0.01],
+            'env_name': ['FrozenLake-v0'],
+            'batch_size': [256],
+            'min_replay_buffer_size': [10],
+            'max_steps': [1000],
+            'epoch': [10],
+            'test_iters': [3],
+            'verbose': [True],
+            'net_structure': [()],
+            'num_options': [2,4,8],
+            'directory': [directory]
+    }
     funcs = utils.gridsearch(params, run_trial)
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
@@ -229,7 +247,7 @@ def run(proc=3):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
-    run_gridsearch(proc=proc)
+    #run_gridsearch(proc=proc)
     # Look through params for best performance
     def reduce(results,s=[]):
         return s + [results]
@@ -301,13 +319,14 @@ def run(proc=3):
         os.makedirs(plot_dir)
     file_mapping = {}
     for i,(k,v) in enumerate(results.items()):
+        print(k)
         trial_rewards = []
         trial_predicted_sa_values = []
         trial_predicted_so_values = []
         trial_entropies = []
         for (trial,) in v:
             trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
-            trial_predicted_sa_values.append([np.mean(epoch) for epoch in trial['state_action_values']])
+            trial_predicted_sa_values.append([np.mean(epoch, axis=0) for epoch in trial['state_action_values']])
             trial_predicted_so_values.append([np.mean(epoch) for epoch in trial['state_option_values']])
         params = dict(k)
         y1 = np.mean(trial_rewards,axis=0)
