@@ -222,23 +222,6 @@ def run_gridsearch(proc=1):
             'num_options': [2,4,8],
             'directory': [directory]
     }
-    params = {
-            'gamma': [1],
-            'alpha': [0.01],
-            'eps_b': [0],
-            'eps_t': [0],
-            'tau': [0.01],
-            'env_name': ['FrozenLake-v0'],
-            'batch_size': [256],
-            'min_replay_buffer_size': [10],
-            'max_steps': [1000],
-            'epoch': [10],
-            'test_iters': [3],
-            'verbose': [True],
-            'net_structure': [()],
-            'num_options': [2,4,8],
-            'directory': [directory]
-    }
     funcs = utils.gridsearch(params, run_trial)
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
@@ -247,7 +230,7 @@ def run(proc=3):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
-    #run_gridsearch(proc=proc)
+    run_gridsearch(proc=proc)
     # Look through params for best performance
     def reduce(results,s=[]):
         return s + [results]
@@ -319,7 +302,6 @@ def run(proc=3):
         os.makedirs(plot_dir)
     file_mapping = {}
     for i,(k,v) in enumerate(results.items()):
-        print(k)
         trial_rewards = []
         trial_predicted_sa_values = []
         trial_predicted_so_values = []
