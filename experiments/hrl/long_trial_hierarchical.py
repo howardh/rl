@@ -157,6 +157,8 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             tqdm.write(str(e))
             tqdm.write("Diverged")
             raise
+    except KeyboardInterrupt:
+        pass
 
     return (args, rewards, state_action_values)
 
