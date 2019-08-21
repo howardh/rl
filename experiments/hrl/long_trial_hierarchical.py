@@ -146,10 +146,9 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             # Update weights
             #if steps >= min_replay_buffer_size:
             #    agent.train(batch_size=batch_size,iterations=1)
-            for o in options:
-                if len(o.replay_buffer) < min_replay_buffer_size:
-                    continue
-                o.train(batch_size=batch_size,iterations=1,value_function=value_function)
+            if len(options[action].replay_buffer) < min_replay_buffer_size:
+                continue
+            options[action].train(batch_size=batch_size,iterations=1,value_function=value_function)
 
             # Next time step
             obs = obs2
