@@ -225,6 +225,54 @@ def run_gridsearch(proc=1):
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
 
+def plot(results_dir, plot_dir):
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+
+    def reduce(results,s=[]):
+        return s + [results]
+    results = utils.get_all_results_reduce(results_dir, reduce, [])
+
+    if not os.path.isdir(plot_dir):
+        os.makedirs(plot_dir)
+    file_mapping = {}
+    for i,(k,v) in enumerate(results.items()):
+        trial_rewards = []
+        trial_predicted_sa_values = []
+        trial_predicted_so_values = []
+        trial_entropies = []
+        for (trial,) in v:
+            trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
+            trial_predicted_sa_values.append([np.mean(epoch, axis=0) for epoch in trial['state_action_values']])
+            trial_predicted_so_values.append([np.mean(epoch) for epoch in trial['state_option_values']])
+        params = dict(k)
+        y1 = np.mean(trial_rewards,axis=0)
+        y2 = np.mean(trial_predicted_sa_values,axis=0)
+        y3 = np.mean(trial_predicted_so_values,axis=0)
+        x = list(range(0,y1.shape[0]*params['epoch'],params['epoch']))
+
+        # Create figure
+        fig, (ax1, ax2) = plt.subplots(1,2)
+        fig.set_size_inches(10,4)
+        # Plot
+        ax1.plot(x,y1)
+        ax1.plot(x,y2)
+        ax1.plot(x,y3)
+        ax1.set_ylim([0,1])
+        ax1.set_title('[Insert Title Here]')
+        ax1.grid(True,which='both',axis='both',color='grey')
+        # Show params
+        ax2.set_axis_off()
+        for j,(pname,pval) in enumerate(sorted(dict(k).items(), key=lambda x: x[0], reverse=True)):
+            ax2.text(0,j/len(k),'%s: %s' % (pname, pval))
+        file_name = os.path.join(plot_dir,'%d.png'%i)
+        fig.savefig(file_name)
+        plt.close(fig)
+
+        print('Saved', file_name)
+        file_mapping[k] = file_name
+
 def run(proc=3):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
@@ -293,45 +341,5 @@ def run(proc=3):
     print('-'*80)
 
     # Plot average performance over time
-    import matplotlib
-    matplotlib.use('Agg')
-    from matplotlib import pyplot as plt
     plot_dir = os.path.join(utils.get_results_root_directory(),'plots',__name__)
-    if not os.path.isdir(plot_dir):
-        os.makedirs(plot_dir)
-    file_mapping = {}
-    for i,(k,v) in enumerate(results.items()):
-        trial_rewards = []
-        trial_predicted_sa_values = []
-        trial_predicted_so_values = []
-        trial_entropies = []
-        for (trial,) in v:
-            trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
-            trial_predicted_sa_values.append([np.mean(epoch, axis=0) for epoch in trial['state_action_values']])
-            trial_predicted_so_values.append([np.mean(epoch) for epoch in trial['state_option_values']])
-        params = dict(k)
-        y1 = np.mean(trial_rewards,axis=0)
-        y2 = np.mean(trial_predicted_sa_values,axis=0)
-        y3 = np.mean(trial_predicted_so_values,axis=0)
-        x = list(range(0,params['max_steps']+1,params['epoch']))
-
-        # Create figure
-        fig, (ax1, ax2) = plt.subplots(1,2)
-        fig.set_size_inches(10,4)
-        # Plot
-        ax1.plot(x,y1)
-        ax1.plot(x,y2)
-        ax1.plot(x,y3)
-        ax1.set_ylim([0,1])
-        ax1.set_title('[Insert Title Here]')
-        ax1.grid(True,which='both',axis='both',color='grey')
-        # Show params
-        ax2.set_axis_off()
-        for j,(pname,pval) in enumerate(sorted(dict(k).items(), key=lambda x: x[0], reverse=True)):
-            ax2.text(0,j/len(k),'%s: %s' % (pname, pval))
-        file_name = os.path.join(plot_dir,'%d.png'%i)
-        fig.savefig(file_name)
-        plt.close(fig)
-
-        print('Saved', file_name)
-        file_mapping[k] = file_name
+    plot(directory, plot_dir)

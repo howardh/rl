@@ -5,15 +5,15 @@ from tqdm import tqdm
 import dill
 import os
 import itertools
+import time
 
 from agent.dqn_agent import DQNAgent, HierarchicalDQNAgent
 from agent.policy import get_greedy_epsilon_policy, greedy_action
 
 from environment.wrappers import FrozenLakeToCoords
 
-from .gridsearch_hierarchical import HRLWrapper
+from .gridsearch_hierarchical import HRLWrapper, plot
 from .model import QFunction
-from .long_trial import plot
 
 import utils
 
@@ -169,4 +169,5 @@ def run():
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
     run_trial(gamma=1,alpha=0.01,eps_b=0,eps_t=0,tau=0.01,net_structure=(10,10),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
-    plot(results_directory=directory,plot_directory=plot_directory)
+    #run_trial(gamma=1,alpha=0.01,eps_b=0,eps_t=0,tau=0.01,net_structure=(),batch_size=10,epoch=10, test_iters=3,verbose=True,directory=directory)
+    plot(results_dir=directory,plot_dir=plot_directory)
