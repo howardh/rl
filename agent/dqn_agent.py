@@ -107,7 +107,10 @@ class DQNAgent(Agent):
     def get_state_action_value(self, observation, action):
         observation = torch.tensor(observation, dtype=torch.float).unsqueeze(0)
         vals = self.q_net(observation).squeeze()
-        return vals[action].item()
+        if vals.size() == ():
+            return vals.item()
+        else:
+            return vals[action].item()
 
     def test_once(self, env, max_steps=np.inf, render=False):
         reward_sum = 0
