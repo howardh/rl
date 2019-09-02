@@ -25,14 +25,19 @@ lock = threading.Lock()
 
 def get_results_root_directory():
     host_name = os.uname()[1]
-    if host_name.endswith('server.mila.quebec') or host_name.startswith('eos'):
+    # Mila
+    mila_hostnames = ['rtx', 'leto', 'eos', 'bart', 'mila', 'kepler', 'power']
+    if host_name.endswith('server.mila.quebec') or any((host_name.startswith(n) for n in mila_hostnames)):
         return "/network/tmp1/huanghow"
+    # RL Lab
     if host_name == "agent-server-1" or host_name == "agent-server-2":
         return "/NOBACKUP/hhuang63/results"
     if host_name == "garden-path" or host_name == "ppl-3":
         return "/home/ml/hhuang63/results"
+    # Compute Canada
     if host_name.find('gra') == 0 or host_name.find('cdr') == 0:
         return "/home/hhuang63/scratch/results"
+    # Local
     if host_name.find('howard-pc') == 0:
         return "/home/howard/tmp/results"
     raise NotImplementedError("No default path defined for %s" % host_name)
