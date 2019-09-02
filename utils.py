@@ -25,7 +25,7 @@ lock = threading.Lock()
 
 def get_results_root_directory():
     host_name = os.uname()[1]
-    if host_name.endswith('server.mila.quebec'):
+    if host_name.endswith('server.mila.quebec') or host_name.startswith('eos'):
         return "/network/tmp1/huanghow"
     if host_name == "agent-server-1" or host_name == "agent-server-2":
         return "/NOBACKUP/hhuang63/results"
