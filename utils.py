@@ -10,10 +10,15 @@ import csv
 import numpy as np
 import torch
 import dill
-import pandas
 import operator
 import traceback
 import itertools
+
+try:
+    import pandas
+except ModuleNotFoundError as e:
+    print(e)
+    print('Could not import pandas. Skipping.')
 
 START_TIME = time.strftime("%Y-%m-%d_%H-%M-%S")
 _results_dir = None
