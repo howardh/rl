@@ -63,7 +63,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
     def value_function(states):
         action_values = agent.q_net(states)
         optimal_actions = greedy_action(action_values)
-        values = [options[o].q_net(s).max() for s,o in zip(states,optimal_actions)]
+        values = [options[o].q_net_target(s).max() for s,o in zip(states,optimal_actions)]
         return torch.tensor(values)
 
     def test(env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
