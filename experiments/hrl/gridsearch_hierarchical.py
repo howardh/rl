@@ -29,7 +29,7 @@ class HRLWrapper(gym.Wrapper):
     def step(self, action):
         option = self.options[action]
         # Select primitive action from option
-        primitive_action = option.act(self.current_obs)
+        primitive_action = option.act(self.current_obs,testing=self.test)
         # Save state-action value
         self.last_sa_value = option.last_vals.squeeze()[primitive_action].item()
         # Transition

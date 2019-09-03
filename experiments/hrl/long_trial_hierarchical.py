@@ -167,10 +167,6 @@ def run():
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-<<<<<<< Updated upstream
     run_trial(gamma=1,alpha=0.001,eps_b=0,eps_t=0,tau=0.001,net_structure=(10,10),num_options=2,batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
-=======
-    run_trial(gamma=1,alpha=0.001,eps_b=0,eps_t=0,tau=0.001,net_structure=(10,10),num_options=1,batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
->>>>>>> Stashed changes
     #run_trial(gamma=1,alpha=0.01,eps_b=0,eps_t=0,tau=0.01,net_structure=(),num_options=1,batch_size=10,epoch=10, test_iters=3,verbose=True,directory=directory)
     plot(results_dir=directory,plot_dir=plot_directory)
