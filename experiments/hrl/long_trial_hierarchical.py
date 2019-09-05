@@ -63,8 +63,8 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             device=device,
             behaviour_policy=get_greedy_epsilon_policy(eps_b),
             target_policy=get_greedy_epsilon_policy(eps_t),
-            #q_net=QFunction(layer_sizes=net_structure,input_size=2,output_size=num_options)
-            q_net=DummyPolicy()
+            q_net=QFunction(layer_sizes=net_structure,input_size=2,output_size=num_options)
+            #q_net=DummyPolicy()
     )
     print_policy(agent)
 
@@ -135,6 +135,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
                 state_option_values.append(so_vals)
                 entropies.append(e)
                 if verbose:
+                    print_policy(agent)
                     tqdm.write('steps %d \t Reward: %f \t SA-V: %f \t SO-V: %f \t Ent: %f' % (steps, np.mean(r), np.mean(sa_vals), np.mean(so_vals), np.mean(e)))
                 data = {'rewards': rewards, 
                         'state_action_values': state_action_values,
@@ -142,7 +143,8 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
                         'entropies': entropies},
                 utils.save_results(args, data, file_path=results_file_path)
 
-            # Linearly Anneal epsilon (Options only)
+            # Linearly Anneal epsilon
+            agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/1000000,1))*(1-eps_b)+eps_b)
             for o in options:
                 o.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/1000000,1))*(1-eps_b)+eps_b)
 
@@ -155,8 +157,8 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             agent.observe_step(obs, action, reward2, obs2, terminal=done)
 
             # Update weights
-            #if steps >= min_replay_buffer_size:
-            #    agent.train(batch_size=batch_size,iterations=1)
+            if steps >= min_replay_buffer_size:
+                agent.train(batch_size=batch_size,iterations=1)
             if len(options[action].replay_buffer) >= min_replay_buffer_size:
                 options[action].train(batch_size=batch_size,iterations=1,value_function=value_function)
 
@@ -175,7 +177,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
 def print_policy(agent):
     states = list(itertools.product([0,1,2,3],[0,1,2,3]))
     vals = agent.q_net(torch.tensor(states).float())
-    print(vals.argmax(dim=1).view(4,4))
+    tqdm.write(repr(vals.argmax(dim=1).view(4,4)))
 
 def run():
     utils.set_results_directory(
