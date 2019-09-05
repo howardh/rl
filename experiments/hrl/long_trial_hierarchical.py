@@ -17,6 +17,15 @@ from .model import QFunction
 
 import utils
 
+class DummyPolicy():
+    def __call__(self,state):
+        v0 = (state[:,0] > 1).view(-1,1).float()
+        v1 = 1-v0
+        return torch.cat((v0,v1),dim=1)
+    def parameters(self):
+        x = torch.tensor(0)
+        return [x]
+
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         net_structure=[2,3,4], num_options=4,
         env_name='FrozenLake-v0', batch_size=32, min_replay_buffer_size=1000,
@@ -54,8 +63,11 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             device=device,
             behaviour_policy=get_greedy_epsilon_policy(eps_b),
             target_policy=get_greedy_epsilon_policy(eps_t),
-            q_net=QFunction(layer_sizes=net_structure,input_size=2,output_size=num_options)
+            #q_net=QFunction(layer_sizes=net_structure,input_size=2,output_size=num_options)
+            q_net=DummyPolicy()
     )
+    print_policy(agent)
+    return
 
     env = HRLWrapper(env, options, test=False)
     test_env = HRLWrapper(test_env, options, test=True)
@@ -160,6 +172,11 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         pass
 
     return (args, rewards, state_action_values)
+
+def print_policy(agent):
+    states = list(itertools.product([0,1,2,3],[0,1,2,3]))
+    vals = agent.q_net(torch.tensor(states).float())
+    print(vals.argmax(dim=1).view(4,4))
 
 def run():
     utils.set_results_directory(
