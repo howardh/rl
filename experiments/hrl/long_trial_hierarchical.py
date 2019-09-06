@@ -12,7 +12,7 @@ from agent.policy import get_greedy_epsilon_policy, greedy_action
 
 from environment.wrappers import FrozenLakeToCoords
 
-from .gridsearch_hierarchical import HRLWrapper, plot
+from .gridsearch_hierarchical import HRLWrapper
 from .model import QFunction
 
 import utils
@@ -140,7 +140,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
                 data = {'rewards': rewards, 
                         'state_action_values': state_action_values,
                         'state_option_values': state_option_values,
-                        'entropies': entropies},
+                        'entropies': entropies}
                 utils.save_results(args, data, file_path=results_file_path)
 
             # Linearly Anneal epsilon
@@ -170,7 +170,11 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             tqdm.write("Diverged")
             raise
     except KeyboardInterrupt:
-        pass
+        data = {'rewards': rewards, 
+                'state_action_values': state_action_values,
+                'state_option_values': state_option_values,
+                'entropies': entropies}
+        utils.save_results(args, data, file_path=results_file_path)
 
     return (args, rewards, state_action_values)
 
@@ -179,12 +183,50 @@ def print_policy(agent):
     vals = agent.q_net(torch.tensor(states).float())
     tqdm.write(repr(vals.argmax(dim=1).view(4,4)))
 
+def plot(results_dir, plot_dir):
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+
+    results = utils.get_all_results(results_dir)
+
+    if not os.path.isdir(plot_dir):
+        os.makedirs(plot_dir)
+    results = list(results)
+    for i,trial in enumerate(results):
+        params,data = trial
+        params = dict(params)
+        y1 = np.array(data['rewards'])
+        y2 = np.mean(data['state_action_values'],axis=1)
+        y3 = np.array(data['state_option_values'])
+        x = list(range(0,y1.shape[0]*params['epoch'],params['epoch']))
+
+        # Create figure
+        fig, (ax1, ax2) = plt.subplots(1,2)
+        fig.set_size_inches(10,4)
+        # Plot
+        ax1.plot(x,y1)
+        ax1.plot(x,y2)
+        ax1.plot(x,y3)
+        ax1.set_ylim([0,1])
+        ax1.set_title('[Insert Title Here]')
+        ax1.grid(True,which='both',axis='both',color='grey')
+        # Show params
+        ax2.set_axis_off()
+        for j,(pname,pval) in enumerate(sorted(dict(params).items(), key=lambda x: x[0], reverse=True)):
+            ax2.text(0,j/len(params),'%s: %s' % (pname, pval))
+        file_name = os.path.join(plot_dir,'%d.png'%i)
+        fig.savefig(file_name)
+        plt.close(fig)
+
+        print('Saved', file_name)
+
 def run():
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    run_trial(gamma=1,alpha=0.001,eps_b=0,eps_t=0,tau=0.001,net_structure=(4,4),num_options=2,batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
+    #run_trial(gamma=1,alpha=0.001,eps_b=0,eps_t=0,tau=0.001,net_structure=(4,4),num_options=2,batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
     #run_trial(gamma=1,alpha=0.01,eps_b=0,eps_t=0,tau=0.01,net_structure=(),num_options=1,batch_size=10,epoch=10, test_iters=3,verbose=True,directory=directory)
     plot(results_dir=directory,plot_dir=plot_directory)

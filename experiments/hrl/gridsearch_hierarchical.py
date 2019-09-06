@@ -198,7 +198,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
     data = {'rewards': rewards, 
             'state_action_values': state_action_values,
             'state_option_values': state_option_values,
-            'entropies': entropies},
+            'entropies': entropies}
     utils.save_results(args, data, directory=directory)
     return (args, rewards, state_action_values)
 
@@ -242,7 +242,7 @@ def plot(results_dir, plot_dir):
         trial_predicted_sa_values = []
         trial_predicted_so_values = []
         trial_entropies = []
-        for (trial,) in v:
+        for trial in v:
             trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
             trial_predicted_sa_values.append([np.mean(epoch, axis=0) for epoch in trial['state_action_values']])
             trial_predicted_so_values.append([np.mean(epoch) for epoch in trial['state_option_values']])
