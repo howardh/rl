@@ -87,19 +87,19 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
 def run_gridsearch(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = {
-            'gamma': [1],
+            'gamma': [0.9],
             'alpha': [0.1,0.01,0.001],
             'eps_b': [0, 0.1],
             'eps_t': [0],
             'tau': [0.1, 0.01, 0.001],
             'env_name': ['gym_fourrooms:fourrooms-v0'],
             'batch_size': [32, 64, 128, 256],
-            'min_replay_buffer_size': [10000],
+            'min_replay_buffer_size': [1000],
             'max_steps': [100000],
             'epoch': [1000],
             'test_iters': [5],
-            'verbose': [True],
-            'net_structure': [(10,10)],
+            'verbose': [False],
+            'net_structure': [(10,10),(20,20)],
             'directory': [directory]
     }
     funcs = utils.gridsearch(params, run_trial)
@@ -110,7 +110,7 @@ def run(proc=3):
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     # Run gridsearch
-    #run_gridsearch(proc=proc)
+    run_gridsearch(proc=proc)
     # Look through params for best performance
     def reduce(results,s=[]):
         return s + [results]
