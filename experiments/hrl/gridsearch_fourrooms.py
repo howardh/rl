@@ -18,9 +18,9 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         max_steps=5000, epoch=50, test_iters=1, verbose=False):
     args = locals()
     env = gym.make(env_name)
-    env = gym.wrappers.TimeLimit(env,1000)
+    env = gym.wrappers.TimeLimit(env,36)
     test_env = gym.make(env_name)
-    test_env = gym.wrappers.TimeLimit(test_env,1000)
+    test_env = gym.wrappers.TimeLimit(test_env,36)
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -87,7 +87,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
 def run_gridsearch(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = {
-            'gamma': [0.9],
+            'gamma': [1],
             'alpha': [0.1,0.01,0.001],
             'eps_b': [0, 0.1],
             'eps_t': [0],
@@ -154,6 +154,14 @@ def run(proc=3):
                 trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
             performance[k] = np.max(np.mean(trial_rewards,axis=0))
         return performance
+    def compute_performance_mean(results):
+        performance = {}
+        for k,v in results.items():
+            trial_rewards = []
+            for trial in v:
+                trial_rewards.append([np.mean(epoch) for epoch in trial['rewards']])
+            performance[k] = np.mean(trial_rewards)
+        return performance
 
     print('-'*80)
 
@@ -168,6 +176,14 @@ def run(proc=3):
     performance = compute_performance_max_cum_mean(results)
     best_param, best_performance = max(performance.items(), key=lambda x: x[1])
     print('Performance by sample complexity')
+    print('Best parameter set:', best_param)
+    print('Best performance:', best_performance)
+
+    print('-'*80)
+
+    performance = compute_performance_mean(results)
+    best_param, best_performance = max(performance.items(), key=lambda x: x[1])
+    print('Performance by overall mean')
     print('Best parameter set:', best_param)
     print('Best performance:', best_performance)
 
