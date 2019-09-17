@@ -9,21 +9,22 @@ import itertools
 from agent.dqn_agent import DQNAgent
 from agent.policy import get_greedy_epsilon_policy
 
-from environment.wrappers import DiscreteObservationToBox
+from environment.wrappers import FrozenLakeToCoords
 
 from .model import QFunction
+from .long_trial import plot
 
 import utils
 
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         net_structure=[2,3,4],
-        env_name='FrozenLake-v0', batch_size=32, min_replay_buffer_size=1000,
-        epoch=50, test_iters=1, verbose=False):
+        env_name='gym_fourrooms:fourrooms-v0', batch_size=32,
+        min_replay_buffer_size=1000, epoch=50, test_iters=1, verbose=False):
     args = locals()
     env = gym.make(env_name)
-    env = DiscreteObservationToBox(env)
+    env = gym.wrappers.TimeLimit(env,36)
     test_env = gym.make(env_name)
-    test_env = DiscreteObservationToBox(test_env)
+    test_env = gym.wrappers.TimeLimit(test_env,36)
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -39,7 +40,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             device=device,
             behaviour_policy=get_greedy_epsilon_policy(eps_b),
             target_policy=get_greedy_epsilon_policy(eps_t),
-            q_net=QFunction(layer_sizes=net_structure)
+            q_net=QFunction(layer_sizes=net_structure,input_size=4)
     )
 
     # Create file to save results
@@ -93,44 +94,11 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
 
     return (args, rewards, state_action_values)
 
-def plot(results_directory, plot_directory):
-    results = utils.get_all_results(results_directory)
-
-    import matplotlib
-    matplotlib.use('Agg')
-    from matplotlib import pyplot as plt
-    fig, (ax1, ax2) = plt.subplots(1,2)
-    fig.set_size_inches(10,4)
-    for k,v in results:
-        params = dict(k)
-        mean_rewards = [np.mean(epoch) for epoch in v['rewards']]
-        mean_sa_vals = [np.mean(epoch) for epoch in v['state_action_values']]
-        assert len(mean_rewards) == len(mean_sa_vals)
-
-        x = list(range(0,len(mean_rewards)*params['epoch'],params['epoch']))
-        ax1.set_title('Testing Reward')
-        ax1.set_xlabel('Steps')
-        ax1.set_ylabel('Average Reward')
-        ax1.plot(x,mean_rewards)
-        ax2.set_title('Predicted Action Values')
-        ax2.set_xlabel('Steps')
-        ax2.set_ylabel('Expected Return')
-        ax2.plot(x,mean_sa_vals)
-        ax2.set_ylim([0,1])
-
-        print(mean_rewards, mean_sa_vals)
-    file_name = os.path.join(plot_directory,'plot.png')
-    if not os.path.isdir(plot_directory):
-        os.makedirs(plot_directory)
-    fig.savefig(file_name)
-    plt.close(fig)
-    print('Saved file', file_name)
-
 def run():
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    run_trial(gamma=1,alpha=0.001,eps_b=0.1,eps_t=0,tau=0.01,net_structure=(10,10),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
+    run_trial(gamma=1,alpha=0.001,eps_b=0,eps_t=0,tau=0.001,net_structure=(20,20),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
     plot(results_directory=directory,plot_directory=plot_directory)

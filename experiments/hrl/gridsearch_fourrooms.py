@@ -14,8 +14,9 @@ from .model import QFunction
 
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         net_structure=[2,3,4],
-        env_name='FrozenLake-v0', batch_size=32, min_replay_buffer_size=1000,
-        max_steps=5000, epoch=50, test_iters=1, verbose=False):
+        env_name='gym_fourrooms:fourrooms-v0', batch_size=32,
+        min_replay_buffer_size=1000, max_steps=5000, epoch=50,
+        test_iters=1, verbose=False):
     args = locals()
     env = gym.make(env_name)
     env = gym.wrappers.TimeLimit(env,36)
