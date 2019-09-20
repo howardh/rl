@@ -2,5 +2,8 @@
 #from experiments.hrl.gridsearch_fourrooms import run
 #from experiments.hrl.long_trial_fourrooms import run
 from experiments.hrl.long_trial_hierarchical_fourrooms import run
+#from experiments.hrl.find_model_fourrooms import run
 
+#while True:
+#    q = run()
 run()
