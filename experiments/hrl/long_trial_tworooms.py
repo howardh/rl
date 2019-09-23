@@ -16,13 +16,13 @@ from .long_trial import plot
 
 import utils
 
-one_room_map = """
+two_rooms_map = """
 xxxxxxxxxx
+x    x   x
+x    x   x
 x        x
-x        x
-x        x
-x        x
-x        x
+x    x   x
+x    x   x
 xxxxxxxxxx"""
 
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
@@ -30,9 +30,9 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         env_name='gym_fourrooms:fourrooms-v0', batch_size=32,
         min_replay_buffer_size=1000, epoch=50, test_iters=1, verbose=False):
     args = locals()
-    env = gym.make(env_name,env_map=one_room_map)
+    env = gym.make(env_name,env_map=two_rooms_map)
     env = gym.wrappers.TimeLimit(env,36)
-    test_env = gym.make(env_name,env_map=one_room_map)
+    test_env = gym.make(env_name,env_map=two_rooms_map)
     test_env = gym.wrappers.TimeLimit(test_env,36)
 
     if torch.cuda.is_available():
