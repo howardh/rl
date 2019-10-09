@@ -31,12 +31,12 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         net_structure=[2,3,4], num_options=4,
         env_name='gym_fourrooms:fourrooms-v0', batch_size=32,
         min_replay_buffer_size=1000,
-        max_steps=5000, epoch=50, test_iters=1, verbose=False):
+        time_limit=20, epoch=50, test_iters=1, verbose=False):
     args = locals()
     env = gym.make(env_name,env_map=two_rooms_map)
-    env = gym.wrappers.TimeLimit(env,20)
+    env = gym.wrappers.TimeLimit(env,time_limit)
     test_env = gym.make(env_name,env_map=two_rooms_map)
-    test_env = gym.wrappers.TimeLimit(test_env,20)
+    test_env = gym.wrappers.TimeLimit(test_env,time_limit)
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -74,13 +74,13 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
     test_env = HRLWrapper(test_env, options, test=True)
 
     def value_function(states):
-        action_values = agent.q_net(states)
+        action_values = agent.q_net_target(states)
         optimal_actions = greedy_action(action_values)
         values = [options[o].q_net_target(s).max() for s,o in zip(states,optimal_actions)]
         return torch.tensor(values)
 
-    def test(env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
-        def test_once(env, max_steps=np.inf, render=False):
+    def test(env, iterations, render=False, record=True, processors=1):
+        def test_once(env, render=False):
             reward_sum = 0
             sa_vals = [[] for _ in range(env.action_space.n)]
             so_vals = []
@@ -88,8 +88,6 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             obs = env.reset()
             o = agent.act(obs, testing=True)
             for steps in itertools.count():
-                if steps > max_steps:
-                    break
                 o = agent.act(obs, testing=True)
                 so_vals.append(agent.get_state_action_value(obs,o))
                 obs, reward, done, _ = env.step(o)
@@ -107,7 +105,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         so_vals = []
         entropies = []
         for i in range(iterations):
-            r,sav,sov,e = test_once(env, render=render, max_steps=max_steps)
+            r,sav,sov,e = test_once(env, render=render)
             rewards.append(r)
             sa_vals.append(sav)
             so_vals.append(sov)
@@ -181,7 +179,7 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
     return (args, rewards, state_action_values)
 
 def print_policy(agent):
-    goals = [(1,1),(2,2),(1,6),(2,7)]
+    goals = [(1,1),(5,2),(1,6),(5,7)]
     map_array = np.array([list(r) for r in two_rooms_map.split('\n')[1:]])
     y_len = len(map_array)
     x_len = len(map_array[0])
@@ -249,6 +247,6 @@ def run():
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    run_trial(gamma=1,alpha=0.001,eps_b=0,eps_t=0,tau=0.001,net_structure=(3,3),num_options=3,batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
+    #run_trial(gamma=1,alpha=0.001,eps_b=0.05,eps_t=0,tau=0.001,net_structure=(3,3),num_options=8,batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory)
     #run_trial(gamma=1,alpha=0.01,eps_b=0,eps_t=0,tau=0.01,net_structure=(),num_options=1,batch_size=10,epoch=10, test_iters=3,verbose=True,directory=directory)
     plot(results_dir=directory,plot_dir=plot_directory)
