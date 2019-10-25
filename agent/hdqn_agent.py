@@ -299,7 +299,9 @@ class HDQNAgentWithDelayAC(Agent):
             m2 = torch.ones_like(m1).to(self.device)
             t = t.float().to(self.device)
             # Update Q function
-            val_target = r2+gamma*self.q_net_target(s2).max(1)[0]*(1-t)
+            action_probs = self.policy_net_target(s0,s1,m1)
+            next_state_vals = (action_probs * self.q_net_target(s2)).sum(1)
+            val_target = r2+gamma*next_state_vals*(1-t)
             val_pred = self.q_net(s1)[range(batch_size),a1.squeeze()]
             critic_optimizer.zero_grad()
             critic_loss = ((val_target-val_pred)**2).mean()
@@ -369,3 +371,4 @@ class HDQNAgentWithDelayAC(Agent):
             rewards.append(r)
             sa_vals.append(sav)
         return rewards, sa_vals
+

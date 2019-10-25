@@ -23,16 +23,68 @@ x    x   x
 x    x   x
 xxxxxxxxxx"""
 
+def print_policy(agent):
+    goals = [(1,1),(5,2),(1,6),(5,7)]
+    map_array = np.array([list(r) for r in two_rooms_map.split('\n')[1:]])
+    y_len = len(map_array)
+    x_len = len(map_array[0])
+    output_arrays = []
+    empty_column = np.array([[' ']]*y_len)
+    for gy,gx in goals:
+        output_array = map_array.copy()
+        states = list(itertools.product(range(y_len),range(x_len),[gy],[gx]))
+        vals = agent.controller_net(torch.tensor(states).float())
+        actions = vals.argmax(dim=1).view(y_len,x_len)
+        for y,x in itertools.product(range(y_len),range(x_len)):
+            if y == gy and x == gx:
+                output_array[y,x] = 'G'
+            elif output_array[y,x] == ' ':
+                output_array[y,x] = str(actions[y,x].item())
+        output_arrays.append(output_array)
+        output_arrays.append(empty_column)
+    concated_arrays = np.concatenate(output_arrays[:-1],axis=1)
+    output_str = '\n'.join([' '.join(row) for row in concated_arrays])
+    tqdm.write(output_str)
+    return output_str
+
+def print_policy2(agent):
+    goals = [(1,1),(5,2),(1,6),(5,7)]
+    dir_arrows = '↑→↓←'
+    map_array = np.array([list(r) for r in two_rooms_map.split('\n')[1:]])
+    y_len = len(map_array)
+    x_len = len(map_array[0])
+    output_arrays = []
+    empty_column = np.array([[' ']]*y_len)
+    for gy,gx in goals:
+        output_array = map_array.copy()
+        states = list(itertools.product(range(y_len),range(x_len),[gy],[gx]))
+        vals = agent.controller_net(torch.tensor(states).float())
+        actions = vals.argmax(dim=1).view(y_len,x_len)
+        for y,x in itertools.product(range(y_len),range(x_len)):
+            if y == gy and x == gx:
+                output_array[y,x] = 'G'
+            elif output_array[y,x] == ' ':
+                s = torch.tensor([[y,x,gy,gx]]).float()
+                prim_action = agent.subpolicy_nets[actions[y,x].item()](s).argmax()
+                output_array[y,x] = dir_arrows[prim_action]
+        output_arrays.append(output_array)
+        output_arrays.append(empty_column)
+    concated_arrays = np.concatenate(output_arrays[:-1],axis=1)
+    output_str = '\n'.join([' '.join(row) for row in concated_arrays])
+    tqdm.write(output_str)
+    return output_str
+
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
-        net_structure=[2,3,4], num_options=4,
+        controller_net_structure=[2,3,4], subpolicy_net_structure=[3],
+        num_options=4,
         env_name='gym_fourrooms:fourrooms-v0', batch_size=32,
         min_replay_buffer_size=1000, epoch=50, test_iters=1, verbose=False,
         max_steps=float('inf')):
     args = locals()
     env = gym.make(env_name,env_map=two_rooms_map)
-    env = gym.wrappers.TimeLimit(env,36)
+    env = gym.wrappers.TimeLimit(env,15)
     test_env = gym.make(env_name,env_map=two_rooms_map)
-    test_env = gym.wrappers.TimeLimit(test_env,36)
+    test_env = gym.wrappers.TimeLimit(test_env,15)
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -47,9 +99,9 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             polyak_rate=tau,
             device=device,
             behaviour_epsilon=eps_b,
-            controller_net=PolicyFunction(layer_sizes=net_structure,input_size=4,output_size=num_options),
-            subpolicy_nets=[PolicyFunction(layer_sizes=net_structure,input_size=4) for _ in range(num_options)],
-            q_net=QFunction(layer_sizes=(10,10),input_size=4,output_size=4),
+            controller_net=PolicyFunction(layer_sizes=controller_net_structure,input_size=4,output_size=num_options),
+            subpolicy_nets=[PolicyFunction(layer_sizes=subpolicy_net_structure,input_size=4) for _ in range(num_options)],
+            q_net=QFunction(layer_sizes=(15,15),input_size=4,output_size=4),
     )
 
     # Create file to save results
@@ -79,6 +131,8 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
                 if verbose:
                     tqdm.write('steps %d \t Reward: %f \t Train rewards: %f' %
                             (steps, np.mean(r), np.mean(training_rewards)))
+                    print_policy(agent)
+                    print_policy2(agent)
                 training_rewards = []
                 utils.save_results(args,
                         {'rewards': rewards, 'state_action_values': state_action_values},
@@ -114,5 +168,5 @@ def run():
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    run_trial(gamma=1,alpha=0.001,eps_b=0.05,eps_t=0,tau=0.001,net_structure=(5,5),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory,num_options=3)
+    run_trial(gamma=1,alpha=0.001,eps_b=0.05,eps_t=0,tau=0.001,controller_net_structure=(2,2),subpolicy_net_structure=(3,),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory,num_options=3)
     plot(results_directory=directory,plot_directory=plot_directory)
