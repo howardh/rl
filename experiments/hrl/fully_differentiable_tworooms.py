@@ -81,9 +81,9 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         min_replay_buffer_size=1000, epoch=50, test_iters=1, verbose=False,
         max_steps=float('inf')):
     args = locals()
-    env = gym.make(env_name,env_map=two_rooms_map)
+    env = gym.make(env_name,env_map=two_rooms_map,fail_prob=0.1)
     env = gym.wrappers.TimeLimit(env,15)
-    test_env = gym.make(env_name,env_map=two_rooms_map)
+    test_env = gym.make(env_name,env_map=two_rooms_map,fail_prob=0.1)
     test_env = gym.wrappers.TimeLimit(test_env,15)
 
     if torch.cuda.is_available():
@@ -168,5 +168,5 @@ def run():
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    run_trial(gamma=1,alpha=0.001,eps_b=0.05,eps_t=0,tau=0.001,controller_net_structure=(2,2),subpolicy_net_structure=(3,),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory,num_options=3)
+    run_trial(gamma=0.9,alpha=0.001,eps_b=0.05,eps_t=0,tau=0.001,controller_net_structure=(2,2),subpolicy_net_structure=(3,),batch_size=256,epoch=1000,test_iters=10,verbose=True,directory=directory,num_options=3)
     plot(results_directory=directory,plot_directory=plot_directory)

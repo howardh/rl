@@ -302,11 +302,14 @@ class HDQNAgentWithDelayAC(Agent):
             action_probs = self.policy_net_target(s0,s1,m1)
             next_state_vals = (action_probs * self.q_net_target(s2)).sum(1)
             val_target = r2+gamma*next_state_vals*(1-t)
+
             val_pred = self.q_net(s1)[range(batch_size),a1.squeeze()]
+
             critic_optimizer.zero_grad()
             critic_loss = ((val_target-val_pred)**2).mean()
             critic_loss.backward()
             critic_optimizer.step()
+
             # Update policy function
             action_values = self.q_net(s1)
             action_probs = self.policy_net(s0,s1,m1)
@@ -344,14 +347,20 @@ class HDQNAgentWithDelayAC(Agent):
         else:
             return vals[action].item()
 
-    def test_once(self, env, max_steps=np.inf, render=False):
+    def test_once(self, env, render=False):
+        """
+        :return: Results of the test.
+        :rtype: Dictionary with the following values:
+            - total_rewards: Sum of all rewards obtained during the episode.
+            - state_action_values: An average of the values of all actions
+              taken by the agent, as estimated by its internal value function.
+            - steps: Length of the episode.
+        """
         reward_sum = 0
         sa_vals = []
         obs = env.reset()
         self.observe_change(obs,testing=True)
         for steps in itertools.count():
-            if steps > max_steps:
-                break
             action = self.act(testing=True)
             sa_vals.append(self.get_state_action_value(self.current_obs_testing,action))
             obs, reward, done, _ = env.step(action)
@@ -361,14 +370,11 @@ class HDQNAgentWithDelayAC(Agent):
                 env.render()
             if done:
                 break
-        return reward_sum, np.mean(sa_vals)
+        return {
+            'total_rewards': reward_sum,
+            'state_action_values': np.mean(sa_vals),
+            'steps': steps
+        }
 
-    def test(self, env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
-        rewards = []
-        sa_vals = []
-        for i in range(iterations):
-            r,sav = self.test_once(env, render=render, max_steps=max_steps)
-            rewards.append(r)
-            sa_vals.append(sav)
-        return rewards, sa_vals
-
+    def test(self, env, iterations, render=False, record=True, processors=1):
+        return [self.test_once(env, render=render) for _ in range(iterations)]
