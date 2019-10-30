@@ -1,3 +1,4 @@
+from collections import deque
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -83,7 +84,6 @@ class HDQNAgentWithDelay(Agent):
 
         # State (training)
         self.prev_obs = None
-        self.prev_action = None
         self.current_obs = None
         self.current_action = None
         self.current_terminal = False
@@ -126,7 +126,6 @@ class HDQNAgentWithDelay(Agent):
                 self.observe_step(self.current_obs, self.current_action, reward, obs, terminal)
             self.prev_obs = self.current_obs
             self.current_obs = obs
-            self.prev_action = self.current_action
             self.current_action = None
 
     def train(self,batch_size,iterations):
@@ -220,7 +219,7 @@ class HDQNAgentWithDelay(Agent):
 
 class HDQNAgentWithDelayAC(Agent):
     def __init__(self, action_space, observation_space, discount_factor,
-            behaviour_epsilon,
+            behaviour_epsilon, delay_steps=1,
             learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'),
             controller_net=None, subpolicy_nets=None, q_net=None):
         self.discount_factor = discount_factor
@@ -229,16 +228,15 @@ class HDQNAgentWithDelayAC(Agent):
         self.device = device
 
         # State (training)
-        self.prev_obs = None
-        self.prev_action = None
+        self.obs_stack = deque(maxlen=delay_steps+1)
         self.current_obs = None
         self.current_action = None
         self.current_terminal = False
         # State (testing)
-        self.prev_obs_testing = None
+        self.obs_stack_testing = deque(maxlen=delay_steps+1)
         self.current_obs_testing = None
 
-        self.replay_buffer = ReplayBufferStackedObs(50000,num_obs=2)
+        self.replay_buffer = ReplayBufferStackedObs(50000,num_obs=delay_steps+1)
 
         self.q_net = q_net
         self.q_net_target = copy.deepcopy(self.q_net)
@@ -269,14 +267,17 @@ class HDQNAgentWithDelayAC(Agent):
 
     def observe_change(self, obs, reward=None, terminal=False, testing=False):
         if testing:
-            self.prev_obs_testing = self.current_obs_testing
+            if reward is None:
+                self.obs_stack_testing.clear()
+            self.obs_stack_testing.append(obs)
             self.current_obs_testing = obs
         else:
-            if reward is not None: # Reward is None if this is the first step of the episode
+            if reward is None: # Reward is None if this is the first step of the episode
+                self.obs_stack.clear()
+            else:
                 self.observe_step(self.current_obs, self.current_action, reward, obs, terminal)
-            self.prev_obs = self.current_obs
+            self.obs_stack.append(obs)
             self.current_obs = obs
-            self.prev_action = self.current_action
             self.current_action = None
 
     def train(self,batch_size=2,iterations=1):
@@ -329,9 +330,9 @@ class HDQNAgentWithDelayAC(Agent):
         """Return a random action according to the current behaviour policy"""
         #observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
         if testing:
-            (obs0,obs1),mask = compute_mask(self.prev_obs_testing,self.current_obs_testing)
+            (obs0,obs1),mask = compute_mask(self.obs_stack_testing[0],self.current_obs_testing)
         else:
-            (obs0,obs1),mask = compute_mask(self.prev_obs,self.current_obs)
+            (obs0,obs1),mask = compute_mask(self.obs_stack[0],self.current_obs)
         action_probs = self.policy_net(obs0,obs1,mask).squeeze()
 
         dist = torch.distributions.Categorical(action_probs)
