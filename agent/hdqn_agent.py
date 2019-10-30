@@ -279,7 +279,7 @@ class HDQNAgentWithDelayAC(Agent):
             self.prev_action = self.current_action
             self.current_action = None
 
-    def train(self,batch_size,iterations):
+    def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
         dataloader = torch.utils.data.DataLoader(

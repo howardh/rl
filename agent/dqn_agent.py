@@ -42,8 +42,13 @@ class DQNAgent(Agent):
         self.behaviour_policy = behaviour_policy
         self.target_policy = target_policy
 
-        self.running_episode = False
-        self.prev_obs = None
+        # State (training)
+        self.current_obs = None
+        self.current_action = None
+        self.current_terminal = False
+        # State (testing)
+        self.current_obs_testing = None
+
         self.replay_buffer = ReplayBuffer(50000)
         if q_net is None:
             self.q_net = QNetwork(action_space.n).to(device)
@@ -62,7 +67,16 @@ class DQNAgent(Agent):
         obs1 = torch.Tensor(obs1)
         self.replay_buffer.add_transition(obs0, action0, reward1, obs1, terminal)
 
-    def train(self,batch_size,iterations):
+    def observe_change(self, obs, reward=None, terminal=False, testing=False):
+        if testing:
+            self.current_obs_testing = obs
+        else:
+            if reward is not None: # Reward is None if this is the first step of the episode
+                self.observe_step(self.current_obs, self.current_action, reward, obs, terminal)
+            self.current_obs = obs
+            self.current_action = None
+
+    def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
         dataloader = torch.utils.data.DataLoader(
@@ -91,18 +105,22 @@ class DQNAgent(Agent):
             for p1,p2 in zip(self.q_net_target.parameters(), self.q_net.parameters()):
                 p1.data = (1-tau)*p1+tau*p2
 
-    def act(self, observation, testing=False):
+    def act(self, testing=False):
         """Return a random action according to the current behaviour policy"""
         #observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
-        observation = torch.tensor(observation, dtype=torch.float).unsqueeze(0)
-        vals = self.q_net(observation)
-        self.last_vals = vals
         if testing:
+            obs = self.current_obs_testing
             policy = self.target_policy
         else:
+            obs = self.current_obs
             policy = self.behaviour_policy
+        obs = torch.tensor(obs).view(1,-1).float()
+        vals = self.q_net(obs)
         dist = policy(vals)
-        return dist.sample().item()
+        action = dist.sample().item()
+        self.current_action = action
+        self.last_vals = vals[0,action].item()
+        return action
 
     def get_state_action_value(self, observation, action):
         observation = torch.tensor(observation, dtype=torch.float).unsqueeze(0)
