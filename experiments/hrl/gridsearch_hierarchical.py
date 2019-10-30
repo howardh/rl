@@ -29,14 +29,14 @@ class HRLWrapper(gym.Wrapper):
     def step(self, action):
         option = self.options[action]
         # Select primitive action from option
-        primitive_action = option.act(self.current_obs,testing=self.test)
+        primitive_action = option.act(testing=self.test)
         # Save state-action value
         self.last_sa_value = option.last_vals.squeeze()[primitive_action].item()
         # Transition
         obs, reward, done, info = self.env.step(primitive_action)
-        # Save transitions
-        if not self.test:
-            self.options[action].observe_step(self.current_obs,primitive_action,reward,obs,done)
+        for o in self.options:
+            o.observe_change(obs, reward, done, testing=self.test)
+
         # Save current obs
         self.current_obs = obs
         return obs, reward, done, info
@@ -62,6 +62,8 @@ class HRLWrapper(gym.Wrapper):
 
     def reset(self, **kwargs):
         self.current_obs = self.env.reset(**kwargs)
+        for o in self.options:
+            o.observe_change(self.current_obs, testing=self.test)
         return self.current_obs
 
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
@@ -120,13 +122,14 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             so_vals = []
             option_freq = np.array([0]*num_options)
             obs = env.reset()
-            o = agent.act(obs, testing=True)
+            agent.observe_change(obs, testing=True)
             for steps in itertools.count():
                 if steps > max_steps:
                     break
-                o = agent.act(obs, testing=True)
+                o = agent.act(testing=True)
                 so_vals.append(agent.get_state_action_value(obs,o))
                 obs, reward, done, _ = env.step(o)
+                agent.observe_change(obs, reward, done, testing=True)
                 sa_vals[o].append(env.last_sa_value)
                 reward_sum += reward
                 if render:
@@ -175,10 +178,10 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             # Run step
             if done:
                 obs = env.reset()
-            action = agent.act(obs)
-
-            obs2, reward2, done, _ = env.step(action)
-            agent.observe_step(obs, action, reward2, obs2, terminal=done)
+                agent.observe_change(obs)
+            action = agent.act()
+            obs, reward, done, _ = env.step(action)
+            agent.observe_change(obs, reward, done)
 
             # Update weights
             #if steps >= min_replay_buffer_size:
@@ -186,9 +189,6 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             if len(options[action].replay_buffer) < min_replay_buffer_size:
                 continue
             options[action].train(batch_size=batch_size,iterations=1,value_function=value_function)
-
-            # Next time step
-            obs = obs2
     except ValueError as e:
         if verbose:
             tqdm.write(str(e))

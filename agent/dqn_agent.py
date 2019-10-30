@@ -71,7 +71,7 @@ class DQNAgent(Agent):
         if testing:
             self.current_obs_testing = obs
         else:
-            if reward is not None: # Reward is None if this is the first step of the episode
+            if reward is not None and self.current_action is not None: # Reward is None if this is the first step of the episode
                 self.observe_step(self.current_obs, self.current_action, reward, obs, terminal)
             self.current_obs = obs
             self.current_action = None
@@ -114,12 +114,12 @@ class DQNAgent(Agent):
         else:
             obs = self.current_obs
             policy = self.behaviour_policy
-        obs = torch.tensor(obs).view(1,-1).float()
+        obs = torch.tensor(obs).unsqueeze(0).float()
         vals = self.q_net(obs)
         dist = policy(vals)
         action = dist.sample().item()
         self.current_action = action
-        self.last_vals = vals[0,action].item()
+        self.last_vals = vals
         return action
 
     def get_state_action_value(self, observation, action):
@@ -134,12 +134,14 @@ class DQNAgent(Agent):
         reward_sum = 0
         sa_vals = []
         obs = env.reset()
+        self.observe_change(obs, testing=True)
         for steps in itertools.count():
             if steps > max_steps:
                 break
-            action = self.act(obs, testing=True)
+            action = self.act(testing=True)
             sa_vals.append(self.get_state_action_value(obs,action))
             obs, reward, done, _ = env.step(action)
+            self.observe_change(obs, reward, done, testing=True)
             reward_sum += reward
             if render:
                 env.render()

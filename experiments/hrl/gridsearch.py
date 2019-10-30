@@ -61,17 +61,15 @@ def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
             # Run step
             if done:
                 obs = env.reset()
-            action = agent.act(obs)
+                agent.observe_change(obs)
+            action = agent.act()
 
-            obs2, reward2, done, _ = env.step(action)
-            agent.observe_step(obs, action, reward2, obs2, terminal=done)
+            obs, reward, done, _ = env.step(action)
+            agent.observe_change(obs, reward, done)
 
             # Update weights
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
-
-            # Next time step
-            obs = obs2
     except ValueError as e:
         if verbose:
             tqdm.write(str(e))

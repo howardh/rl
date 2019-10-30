@@ -43,23 +43,13 @@ def run_trial(gamma, alpha, eps_b, eps_t, directory=None,
                 print('iter %d \t Reward: %f' % (iters, np.mean(r)))
             # Run an episode
             obs = env.reset()
-            action = agent.act(obs)
-            obs2 = None
-            done = False
-            step_count = 0
-            reward_sum = 0
-            while not done:
-                step_count += 1
-
-                obs2, reward2, done, _ = env.step(action)
-                action2 = agent.act(obs2)
-
-                agent.observe_step(obs, action, reward2, obs2, terminal=done)
+            agent.observe_change(obs)
+            for step_count in itertools.count():
+                obs, reward, done, _ = env.step(agent.act(obs))
+                agent.observe_change(obs, reward, done)
                 agent.train(batch_size=32,iterations=1)
-
-                # Next time step
-                obs = obs2
-                action = action2
+                if done:
+                    break
     except ValueError as e:
         tqdm.write(str(e))
         tqdm.write("Diverged")
@@ -119,17 +109,13 @@ def run_trial_steps(gamma, alpha, eps_b, eps_t, tau, directory=None,
             # Run step
             if done:
                 obs = env.reset()
-            action = agent.act(obs)
-
-            obs2, reward2, done, _ = env.step(action)
-            agent.observe_step(obs, action, reward2, obs2, terminal=done)
+                agent.observe_change(obs)
+            obs, reward, done, _ = env.step(agent.act())
+            agent.observe_change(obs, reward, done)
 
             # Update weights
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
-
-            # Next time step
-            obs = obs2
     except ValueError as e:
         if verbose:
             tqdm.write(str(e))
