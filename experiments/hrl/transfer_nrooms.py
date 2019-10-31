@@ -5,6 +5,7 @@ from tqdm import tqdm
 import dill
 import os
 import itertools
+from collections import defaultdict
 
 from agent.hdqn_agent import HDQNAgentWithDelayAC
 from agent.policy import get_greedy_epsilon_policy
@@ -40,8 +41,9 @@ x             x
 x             x
 xxxxxxxxxxxxxxx"""
 
-def run_trial(gamma, directory=None,
-        epoch=50, test_iters=1, verbose=False, agent_name='HDQNAgentWithDelayAC'):
+def run_trial(gamma, directory=None, steps_per_task=100,
+        epoch=50, test_iters=1, verbose=False,
+        agent_name='HDQNAgentWithDelayAC', **agent_params):
     args = locals()
     env_name='gym_fourrooms:fourrooms-v0'
 
@@ -70,7 +72,11 @@ def run_trial(gamma, directory=None,
     before_step = lambda s: None
     after_step = lambda s: None
 
-    if agent_name == 'HDQNAgentWithDelayAC':
+    if agent_name == 'HDQNAgentWithDelayAC' or agent_name == 'ActorCritic':
+        if agent_name == 'HDQNAgentWithDelayAC':
+            delay = agent_params['delay']
+        else:
+            delay = 0
         eps_b = 0.01
         num_options = 3
         min_replay_buffer_size = 1000
@@ -83,6 +89,7 @@ def run_trial(gamma, directory=None,
                 polyak_rate=0.001,
                 device=device,
                 behaviour_epsilon=eps_b,
+                delay_steps=delay,
                 controller_net=PolicyFunction(
                     layer_sizes=[3,3],input_size=4,output_size=num_options),
                 subpolicy_nets=[PolicyFunction(layer_sizes=[2],input_size=4) for _ in range(num_options)],
@@ -93,20 +100,20 @@ def run_trial(gamma, directory=None,
         def after_step(steps):
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
-
+    elif agent_name == 'OptionCritic':
+        raise NotImplementedError('Option Critic not implemented yet.')
 
     # Create file to save results
     results_file_path = utils.save_results(args,
             {'rewards': [], 'state_action_values': []},
             directory=directory)
 
-    max_steps = 100000
     if verbose:
-        step_range1 = tqdm(range(max_steps))
-        step_range2 = tqdm(range(max_steps))
+        step_range1 = tqdm(range(steps_per_task))
+        step_range2 = tqdm(range(steps_per_task))
     else:
-        step_range1 = range(max_steps)
-        step_range2 = range(max_steps)
+        step_range1 = range(steps_per_task)
+        step_range2 = range(steps_per_task)
 
     try:
         rewards = []
@@ -124,7 +131,9 @@ def run_trial(gamma, directory=None,
                     if verbose:
                         tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (steps, rewards[-1], steps_to_reward[-1]))
                     utils.save_results(args,
-                            {'rewards': rewards, 'state_action_values': state_action_values},
+                            {'rewards': rewards,
+                            'state_action_values': state_action_values,
+                            'steps_to_reward': steps_to_reward},
                             file_path=results_file_path)
 
                 before_step(steps)
@@ -143,10 +152,26 @@ def run_trial(gamma, directory=None,
 
     return (args, rewards, state_action_values)
 
-def experiment_main_loop(env, test_env, agent, step_range, epoch, test_iters,
-        args, results_file_path, verbose=False,
-        before_step=lambda s:None, after_step=lambda s:None):
-    pass
+def plot(results_directory,plot_directory):
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+
+    if not os.path.isdir(plot_directory):
+        os.makedirs(plot_directory)
+
+    data_y = defaultdict(lambda: [])
+    data_x = {}
+    for args,result in utils.get_all_results(results_directory):
+        data_y[args['agent_name']].append(result['steps_to_reward'])
+        args['steps_per_task'] = 100 # TODO: Temporary
+        data_x[args['agent_name']] = range(0,args['steps_per_task']*2,args['epoch'])
+    for k,v in data_y.items():
+        data_y[k] = np.array(v).mean(0)
+        plt.plot(data_x[k],data_y[k])
+    plot_path = os.path.join(plot_directory,'plot.png')
+    plt.savefig(plot_path)
+    print('Saved plot %s' % plot_path)
 
 def run():
     utils.set_results_directory(
@@ -154,5 +179,7 @@ def run():
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    run_trial(gamma=0.9,epoch=1000,test_iters=10,verbose=True,directory=directory)
-    #plot(results_directory=directory,plot_directory=plot_directory)
+    for _ in range(10):
+        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC',delay=1,steps_per_task=100000,epoch=10,test_iters=3,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=100000,epoch=10,test_iters=3,verbose=True,directory=directory)
+        plot(results_directory=directory,plot_directory=plot_directory)
