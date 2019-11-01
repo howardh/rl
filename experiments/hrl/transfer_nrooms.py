@@ -61,8 +61,6 @@ def run_trial(gamma, directory=None, steps_per_task=100,
 
     print(env1, test_env1)
 
-    breakpoint()
-
     if torch.cuda.is_available():
         device = torch.device('cuda')
     else:
