@@ -15,6 +15,24 @@ from .long_trial import plot
 
 import utils
 
+class TimeLimit(gym.Wrapper):
+    """ Copied from gym.wrappers.TimeLimit with small modifications."""
+    def __init__(self, env, max_episode_steps=None):
+        super().__init__(env)
+        self._max_episode_steps = max_episode_steps
+        self._elapsed_steps = None
+    def step(self, action):
+        assert self._elapsed_steps is not None, "Cannot call env.step() before calling reset()"
+        observation, reward, done, info = self.env.step(action)
+        self._elapsed_steps += 1
+        if self._elapsed_steps >= self._max_episode_steps:
+            info['TimeLimit.truncated'] = not done
+            done = True
+        return observation, reward, done, info
+    def reset(self, **kwargs):
+        self._elapsed_steps = 0
+        return self.env.reset(**kwargs)
+
 rooms_map_1 = """
 xxxxxxxxxxxxxxx
 x       x     x
@@ -50,14 +68,14 @@ def run_trial(gamma, directory=None, steps_per_task=100,
     args = locals()
     env_name='gym_fourrooms:fourrooms-v0'
 
-    env1 = gym.make(env_name,env_map=rooms_map_1)
-    env1 = gym.wrappers.TimeLimit(env1,20)
-    test_env1 = gym.make(env_name,env_map=rooms_map_1)
-    test_env1 = gym.wrappers.TimeLimit(test_env1,150)
-    env2 = gym.make(env_name,env_map=rooms_map_2)
-    env2 = gym.wrappers.TimeLimit(env2,20)
-    test_env2 = gym.make(env_name,env_map=rooms_map_2)
-    test_env2 = gym.wrappers.TimeLimit(test_env2,150)
+    env1 = gym.make(env_name,env_map=rooms_map_1).unwrapped
+    env1 = TimeLimit(env1,20)
+    test_env1 = gym.make(env_name,env_map=rooms_map_1).unwrapped
+    test_env1 = TimeLimit(test_env1,150)
+    env2 = gym.make(env_name,env_map=rooms_map_2).unwrapped
+    env2 = TimeLimit(env2,20)
+    test_env2 = gym.make(env_name,env_map=rooms_map_2).unwrapped
+    test_env2 = TimeLimit(test_env2,150)
 
     print(env1, test_env1)
 
