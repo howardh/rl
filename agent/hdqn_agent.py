@@ -219,7 +219,7 @@ class HDQNAgentWithDelay(Agent):
 
 class HDQNAgentWithDelayAC(Agent):
     def __init__(self, action_space, observation_space, discount_factor,
-            behaviour_epsilon, delay_steps=1,
+            behaviour_epsilon, delay_steps=1, replay_buffer_size=50000,
             learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'),
             controller_net=None, subpolicy_nets=None, q_net=None):
         self.discount_factor = discount_factor
@@ -236,7 +236,7 @@ class HDQNAgentWithDelayAC(Agent):
         self.obs_stack_testing = deque(maxlen=delay_steps+1)
         self.current_obs_testing = None
 
-        self.replay_buffer = ReplayBufferStackedObs(50000,num_obs=delay_steps+1)
+        self.replay_buffer = ReplayBufferStackedObs(replay_buffer_size,num_obs=delay_steps+1)
 
         self.q_net = q_net
         self.q_net_target = copy.deepcopy(self.q_net)
@@ -289,10 +289,10 @@ class HDQNAgentWithDelayAC(Agent):
         tau = self.polyak_rate
         actor_optimizer = self.actor_optimizer
         critic_optimizer = self.critic_optimizer
-        for i,((s0,s1),a1,r2,s2,t,m1) in zip(range(iterations),dataloader):
+        for i,(s,a1,r2,s2,t,m1) in zip(range(iterations),dataloader):
             # Fix data types
-            s0 = s0.to(self.device)
-            s1 = s1.to(self.device)
+            s0 = s[0].to(self.device)
+            s1 = s[-1].to(self.device)
             m1 = m1.to(self.device)
             a1 = a1.to(self.device)
             r2 = r2.float().to(self.device)

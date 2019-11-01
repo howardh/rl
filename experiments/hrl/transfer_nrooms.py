@@ -89,6 +89,7 @@ def run_trial(gamma, directory=None, steps_per_task=100,
                 polyak_rate=0.001,
                 device=device,
                 behaviour_epsilon=eps_b,
+                replay_buffer_size=1000,
                 delay_steps=delay,
                 controller_net=PolicyFunction(
                     layer_sizes=[3,3],input_size=4,output_size=num_options),
@@ -164,7 +165,6 @@ def plot(results_directory,plot_directory):
     data_x = {}
     for args,result in utils.get_all_results(results_directory):
         data_y[args['agent_name']].append(result['steps_to_reward'])
-        args['steps_per_task'] = 100 # TODO: Temporary
         data_x[args['agent_name']] = range(0,args['steps_per_task']*2,args['epoch'])
     for k,v in data_y.items():
         data_y[k] = np.array(v).mean(0)
@@ -180,6 +180,6 @@ def run():
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
     for _ in range(10):
-        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC',delay=1,steps_per_task=100000,epoch=10,test_iters=3,verbose=True,directory=directory)
-        run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=100000,epoch=10,test_iters=3,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,epoch=100,test_iters=10,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC',delay=1,steps_per_task=10000,epoch=100,test_iters=10,verbose=True,directory=directory)
         plot(results_directory=directory,plot_directory=plot_directory)
