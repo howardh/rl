@@ -50,22 +50,18 @@ def run_trial(gamma, directory=None, steps_per_task=100,
     args = locals()
     env_name='gym_fourrooms:fourrooms-v0'
 
-    #env_name = 'FrozenLake-v0' # wtf? Why is e2 getting wrapped in a TimeLimit?
-    #e1 = gym.make(env_name)
-    #e1 = gym.wrappers.TimeLimit(e1,20)
-    #e2 = gym.make(env_name)
-    #breakpoint()
-
     env1 = gym.make(env_name,env_map=rooms_map_1)
     env1 = gym.wrappers.TimeLimit(env1,20)
-    test_env1 = gym.make(env_name,env_map=rooms_map_1).env
+    test_env1 = gym.make(env_name,env_map=rooms_map_1)
     test_env1 = gym.wrappers.TimeLimit(test_env1,150)
-    env2 = gym.make(env_name,env_map=rooms_map_2).env
+    env2 = gym.make(env_name,env_map=rooms_map_2)
     env2 = gym.wrappers.TimeLimit(env2,20)
-    test_env2 = gym.make(env_name,env_map=rooms_map_2).env
+    test_env2 = gym.make(env_name,env_map=rooms_map_2)
     test_env2 = gym.wrappers.TimeLimit(test_env2,150)
 
     print(env1, test_env1)
+
+    breakpoint()
 
     if torch.cuda.is_available():
         device = torch.device('cuda')

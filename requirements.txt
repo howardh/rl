@@ -9,8 +9,8 @@ cycler==0.10.0
 dill==0.3.0
 fabulous==0.3.0
 future==0.17.0
-gym==0.13.1
--e git+https://github.com/howardh/gym-fourrooms@3b17b1f7c08a37135c414d7293dce1f669cb8bc0#egg=gym_fourrooms
+gym==0.12.1
+-e git+https://github.com/howardh/gym-fourrooms.git@d7269ae726df84d6ba4c47ecf67efe11c35e3847#egg=gym_fourrooms
 idna==2.7
 importlib-metadata==0.18
 kiwisolver==1.0.1
