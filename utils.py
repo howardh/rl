@@ -91,14 +91,18 @@ def skip_new_files(skip=None):
 # Data Storage
 
 def save_results(params, results, directory=None, file_path=None):
-    data = (params, results)
-    if file_path is None:
-        if directory is None:
-            raise Exception('No directory or file path provided. One of the other is needed.')
-        file_path, file_num = find_next_free_file("results", "pkl", directory)
-    with open(file_path, "wb") as f:
-        dill.dump(data, f)
-    return file_path
+    while True:
+        try:
+            data = (params, results)
+            if file_path is None:
+                if directory is None:
+                    raise Exception('No directory or file path provided. One of the other is needed.')
+                file_path, file_num = find_next_free_file("results", "pkl", directory)
+            with open(file_path, "wb") as f:
+                dill.dump(data, f)
+            return file_path
+        except KeyboardInterrupt:
+            print('Writing data to disk. Ignoring keyboard interrupt.')
 
 def get_all_results(directory):
     for d,_,file_names in tqdm(os.walk(directory)):
