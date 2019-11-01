@@ -167,10 +167,15 @@ def plot(results_directory,plot_directory):
         data_y[args['agent_name']].append(result['steps_to_reward'])
         data_x[args['agent_name']] = range(0,args['steps_per_task']*2,args['epoch'])
     for k,v in data_y.items():
-        data_y[k] = np.array(v).mean(0)
-        plt.plot(data_x[k],data_y[k])
+        max_len = max([len(y) for y in v])
+        data_y[k] = np.nanmean(np.array([y+[np.nan]*(max_len-len(y)) for y in v]),0)
+        plt.plot(data_x[k],data_y[k],label=k)
+    plt.xlabel('Training Steps')
+    plt.ylabel('Steps to Reward')
+    plt.legend(loc='best')
     plot_path = os.path.join(plot_directory,'plot.png')
     plt.savefig(plot_path)
+    plt.close()
     print('Saved plot %s' % plot_path)
 
 def run():
