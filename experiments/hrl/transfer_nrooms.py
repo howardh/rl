@@ -92,7 +92,7 @@ def run_trial(gamma, directory=None, steps_per_task=100,
             delay = agent_params['delay']
         else:
             delay = 0
-        eps_b = 0.01
+        eps_b = 0.05
         num_options = 3
         min_replay_buffer_size = 1000
         batch_size = 256
@@ -104,11 +104,11 @@ def run_trial(gamma, directory=None, steps_per_task=100,
                 polyak_rate=0.001,
                 device=device,
                 behaviour_epsilon=eps_b,
-                replay_buffer_size=1000,
+                replay_buffer_size=10000,
                 delay_steps=delay,
                 controller_net=PolicyFunction(
-                    layer_sizes=[3,3],input_size=4,output_size=num_options),
-                subpolicy_nets=[PolicyFunction(layer_sizes=[2],input_size=4) for _ in range(num_options)],
+                    layer_sizes=[2,2],input_size=4,output_size=num_options),
+                subpolicy_nets=[PolicyFunction(layer_sizes=[3],input_size=4) for _ in range(num_options)],
                 q_net=QFunction(layer_sizes=(15,15),input_size=4,output_size=4),
         )
         def before_step(steps):
@@ -198,6 +198,6 @@ def run():
 
     #for _ in range(10):
     while True:
-        run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,epoch=100,test_iters=10,verbose=True,directory=directory)
-        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC',delay=1,steps_per_task=10000,epoch=100,test_iters=10,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC',delay=1,steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
         plot(results_directory=directory,plot_directory=plot_directory)
