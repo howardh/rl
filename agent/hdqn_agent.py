@@ -222,6 +222,8 @@ class HDQNAgentWithDelayAC(Agent):
             behaviour_epsilon, delay_steps=1, replay_buffer_size=50000,
             learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'),
             controller_net=None, subpolicy_nets=None, q_net=None):
+        self.action_space = action_space
+        self.observation_space = observation_space
         self.discount_factor = discount_factor
         self.polyak_rate = polyak_rate
         self.behaviour_epsilon = behaviour_epsilon
@@ -255,10 +257,18 @@ class HDQNAgentWithDelayAC(Agent):
         self.actor_optimizer = torch.optim.Adam(params, lr=learning_rate)
         self.critic_optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
 
+        self.to(device)
+
     def to(self,device):
         self.device = device
         self.q_net.to(device)
         self.q_net_target.to(device)
+        self.controller_net.to(device)
+        self.controller_net_target.to(device)
+        for n in self.subpolicy_nets + self.subpolicy_net_targets:
+            n.to(device)
+        self.policy_net.to(device)
+        self.policy_net_target.to(device)
 
     def observe_step(self,obs0, action0, reward1, obs1, terminal=False):
         obs0 = torch.Tensor(obs0)
@@ -328,11 +338,18 @@ class HDQNAgentWithDelayAC(Agent):
 
     def act(self, testing=False):
         """Return a random action according to the current behaviour policy"""
-        #observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
         if testing:
             (obs0,obs1),mask = compute_mask(self.obs_stack_testing[0],self.current_obs_testing)
         else:
             (obs0,obs1),mask = compute_mask(self.obs_stack[0],self.current_obs)
+
+        # Move to appropriate device
+        if obs0 is not None:
+            obs0 = obs0.to(self.device)
+        obs1 = obs1.to(self.device)
+        mask = mask.to(self.device)
+
+        # Sample an action
         action_probs = self.policy_net(obs0,obs1,mask).squeeze()
 
         dist = torch.distributions.Categorical(action_probs)
@@ -342,7 +359,7 @@ class HDQNAgentWithDelayAC(Agent):
         return action
 
     def get_state_action_value(self, obs, action):
-        vals = self.q_net(torch.tensor(obs).float())[action]
+        vals = self.q_net(torch.tensor(obs).to(self.device).float())[action]
         if vals.size() == ():
             return vals.item()
         else:
@@ -379,3 +396,87 @@ class HDQNAgentWithDelayAC(Agent):
 
     def test(self, env, iterations, render=False, record=True, processors=1):
         return [self.test_once(env, render=render) for _ in range(iterations)]
+
+class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        learning_rate = kwargs['learning_rate']
+
+        self.subpolicy_q_nets = [copy.deepcopy(self.q_net) for _ in self.subpolicy_nets]
+
+        params = []
+        for net in self.subpolicy_q_nets:
+            params += list(net.parameters())
+        self.subpolicy_critic_optimizer = torch.optim.Adam(params, lr=learning_rate)
+
+    def train(self,batch_size=2,iterations=1):
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=batch_size, shuffle=True)
+        gamma = self.discount_factor
+        tau = self.polyak_rate
+        actor_optimizer = self.actor_optimizer
+        critic_optimizer = self.critic_optimizer
+        subpolicy_critic_optimizer = self.subpolicy_critic_optimizer
+        for i,(s,a1,r2,s2,t,m1) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0 = s[0].to(self.device)
+            s1 = s[-1].to(self.device)
+            m1 = m1.to(self.device)
+            a1 = a1.to(self.device)
+            r2 = r2.float().to(self.device)
+            s2 = s2.to(self.device)
+            m2 = torch.ones_like(m1).to(self.device)
+            t = t.float().to(self.device)
+            
+            # Update Q function
+            action_probs = self.policy_net_target(s0,s1,m1)
+            next_state_vals = (action_probs * self.q_net_target(s2)).sum(1)
+            val_target = r2+gamma*next_state_vals*(1-t)
+
+            val_pred = self.q_net(s1)[range(batch_size),a1.squeeze()]
+
+            critic_optimizer.zero_grad()
+            critic_loss = ((val_target-val_pred)**2).mean()
+            critic_loss.backward()
+            critic_optimizer.step()
+
+            # Update subpolicy Q functions
+            subpolicy_critic_optimizer.zero_grad()
+            subpolicy_loss_total = 0
+            for q_net,p_net in zip(self.subpolicy_q_nets,self.subpolicy_nets):
+                action_probs = p_net(s1)
+                next_state_vals = (action_probs * self.q_net_target(s2)).sum(1)
+                val_target = r2+gamma*next_state_vals*(1-t)
+                val_pred = q_net(s1)[range(batch_size),a1.squeeze()]
+                loss = ((val_target-val_pred)**2).mean()
+                subpolicy_loss_total += loss
+            subpolicy_loss_total.backward()
+            subpolicy_critic_optimizer.step()
+
+            # Update policy function
+            num_subpolicies = len(self.subpolicy_nets)
+            num_actions = self.action_space.n
+            total_action_vals = 0
+            sub_prob0 = self.controller_net(s0).view(-1,num_subpolicies,1) # batch * subpolicy * 1
+            sub_prob1 = self.controller_net(s1).view(-1,num_subpolicies,1) # batch * subpolicy * 1
+            vals = torch.empty([batch_size,num_subpolicies,num_subpolicies]) # batch * subpolicy * subpolicy
+            for om0,om1 in itertools.product(range(num_subpolicies),range(num_subpolicies)):
+                # pi(om0|s0)*pi_om0(a|s1)*Q_om1(a|s1)
+                val = self.subpolicy_nets[om0](s1)*self.subpolicy_q_nets[om1](s1) # batch * actions
+                val = val.sum(dim=1) # batch
+                vals[:,om0,om1] = val
+            actor_loss = -((sub_prob0 @ sub_prob1.permute(0,2,1))*vals).sum()
+
+            actor_optimizer.zero_grad()
+            actor_loss.backward()
+            actor_optimizer.step()
+
+            # Update target weights
+            params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]
+            params += [zip(self.controller_net_target.parameters(), self.controller_net.parameters())]
+            for net1,net2 in zip(self.subpolicy_net_targets,self.subpolicy_nets):
+                params.append(zip(net1.parameters(),net2.parameters()))
+            for p1,p2 in itertools.chain.from_iterable(params):
+                p1.data = (1-tau)*p1+tau*p2

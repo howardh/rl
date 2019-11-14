@@ -7,7 +7,7 @@ import os
 import itertools
 from collections import defaultdict
 
-from agent.hdqn_agent import HDQNAgentWithDelayAC
+from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2
 from agent.policy import get_greedy_epsilon_policy
 
 from .model import QFunction, PolicyFunction
@@ -87,25 +87,66 @@ def run_trial(gamma, directory=None, steps_per_task=100,
     before_step = lambda s: None
     after_step = lambda s: None
 
-    if agent_name == 'HDQNAgentWithDelayAC' or agent_name == 'ActorCritic':
-        if agent_name == 'HDQNAgentWithDelayAC':
-            delay = agent_params['delay']
-        else:
-            delay = 0
-        eps_b = 0.05
-        num_options = 3
-        min_replay_buffer_size = 1000
-        batch_size = 256
+    eps_b = 0.05
+    num_options = 3
+    min_replay_buffer_size = 1000
+    batch_size = 256
+    learning_rate = 0.01
+    polyak_rate=0.001
+    replay_buffer_size=10000
+    if agent_name == 'HDQNAgentWithDelayAC':
         agent = HDQNAgentWithDelayAC(
                 action_space=env1.action_space,
                 observation_space=env1.observation_space,
-                learning_rate=0.01,
+                learning_rate=learning_rate,
                 discount_factor=gamma,
-                polyak_rate=0.001,
+                polyak_rate=polyak_rate,
                 device=device,
                 behaviour_epsilon=eps_b,
-                replay_buffer_size=10000,
-                delay_steps=delay,
+                replay_buffer_size=replay_buffer_size,
+                delay_steps=1,
+                controller_net=PolicyFunction(
+                    layer_sizes=[2,2],input_size=4,output_size=num_options),
+                subpolicy_nets=[PolicyFunction(layer_sizes=[3],input_size=4) for _ in range(num_options)],
+                q_net=QFunction(layer_sizes=(15,15),input_size=4,output_size=4),
+        )
+        def before_step(steps):
+            agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+        def after_step(steps):
+            if steps >= min_replay_buffer_size:
+                agent.train(batch_size=batch_size,iterations=1)
+    elif agent_name == 'HDQNAgentWithDelayAC_v2':
+        agent = HDQNAgentWithDelayAC_v2(
+                action_space=env1.action_space,
+                observation_space=env1.observation_space,
+                learning_rate=learning_rate,
+                discount_factor=gamma,
+                polyak_rate=polyak_rate,
+                device=device,
+                behaviour_epsilon=eps_b,
+                replay_buffer_size=replay_buffer_size,
+                delay_steps = agent_params['delay'],
+                controller_net=PolicyFunction(
+                    layer_sizes=[2,2],input_size=4,output_size=num_options),
+                subpolicy_nets=[PolicyFunction(layer_sizes=[3],input_size=4) for _ in range(num_options)],
+                q_net=QFunction(layer_sizes=(15,15),input_size=4,output_size=4),
+        )
+        def before_step(steps):
+            agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+        def after_step(steps):
+            if steps >= min_replay_buffer_size:
+                agent.train(batch_size=batch_size,iterations=1)
+    elif agent_name == 'ActorCritic':
+        agent = HDQNAgentWithDelayAC(
+                action_space=env1.action_space,
+                observation_space=env1.observation_space,
+                learning_rate=learning_rate,
+                discount_factor=gamma,
+                polyak_rate=polyak_rate,
+                device=device,
+                behaviour_epsilon=eps_b,
+                replay_buffer_size=replay_buffer_size,
+                delay_steps = 0,
                 controller_net=PolicyFunction(
                     layer_sizes=[2,2],input_size=4,output_size=num_options),
                 subpolicy_nets=[PolicyFunction(layer_sizes=[3],input_size=4) for _ in range(num_options)],
@@ -191,13 +232,13 @@ def plot(results_directory,plot_directory):
     print('Saved plot %s' % plot_path)
 
 def run():
-    utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'hrl'))
+    #utils.set_results_directory(
+    #        os.path.join(utils.get_results_root_directory(),'hrl'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
     #for _ in range(10):
     while True:
-        run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC',delay=1,steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        #run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
         plot(results_directory=directory,plot_directory=plot_directory)
