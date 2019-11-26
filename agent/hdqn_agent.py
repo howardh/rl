@@ -9,7 +9,7 @@ import itertools
 import numpy as np
 
 from agent.agent import Agent
-from .replay_buffer import ReplayBufferStackedObs
+from .replay_buffer import ReplayBufferStackedObs,ReplayBufferStackedObsAction
 from .policy import get_greedy_epsilon_policy, greedy_action
 
 class HierarchicalQNetwork(torch.nn.Module):
@@ -47,6 +47,31 @@ class HierarchicalPolicyNetwork(torch.nn.Module):
     def forward(self, obs0, obs1, obs_mask):
         # Values of each subpolicy
         controller_output = self.controller(obs0)
+        # If there's no observation available, assign the same value to all
+        # subpolicies
+        uniform_controller = torch.ones_like(controller_output)
+        mask = obs_mask[:,0].view(-1,1)
+        controller_output = mask*controller_output+(1-mask)*uniform_controller
+        
+        # Compute overall probability of primitive action as a weighted sum, weighted by
+        # probability of taking each subpolicy
+        subpolicy_probabilities = self.softmax(controller_output).unsqueeze(1)
+        primitive_action_probabilities = torch.stack([sp(obs1) for sp in self.subpolicies], dim=1)
+        action_probs = subpolicy_probabilities @ primitive_action_probabilities
+        action_probs = action_probs.squeeze(1)
+
+        return action_probs
+
+class HierarchicalPolicyNetworkAugmentedState(torch.nn.Module):
+    def __init__(self, controller, subpolicies):
+        super().__init__()
+        self.controller = controller
+        self.subpolicies = subpolicies
+        self.softmax = torch.nn.Softmax()
+
+    def forward(self, obs0, action0, obs1, obs_mask):
+        # Values of each subpolicy
+        controller_output = self.controller(obs0,action0)
         # If there's no observation available, assign the same value to all
         # subpolicies
         uniform_controller = torch.ones_like(controller_output)
@@ -480,3 +505,167 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
                 params.append(zip(net1.parameters(),net2.parameters()))
             for p1,p2 in itertools.chain.from_iterable(params):
                 p1.data = (1-tau)*p1+tau*p2
+
+def compute_mask_augmented_state(obs0,action0,obs1):
+    mask = torch.tensor([[obs0 is not None, obs1 is not None]]).float()
+    def o_to_t(o):
+        """ obs to tensor """
+        if o is None:
+            return torch.empty(obs1.shape).float().unsqueeze(0)
+        return torch.tensor(o).float().unsqueeze(0)
+    def a_to_t(a):
+        """ action to tensor """
+        if a is None:
+            return torch.zeros([1,1]).long()
+        return torch.tensor(a).long().unsqueeze(0)
+    return (o_to_t(obs0),a_to_t(action0),o_to_t(obs1)), mask
+
+class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.replay_buffer = ReplayBufferStackedObsAction(kwargs['replay_buffer_size'])
+
+        self.policy_net = HierarchicalPolicyNetworkAugmentedState(
+                self.controller_net, self.subpolicy_nets)
+        self.policy_net_target = HierarchicalPolicyNetworkAugmentedState(
+                self.controller_net_target, self.subpolicy_net_targets)
+
+        # TODO: Store observation stack as state-action pairs
+        self.reset_obs_stack(testing=True)
+        self.reset_obs_stack(testing=False)
+
+    def reset_obs_stack(self, testing=False):
+        if testing:
+            self.obs_stack_testing.clear()
+            self.obs_stack_testing.append((None,None))
+        else:
+            self.obs_stack.clear()
+            self.obs_stack.append((None,None))
+
+    def train(self,batch_size=2,iterations=1):
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=batch_size, shuffle=True)
+        gamma = self.discount_factor
+        tau = self.polyak_rate
+        actor_optimizer = self.actor_optimizer
+        critic_optimizer = self.critic_optimizer
+        subpolicy_critic_optimizer = self.subpolicy_critic_optimizer
+        for i,(s0,a0,s1,a1,r2,s2,t,m1) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0 = s0.to(self.device)
+            a0 = a0.to(self.device)
+            s1 = s1.to(self.device)
+            a1 = a1.to(self.device)
+            r2 = r2.float().to(self.device)
+            s2 = s2.to(self.device)
+            t = t.float().to(self.device)
+            m1 = m1.to(self.device)
+            m2 = torch.ones_like(m1).to(self.device)
+            
+            # Update Q function
+            action_probs = self.policy_net_target(s0,a0,s1,m1)
+            next_state_vals = (action_probs * self.q_net_target(s2)).sum(1)
+            val_target = r2+gamma*next_state_vals*(1-t)
+
+            val_pred = self.q_net(s1)[range(batch_size),a1.squeeze()]
+
+            critic_optimizer.zero_grad()
+            critic_loss = ((val_target-val_pred)**2).mean()
+            critic_loss.backward()
+            critic_optimizer.step()
+
+            # Update subpolicy Q functions
+            subpolicy_critic_optimizer.zero_grad()
+            subpolicy_loss_total = 0
+            for q_net,p_net in zip(self.subpolicy_q_nets,self.subpolicy_nets):
+                action_probs = p_net(s1)
+                next_state_vals = (action_probs * self.q_net_target(s2)).sum(1)
+                val_target = r2+gamma*next_state_vals*(1-t)
+                val_pred = q_net(s1)[range(batch_size),a1.squeeze()]
+                loss = ((val_target-val_pred)**2).mean()
+                subpolicy_loss_total += loss
+            subpolicy_loss_total.backward()
+            subpolicy_critic_optimizer.step()
+
+            # Update policy function
+            num_subpolicies = len(self.subpolicy_nets)
+            num_actions = self.action_space.n
+            total_action_vals = 0
+            sub_prob0 = self.controller_net(s0,a0).view(-1,num_subpolicies,1) # batch * subpolicy * 1
+            sub_prob1 = self.controller_net(s1,a1).view(-1,num_subpolicies,1) # batch * subpolicy * 1
+            vals = torch.empty([batch_size,num_subpolicies,num_subpolicies]) # batch * subpolicy * subpolicy
+            for om0,om1 in itertools.product(range(num_subpolicies),range(num_subpolicies)):
+                # pi(om0|s0)*pi_om0(a|s1)*Q_om1(a|s1)
+                val = self.subpolicy_nets[om0](s1)*self.subpolicy_q_nets[om1](s1) # batch * actions
+                val = val.sum(dim=1) # batch
+                vals[:,om0,om1] = val
+            actor_loss = -((sub_prob0 @ sub_prob1.permute(0,2,1))*vals).sum()
+
+            actor_optimizer.zero_grad()
+            actor_loss.backward()
+            actor_optimizer.step()
+
+            # Update target weights
+            params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]
+            params += [zip(self.controller_net_target.parameters(), self.controller_net.parameters())]
+            for net1,net2 in zip(self.subpolicy_net_targets,self.subpolicy_nets):
+                params.append(zip(net1.parameters(),net2.parameters()))
+            for p1,p2 in itertools.chain.from_iterable(params):
+                p1.data = (1-tau)*p1+tau*p2
+
+    def observe_step(self,obs0,action0,obs1,action1,reward1,obs2,terminal=False):
+        obs0 = torch.Tensor(obs0).squeeze()
+        obs1 = torch.Tensor(obs1).squeeze()
+        obs2 = torch.Tensor(obs2).squeeze()
+        self.replay_buffer.add_transition(obs0,action0,obs1,action1,reward1,obs2,terminal=terminal)
+
+    def observe_change(self, obs, reward=None, terminal=False, testing=False):
+        if testing:
+            # Reward is None if this is the first step of the episode
+            if reward is None:
+                self.reset_obs_stack(testing=testing)
+            else:
+                self.obs_stack_testing.append((
+                    self.current_obs_testing,self.current_action_testing))
+            self.current_obs_testing = obs
+        else:
+            # Reward is None if this is the first step of the episode
+            if reward is None:
+                self.reset_obs_stack(testing=testing)
+            else:
+                self.obs_stack.append((
+                    self.current_obs,self.current_action))
+                self.observe_step(*self.obs_stack[0], *self.obs_stack[1],
+                        reward, obs, terminal)
+            self.current_obs = obs
+            self.current_action = None
+
+    def act(self, testing=False):
+        """Return a random action according to the current behaviour policy"""
+        if testing:
+            (obs0,action0,obs1),mask = compute_mask_augmented_state(
+                    *self.obs_stack_testing[-1], self.current_obs_testing)
+        else:
+            (obs0,action0,obs1),mask = compute_mask_augmented_state(
+                    *self.obs_stack[-1], self.current_obs)
+
+        # Move to appropriate device
+        if obs0 is not None:
+            obs0 = obs0.to(self.device)
+        obs1 = obs1.to(self.device)
+        mask = mask.to(self.device)
+
+        # Sample an action
+        action_probs = self.policy_net(obs0,action0,obs1,mask).squeeze()
+
+        dist = torch.distributions.Categorical(action_probs)
+        action = dist.sample().item()
+        self.current_action = action
+        self.last_vals = self.q_net(obs1)[0,action].item()
+        if testing:
+            self.obs_stack_testing.append((obs1,action))
+        else:
+            self.obs_stack.append((obs1,action))
+        return action

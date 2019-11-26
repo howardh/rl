@@ -7,10 +7,10 @@ import os
 import itertools
 from collections import defaultdict
 
-from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2
+from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3
 from agent.policy import get_greedy_epsilon_policy
 
-from .model import QFunction, PolicyFunction
+from .model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
 from .long_trial import plot
 
 import utils
@@ -136,6 +136,27 @@ def run_trial(gamma, directory=None, steps_per_task=100,
         def after_step(steps):
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
+    elif agent_name == 'HDQNAgentWithDelayAC_v3':
+        agent = HDQNAgentWithDelayAC_v3(
+                action_space=env1.action_space,
+                observation_space=env1.observation_space,
+                learning_rate=learning_rate,
+                discount_factor=gamma,
+                polyak_rate=polyak_rate,
+                device=device,
+                behaviour_epsilon=eps_b,
+                replay_buffer_size=replay_buffer_size,
+                delay_steps = agent_params['delay'],
+                controller_net=PolicyFunctionAugmentatedState(
+                    layer_sizes=[10,10],state_size=4,num_actions=4,output_size=num_options),
+                subpolicy_nets=[PolicyFunction(layer_sizes=[3],input_size=4) for _ in range(num_options)],
+                q_net=QFunction(layer_sizes=(15,15),input_size=4,output_size=4),
+        )
+        def before_step(steps):
+            agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+        def after_step(steps):
+            if steps >= min_replay_buffer_size:
+                agent.train(batch_size=batch_size,iterations=1)
     elif agent_name == 'ActorCritic':
         agent = HDQNAgentWithDelayAC(
                 action_space=env1.action_space,
@@ -163,7 +184,8 @@ def run_trial(gamma, directory=None, steps_per_task=100,
     # Create file to save results
     results_file_path = utils.save_results(args,
             {'rewards': [], 'state_action_values': []},
-            directory=directory)
+            directory=directory,
+            file_name_prefix=agent_name)
 
     if verbose:
         step_range1 = tqdm(range(steps_per_task))
@@ -240,5 +262,6 @@ def run():
     #for _ in range(10):
     while True:
         #run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        #run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v3',delay=1,steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
         plot(results_directory=directory,plot_directory=plot_directory)

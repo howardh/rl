@@ -90,14 +90,15 @@ def skip_new_files(skip=None):
 
 # Data Storage
 
-def save_results(params, results, directory=None, file_path=None):
+def save_results(params, results, directory=None, file_path=None,
+        file_name_prefix='results'):
     while True:
         try:
             data = (params, results)
             if file_path is None:
                 if directory is None:
                     raise Exception('No directory or file path provided. One of the other is needed.')
-                file_path, file_num = find_next_free_file("results", "pkl", directory)
+                file_path, file_num = find_next_free_file(file_name_prefix, "pkl", directory)
             with open(file_path, "wb") as f:
                 dill.dump(data, f)
             return file_path
