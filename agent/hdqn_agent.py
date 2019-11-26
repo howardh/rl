@@ -245,7 +245,9 @@ class HDQNAgentWithDelay(Agent):
 class HDQNAgentWithDelayAC(Agent):
     def __init__(self, action_space, observation_space, discount_factor,
             behaviour_epsilon, delay_steps=1, replay_buffer_size=50000,
-            learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'),
+            controller_learning_rate=1e-3, subpolicy_learning_rate=1e-3,
+            q_net_learning_rate=1e-3,
+            polyak_rate=0.001, device=torch.device('cpu'),
             controller_net=None, subpolicy_nets=None, q_net=None):
         self.action_space = action_space
         self.observation_space = observation_space
@@ -276,11 +278,15 @@ class HDQNAgentWithDelayAC(Agent):
         self.policy_net_target = HierarchicalPolicyNetwork(
                 self.controller_net_target, self.subpolicy_net_targets)
 
-        params = list(self.controller_net.parameters())
+        controller_params = list(self.controller_net.parameters())
+        subpolicy_params = []
         for net in self.subpolicy_nets:
-            params += list(net.parameters())
-        self.actor_optimizer = torch.optim.Adam(params, lr=learning_rate)
-        self.critic_optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
+            subpolicy_params += list(net.parameters())
+        self.actor_optimizer = torch.optim.Adam([
+            {'params': controller_params, 'lr': controller_learning_rate},
+            {'params': subpolicy_params, 'lr': subpolicy_learning_rate}])
+        self.critic_optimizer = torch.optim.Adam(
+                self.q_net.parameters(), lr=q_net_learning_rate)
 
         self.to(device)
 
@@ -424,8 +430,8 @@ class HDQNAgentWithDelayAC(Agent):
 
 class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
     def __init__(self, **kwargs):
+        learning_rate = kwargs.pop('subpolicy_q_net_learning_rate')
         super().__init__(**kwargs)
-        learning_rate = kwargs['learning_rate']
 
         self.subpolicy_q_nets = [copy.deepcopy(self.q_net) for _ in self.subpolicy_nets]
 
@@ -530,7 +536,6 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
         self.policy_net_target = HierarchicalPolicyNetworkAugmentedState(
                 self.controller_net_target, self.subpolicy_net_targets)
 
-        # TODO: Store observation stack as state-action pairs
         self.reset_obs_stack(testing=True)
         self.reset_obs_stack(testing=False)
 

@@ -72,7 +72,9 @@ def create_agent(agent_name, env, device, **agent_params):
     num_options = agent_params.pop('num_options',3)
     min_replay_buffer_size = agent_params.pop('min_replay_buffer_size',1000)
     batch_size = agent_params.pop('batch_size',256)
-    learning_rate = agent_params.pop('learning_rate',0.01)
+    controller_learning_rate = agent_params.pop('controller_learning_rate',0.01)
+    subpolicy_learning_rate = agent_params.pop('subpolicy_learning_rate',0.01)
+    q_net_learning_rate = agent_params.pop('q_net_learning_rate',0.01)
     polyak_rate = agent_params.pop('polyak_rate',0.001)
     replay_buffer_size = agent_params.pop('replay_buffer_size',10000)
     delay = agent_params.pop('delay',1)
@@ -86,7 +88,9 @@ def create_agent(agent_name, env, device, **agent_params):
         agent = HDQNAgentWithDelayAC(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
-                learning_rate=learning_rate,
+                controller_learning_rate=controller_learning_rate,
+                subpolicy_learning_rate=subpolicy_learning_rate,
+                q_net_learning_rate=q_net_learning_rate,
                 discount_factor=gamma,
                 polyak_rate=polyak_rate,
                 device=device,
@@ -114,10 +118,15 @@ def create_agent(agent_name, env, device, **agent_params):
                 'subpolicy_net_structure',[3])
         q_net_structure = agent_params.pop(
                 'q_net_structure',[15,15])
+        subpolicy_q_net_learning_rate = agent_params.pop(
+                'subpolicy_q_net_learning_rate',1e-3)
         agent = HDQNAgentWithDelayAC_v2(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
-                learning_rate=learning_rate,
+                controller_learning_rate=controller_learning_rate,
+                subpolicy_learning_rate=subpolicy_learning_rate,
+                q_net_learning_rate=q_net_learning_rate,
+                subpolicy_q_net_learning_rate=subpolicy_q_net_learning_rate,
                 discount_factor=gamma,
                 polyak_rate=polyak_rate,
                 device=device,
@@ -145,10 +154,15 @@ def create_agent(agent_name, env, device, **agent_params):
                 'subpolicy_net_structure',[3])
         q_net_structure = agent_params.pop(
                 'q_net_structure',[15,15])
+        subpolicy_q_net_learning_rate = agent_params.pop(
+                'subpolicy_q_net_learning_rate',1e-3)
         agent = HDQNAgentWithDelayAC_v3(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
-                learning_rate=learning_rate,
+                controller_learning_rate=controller_learning_rate,
+                subpolicy_learning_rate=subpolicy_learning_rate,
+                q_net_learning_rate=q_net_learning_rate,
+                subpolicy_q_net_learning_rate=subpolicy_q_net_learning_rate,
                 discount_factor=gamma,
                 polyak_rate=polyak_rate,
                 device=device,
@@ -179,7 +193,9 @@ def create_agent(agent_name, env, device, **agent_params):
         agent = HDQNAgentWithDelayAC(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
-                learning_rate=learning_rate,
+                controller_learning_rate=controller_learning_rate,
+                subpolicy_learning_rate=subpolicy_learning_rate,
+                q_net_learning_rate=q_net_learning_rate,
                 discount_factor=gamma,
                 polyak_rate=polyak_rate,
                 device=device,
@@ -288,7 +304,10 @@ def run_gridsearch(proc=1):
     params = {
             'agent_name': ['HDQNAgentWithDelayAC_v3'],
             'gamma': [0.9],
-            'learning_rate': [0.1,0.01,0.001],
+            'controller_learning_rate': [0.1,0.01,0.001],
+            'subpolicy_learning_rate': [0.1,0.01,0.001],
+            'q_net_learning_rate': [0.1,0.01,0.001],
+            'subpolicy_q_net_learning_rate': [0.1,0.01,0.001],
             'eps_b': [0, 0.1],
             'polyak_rate': [0.1, 0.01, 0.001],
             'batch_size': [128, 256],
