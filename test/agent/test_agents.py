@@ -15,7 +15,9 @@ def create_agent(agent_name, env):
         return HDQNAgentWithDelayAC(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
-                learning_rate=0.01,
+                controller_learning_rate=0.01,
+                subpolicy_learning_rate=0.01,
+                q_net_learning_rate=0.01,
                 discount_factor=0.9,
                 polyak_rate=0.001,
                 behaviour_epsilon=0.01,
