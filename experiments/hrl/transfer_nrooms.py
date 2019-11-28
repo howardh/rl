@@ -224,22 +224,18 @@ def create_agent(agent_name, env, device, **agent_params):
 
     return agent, before_step, after_step
 
-def run_trial(directory=None, steps_per_task=100,
+def run_trial(directory=None, steps_per_task=100, total_steps=1000,
         epoch=50, test_iters=1, verbose=False,
         agent_name='HDQNAgentWithDelayAC', **agent_params):
     args = locals()
     env_name='gym_fourrooms:fourrooms-v0'
 
-    env1 = gym.make(env_name,env_map=rooms_map_1).unwrapped
-    env1 = TimeLimit(env1,20)
-    test_env1 = gym.make(env_name,env_map=rooms_map_1).unwrapped
-    test_env1 = TimeLimit(test_env1,150)
-    env2 = gym.make(env_name,env_map=rooms_map_2).unwrapped
-    env2 = TimeLimit(env2,20)
-    test_env2 = gym.make(env_name,env_map=rooms_map_2).unwrapped
-    test_env2 = TimeLimit(test_env2,150)
+    env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
+    env = TimeLimit(env,36)
+    test_env = gym.make(env_name,goal_duration_steps=float('inf')).unwrapped
+    test_env = TimeLimit(test_env,500)
 
-    print(env1, test_env1)
+    print(env, test_env)
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -247,7 +243,7 @@ def run_trial(directory=None, steps_per_task=100,
         device = torch.device('cpu')
 
     agent, before_step, after_step = create_agent(
-            agent_name, env1, device, **agent_params)
+            agent_name, env, device, **agent_params)
 
     # Create file to save results
     results_file_path = utils.save_results(args,
@@ -256,46 +252,42 @@ def run_trial(directory=None, steps_per_task=100,
             file_name_prefix=agent_name)
 
     if verbose:
-        step_range1 = tqdm(range(steps_per_task))
-        step_range2 = tqdm(range(steps_per_task))
-    else:
-        step_range1 = range(steps_per_task)
-        step_range2 = range(steps_per_task)
+        step_range = tqdm(range(total_steps))
 
     rewards = []
     state_action_values = []
     steps_to_reward = []
-    for step_range, env, test_env in [(step_range1, env1, test_env1),(step_range2, env2, test_env2)]:
-        done = True
-        for steps in step_range:
-            # Run tests
-            if steps % epoch == 0:
-                test_results = agent.test(
-                        test_env, test_iters, render=False, processors=1)
-                rewards.append(np.mean(
-                    [r['total_rewards'] for r in test_results]))
-                state_action_values.append(np.mean(
-                    [r['state_action_values'] for r in test_results]))
-                steps_to_reward.append(np.mean(
-                    [r['steps'] for r in test_results]))
-                if verbose:
-                    tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (
-                        steps, rewards[-1], steps_to_reward[-1]))
-                utils.save_results(args,
-                        {'rewards': rewards,
-                        'state_action_values': state_action_values,
-                        'steps_to_reward': steps_to_reward},
-                        file_path=results_file_path)
+    done = True
+    for steps in step_range:
+        # Run tests
+        if steps % epoch == 0:
+            test_env.reset_goal(env.goal)
+            test_results = agent.test(
+                    test_env, test_iters, render=False, processors=1)
+            rewards.append(np.mean(
+                [r['total_rewards'] for r in test_results]))
+            state_action_values.append(np.mean(
+                [r['state_action_values'] for r in test_results]))
+            steps_to_reward.append(np.mean(
+                [r['steps'] for r in test_results]))
+            if verbose:
+                tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (
+                    steps, rewards[-1], steps_to_reward[-1]))
+            utils.save_results(args,
+                    {'rewards': rewards,
+                    'state_action_values': state_action_values,
+                    'steps_to_reward': steps_to_reward},
+                    file_path=results_file_path)
 
-            before_step(steps)
-            # Run step
-            if done:
-                obs = env.reset()
-                agent.observe_change(obs, None)
-            obs, reward, done, _ = env.step(agent.act())
-            agent.observe_change(obs, reward, terminal=done)
-            # Update weights
-            after_step(steps)
+        before_step(steps)
+        # Run step
+        if done:
+            obs = env.reset()
+            agent.observe_change(obs, None)
+        obs, reward, done, _ = env.step(agent.act())
+        agent.observe_change(obs, reward, terminal=done)
+        # Update weights
+        after_step(steps)
 
     return (args, rewards, state_action_values)
 
@@ -304,13 +296,13 @@ def run_gridsearch(proc=1):
     params = {
             'agent_name': ['HDQNAgentWithDelayAC_v3'],
             'gamma': [0.9],
-            'controller_learning_rate': [0.1,0.01,0.001],
-            'subpolicy_learning_rate': [0.1,0.01,0.001],
-            'q_net_learning_rate': [0.1,0.01,0.001],
-            'subpolicy_q_net_learning_rate': [0.1,0.01,0.001],
-            'eps_b': [0, 0.1],
-            'polyak_rate': [0.1, 0.01, 0.001],
-            'batch_size': [128, 256],
+            'controller_learning_rate': [0.01,0.001],
+            'subpolicy_learning_rate': [0.01,0.001],
+            'q_net_learning_rate': [0.01,0.001],
+            'subpolicy_q_net_learning_rate': [0.01,0.001],
+            'eps_b': [0.05],
+            'polyak_rate': [0.001],
+            'batch_size': [256],
             'min_replay_buffer_size': [1000],
             'steps_per_task': [100000],
             'epoch': [1000],
@@ -351,16 +343,16 @@ def plot(results_directory,plot_directory):
     print('Saved plot %s' % plot_path)
 
 def run():
-    #utils.set_results_directory(
-    #        os.path.join(utils.get_results_root_directory(),'hrl'))
+    utils.set_results_directory(
+            os.path.join(utils.get_results_root_directory(),'hrl'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    run_gridsearch()
+    #run_gridsearch()
 
     #for _ in range(10):
-    #while True:
-    #    #run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-    #    #run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-    #    run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v3',delay=1,steps_per_task=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-    #    plot(results_directory=directory,plot_directory=plot_directory)
+    while True:
+        run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v3',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        plot(results_directory=directory,plot_directory=plot_directory)
