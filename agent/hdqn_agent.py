@@ -429,10 +429,10 @@ class HDQNAgentWithDelayAC(Agent):
         return [self.test_once(env, render=render) for _ in range(iterations)]
 
 class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
-    def __init__(self, **kwargs):
-        learning_rate = kwargs.pop('subpolicy_q_net_learning_rate')
+    def __init__(self, subpolicy_q_net_learning_rate=1e-3, **kwargs):
         super().__init__(**kwargs)
 
+        learning_rate = subpolicy_q_net_learning_rate
         self.subpolicy_q_nets = [copy.deepcopy(self.q_net) for _ in self.subpolicy_nets]
 
         params = []
@@ -621,7 +621,10 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
                 p1.data = (1-tau)*p1+tau*p2
 
     def observe_step(self,obs0,action0,obs1,action1,reward1,obs2,terminal=False):
-        obs0 = torch.Tensor(obs0).squeeze()
+        if obs0 is None:
+            obs0 = torch.zeros(obs1.shape).squeeze()
+        else:
+            obs0 = torch.Tensor(obs0).squeeze()
         obs1 = torch.Tensor(obs1).squeeze()
         obs2 = torch.Tensor(obs2).squeeze()
         self.replay_buffer.add_transition(obs0,action0,obs1,action1,reward1,obs2,terminal=terminal)
@@ -631,17 +634,12 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
             # Reward is None if this is the first step of the episode
             if reward is None:
                 self.reset_obs_stack(testing=testing)
-            else:
-                self.obs_stack_testing.append((
-                    self.current_obs_testing,self.current_action_testing))
             self.current_obs_testing = obs
         else:
             # Reward is None if this is the first step of the episode
             if reward is None:
                 self.reset_obs_stack(testing=testing)
             else:
-                self.obs_stack.append((
-                    self.current_obs,self.current_action))
                 self.observe_step(*self.obs_stack[0], *self.obs_stack[1],
                         reward, obs, terminal)
             self.current_obs = obs
@@ -649,18 +647,8 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
 
     def act(self, testing=False):
         """Return a random action according to the current behaviour policy"""
-        if testing:
-            (obs0,action0,obs1),mask = compute_mask_augmented_state(
-                    *self.obs_stack_testing[-1], self.current_obs_testing)
-        else:
-            (obs0,action0,obs1),mask = compute_mask_augmented_state(
-                    *self.obs_stack[-1], self.current_obs)
 
-        # Move to appropriate device
-        if obs0 is not None:
-            obs0 = obs0.to(self.device)
-        obs1 = obs1.to(self.device)
-        mask = mask.to(self.device)
+        obs0,action0,obs1,mask = self.get_current_obs(testing)
 
         # Sample an action
         action_probs = self.policy_net(obs0,action0,obs1,mask).squeeze()
@@ -674,3 +662,24 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
         else:
             self.obs_stack.append((obs1,action))
         return action
+
+    def get_current_obs(self,testing=False):
+        """ Return the observation the agent needs to act on. This can be fed
+        directly to the policy network.  """
+        if testing:
+            obs_stack = self.obs_stack_testing
+            current_obs = self.current_obs_testing
+        else:
+            obs_stack = self.obs_stack
+            current_obs = self.current_obs
+
+        (obs0,action0,obs1),mask = compute_mask_augmented_state(
+                *obs_stack[-1], current_obs)
+
+        # Move to appropriate device
+        if obs0 is not None:
+            obs0 = obs0.to(self.device)
+        obs1 = obs1.to(self.device)
+        mask = mask.to(self.device)
+
+        return obs0,action0,obs1,mask

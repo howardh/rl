@@ -1,10 +1,11 @@
 import pytest
 import gym
 import numpy as np
+import torch
 
 import agent
 from experiments.hrl.model import QFunction, PolicyFunction
-from agent.hdqn_agent import HDQNAgentWithDelayAC
+from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v3
 from agent.dqn_agent import DQNAgent
 
 def create_agent(agent_name, env):
@@ -27,7 +28,7 @@ def create_agent(agent_name, env):
                     for _ in range(num_options)],
                 q_net=QFunction(layer_sizes=[],input_size=state_size,output_size=num_actions),
         )
-    if agent_name == 'DQNAgent':
+    elif agent_name == 'DQNAgent':
         return DQNAgent(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
@@ -105,3 +106,59 @@ def test_agents_train_without_error(agent_name):
         agent.train()
         if done:
             break
+
+def test_HDQNAC_v3():
+    action_space = gym.spaces.Discrete(2)
+    observation_space = gym.spaces.Box(
+            high=np.array([1,1,1]),low=np.array([0,0,0]))
+
+    class DummyPolicy(torch.nn.Module):
+        def __init__(self,ret_val):
+            super().__init__()
+            self.fc = torch.nn.Linear(1,1)
+            self.call_stack = []
+            self.ret_val = ret_val
+        def forward(self,*params):
+            self.call_stack.append(params)
+            return self.ret_val.float()
+
+    agent = HDQNAgentWithDelayAC_v3(
+                action_space=action_space,
+                observation_space=observation_space,
+                discount_factor=1,
+                behaviour_epsilon=0,
+                replay_buffer_size=10,
+                controller_net=DummyPolicy(torch.tensor([[0.5,0.5]])),
+                subpolicy_nets=[DummyPolicy(torch.tensor([[0.5,0.5]])),DummyPolicy(torch.tensor([[0.5,0.5]]))],
+                q_net=DummyPolicy(torch.tensor([[0,0]]))
+            )
+    
+    for testing in [False,True]:
+        agent.observe_change(np.array([0,0,0]),testing=testing)
+        obs0,action0,obs1,mask = agent.get_current_obs(testing=testing)
+        assert (obs1 == torch.tensor([[0,0,0]]).float()).all()
+        assert (mask == torch.tensor([[0,1]]).float()).all()
+
+        a = agent.act(testing=testing)
+        agent.observe_change(np.array([0,0,0]),0,False,testing=testing)
+        obs0,action0,obs1,mask = agent.get_current_obs(testing=testing)
+        assert (obs0 == torch.tensor([[0,0,0]]).float()).all()
+        assert action0 == a
+        assert (obs1 == torch.tensor([[0,0,0]]).float()).all()
+        assert (mask == torch.tensor([[1,1]]).float()).all()
+
+        a = agent.act(testing=testing)
+        agent.observe_change(np.array([0,0,1]),0,False,testing=testing)
+        obs0,action0,obs1,mask = agent.get_current_obs(testing=testing)
+        assert (obs0 == torch.tensor([[0,0,0]]).float()).all()
+        assert action0 == a
+        assert (obs1 == torch.tensor([[0,0,1]]).float()).all()
+        assert (mask == torch.tensor([[1,1]]).float()).all()
+
+        a = agent.act(testing=testing)
+        agent.observe_change(np.array([0,1,0]),0,False,testing=testing)
+        obs0,action0,obs1,mask = agent.get_current_obs(testing=testing)
+        assert (obs0 == torch.tensor([[0,0,1]]).float()).all()
+        assert action0 == a
+        assert (obs1 == torch.tensor([[0,1,0]]).float()).all()
+        assert (mask == torch.tensor([[1,1]]).float()).all()

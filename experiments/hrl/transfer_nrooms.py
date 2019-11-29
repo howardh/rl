@@ -329,7 +329,7 @@ def plot(results_directory,plot_directory):
     data_x = {}
     for args,result in utils.get_all_results(results_directory):
         data_y[args['agent_name']].append(result['steps_to_reward'])
-        data_x[args['agent_name']] = range(0,args['steps_per_task']*2,args['epoch'])
+        data_x[args['agent_name']] = range(0,args['total_steps'],args['epoch'])
     for k,v in data_y.items():
         max_len = max([len(y) for y in v])
         data_y[k] = np.nanmean(np.array([y+[np.nan]*(max_len-len(y)) for y in v]),0)
@@ -337,6 +337,7 @@ def plot(results_directory,plot_directory):
     plt.xlabel('Training Steps')
     plt.ylabel('Steps to Reward')
     plt.legend(loc='best')
+    plt.grid()
     plot_path = os.path.join(plot_directory,'plot.png')
     plt.savefig(plot_path)
     plt.close()
@@ -352,7 +353,9 @@ def run():
 
     #for _ in range(10):
     while True:
-        run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v3',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
         plot(results_directory=directory,plot_directory=plot_directory)
+        #run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        #plot(results_directory=directory,plot_directory=plot_directory)
+        #run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        #plot(results_directory=directory,plot_directory=plot_directory)
+        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v3',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
