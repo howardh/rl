@@ -517,8 +517,8 @@ def compute_mask_augmented_state(obs0,action0,obs1):
     def o_to_t(o):
         """ obs to tensor """
         if o is None:
-            return torch.empty(obs1.shape).float().unsqueeze(0)
-        return torch.tensor(o).float().unsqueeze(0)
+            return torch.empty(obs1.shape).float().squeeze().unsqueeze(0)
+        return torch.tensor(o).float().squeeze().unsqueeze(0)
     def a_to_t(a):
         """ action to tensor """
         if a is None:
@@ -640,8 +640,9 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
             if reward is None:
                 self.reset_obs_stack(testing=testing)
             else:
-                self.observe_step(*self.obs_stack[0], *self.obs_stack[1],
-                        reward, obs, terminal)
+                if self.obs_stack[0][0] is not None:
+                    self.observe_step(*self.obs_stack[0], *self.obs_stack[1],
+                            reward, obs, terminal)
             self.current_obs = obs
             self.current_action = None
 

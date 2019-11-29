@@ -353,7 +353,7 @@ def run():
 
     #for _ in range(10):
     while True:
-        plot(results_directory=directory,plot_directory=plot_directory)
+        #plot(results_directory=directory,plot_directory=plot_directory)
         #run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
         #plot(results_directory=directory,plot_directory=plot_directory)
         #run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)

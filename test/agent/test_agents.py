@@ -162,3 +162,15 @@ def test_HDQNAC_v3():
         assert action0 == a
         assert (obs1 == torch.tensor([[0,1,0]]).float()).all()
         assert (mask == torch.tensor([[1,1]]).float()).all()
+
+    s0,a0,s1,a1,r2,s2,t,m1 = agent.replay_buffer.buffer[0]
+    assert (s0 == torch.tensor([[0,0,0]]).float()).all()
+    assert a0 is not None
+    assert (s1 == torch.tensor([[0,0,0]]).float()).all()
+    assert (s2 == torch.tensor([[0,0,1]]).float()).all()
+
+    s0,a0,s1,a1,r2,s2,t,m1 = agent.replay_buffer.buffer[1]
+    assert (s0 == torch.tensor([[0,0,0]]).float()).all()
+    assert a0 is not None
+    assert (s1 == torch.tensor([[0,0,1]]).float()).all()
+    assert (s2 == torch.tensor([[0,1,0]]).float()).all()
