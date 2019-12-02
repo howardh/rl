@@ -106,6 +106,7 @@ def save_results(params, results, directory=None, file_path=None,
             print('Writing data to disk. Ignoring keyboard interrupt.')
 
 def get_all_results(directory):
+    """ Generator for the contents of all files in the given directory. """
     for d,_,file_names in tqdm(os.walk(directory)):
         for fn in file_names:
             with open(os.path.join(d,fn), 'rb') as f:
@@ -128,18 +129,27 @@ def get_results_reduce(params, directory, func, initial):
         total = func(r, total)
     return total
 
-def get_all_results_reduce(directory, func, initial):
+def get_all_results_reduce(directory, func, initial=lambda: []):
     results = {}
     for p,r in get_all_results(directory):
-        key = frozenset(p.items())
+        key = recursive_frozenset(p)
         if key in results:
             results[key] = func(r, results[key])
         else:
-            results[key] = func(r, initial)
+            results[key] = func(r, initial())
     return results
 
 def sort_parameters(directory, func, initial):
     get_all_results_reduce(directory, func, initial)
+
+def recursive_frozenset(d):
+    def to_hashable(x):
+        if type(x) is dict:
+            return recursive_frozenset(x)
+        if type(x) is list:
+            return tuple(x)
+        return x
+    return tuple([(k,to_hashable(v)) for k,v in d.items()])
 
 # Data processing
 

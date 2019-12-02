@@ -343,6 +343,17 @@ def plot(results_directory,plot_directory):
     plt.close()
     print('Saved plot %s' % plot_path)
 
+def compute_score(directory):
+    def reduce(r,acc):
+        acc.append(np.mean(r['steps_to_reward']))
+        return acc
+    scores = utils.get_all_results_reduce(
+            directory, reduce, lambda: [])
+    for k,v in scores.items():
+        scores[k] = np.mean(v)
+    sorted_scores = sorted(scores.items(),key=lambda x: x[1])
+    return sored_scores
+
 def run():
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl'))
@@ -350,12 +361,13 @@ def run():
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
     #run_gridsearch()
+    scores = compute_score(directory)
 
     #for _ in range(10):
-    while True:
-        #plot(results_directory=directory,plot_directory=plot_directory)
-        #run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-        #plot(results_directory=directory,plot_directory=plot_directory)
-        #run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-        #plot(results_directory=directory,plot_directory=plot_directory)
-        run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v3',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+    #while True:
+    #    plot(results_directory=directory,plot_directory=plot_directory)
+    #    run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+    #    #plot(results_directory=directory,plot_directory=plot_directory)
+    #    #run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+    #    plot(results_directory=directory,plot_directory=plot_directory)
+    #    run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v3',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
