@@ -139,6 +139,16 @@ def get_all_results_reduce(directory, func, initial=lambda: []):
             results[key] = func(r, initial())
     return results
 
+def get_all_results_map_reduce(directory, map_func, reduce_func, initial=lambda: []):
+    results = {}
+    for p,r in get_all_results(directory):
+        key = map_func(p)
+        if key in results:
+            results[key] = reduce_func(r, results[key])
+        else:
+            results[key] = reduce_func(r, initial())
+    return results
+
 def sort_parameters(directory, func, initial):
     get_all_results_reduce(directory, func, initial)
 
