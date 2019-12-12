@@ -293,7 +293,26 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
 
 def run_gridsearch(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
-    params = {
+    params_ac = {
+            'agent_name': ['ActorCritic'],
+            'gamma': [0.9],
+            'controller_learning_rate': [0.01,0.001],
+            'subpolicy_learning_rate': [0.01,0.001],
+            'q_net_learning_rate': [0.01,0.001],
+            'eps_b': [0.05],
+            'polyak_rate': [0.001],
+            'batch_size': [256],
+            'min_replay_buffer_size': [1000],
+            'steps_per_task': [100000],
+            'epoch': [1000],
+            'test_iters': [5],
+            'verbose': [True],
+            'controller_net_structure': [(10,10),(20,20)],
+            'subpolicy_net_structure': [(5,5),(3,)],
+            'q_net_structure': [(10,10),(20,20)],
+            'directory': [directory]
+    }
+    params_v3 = {
             'agent_name': ['HDQNAgentWithDelayAC_v3'],
             'gamma': [0.9],
             'controller_learning_rate': [0.01,0.001],
@@ -317,15 +336,16 @@ def run_gridsearch(proc=1):
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
 
-def run_refinement(proc=1,runs_per_agent=1):
+def run_refinement(proc=1,runs_per_agent=1,
+        agent_name='HDQNAgentWithDelayAC_v3'):
     directory = os.path.join(utils.get_results_directory(),__name__)
     scores = compute_score(directory)
     scores_by_agent = defaultdict(lambda: [])
     for p,s in scores:
-        p = dict(scores[0][0])
+        p = dict(p)
         scores_by_agent[p['agent_name']].append((p,s))
-    s = scores_by_agent['HDQNAgentWithDelayAC_v3'][0][1]
-    p = dict(scores_by_agent['HDQNAgentWithDelayAC_v3'][0][0])
+    s = scores_by_agent[agent_name][0][1]
+    p = dict(scores_by_agent[agent_name][0][0])
     p['directory'] = directory
     print(s)
     print(p)
@@ -371,7 +391,7 @@ def plot(data, plot_directory):
     plt.xlabel('Training Steps')
     plt.ylabel('Steps to Reward')
     plt.legend(loc='best')
-    plt.grid()
+    plt.grid(which='both')
     plot_path = os.path.join(plot_directory,'plot.png')
     plt.savefig(plot_path)
     plt.close()
@@ -388,7 +408,7 @@ def map_func(params):
 
 def compute_score(directory,params={}):
     def reduce(r,acc):
-        acc.append(np.mean(r['steps_to_reward']))
+        acc.append(np.mean(r['steps_to_reward'][50:]))
         return acc
     scores = utils.get_all_results_map_reduce(
             directory, map_func, reduce, lambda: [])
@@ -405,7 +425,7 @@ def compute_series(directory,params={}):
             directory, map_func, reduce, lambda: [])
     for k,v in series.items():
         max_len = max([len(x) for x in v])
-        series[k] = np.array(list(itertools.zip_longest(*v,fillvalue=np.nan))).mean(axis=1)
+        series[k] = np.nanmean(np.array(list(itertools.zip_longest(*v,fillvalue=np.nan))),axis=1)
     return series
 
 def run():
@@ -419,7 +439,7 @@ def run():
     scores = compute_score(directory)
     scores_by_agent = defaultdict(lambda: [])
     for p,s in scores:
-        p = dict(scores[0][0])
+        p = dict(p)
         scores_by_agent[p['agent_name']].append((p,s))
     agent_names = scores_by_agent.keys()
     data = defaultdict(lambda: {'x': None, 'y': None})
@@ -431,8 +451,9 @@ def run():
     plot(data,plot_directory)
 
     #for _ in range(10):
-    #while True:
-    #    run_refinement()
+    while True:
+        run_refinement(agent_name='ActorCritic')
+        run_refinement(agent_name='HDQNAgentWithDelayAC_v3')
     #    plot(results_directory=directory,plot_directory=plot_directory)
     #    run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
     #    #plot(results_directory=directory,plot_directory=plot_directory)
