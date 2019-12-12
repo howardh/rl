@@ -159,7 +159,7 @@ def recursive_frozenset(d):
         if type(x) is list:
             return tuple(x)
         return x
-    return tuple([(k,to_hashable(v)) for k,v in d.items()])
+    return frozenset([(k,to_hashable(v)) for k,v in d.items()])
 
 # Data processing
 

@@ -232,7 +232,7 @@ def plot(results_dir, plot_dir):
 
     def reduce(results,s=[]):
         return s + [results]
-    results = utils.get_all_results_reduce(results_dir, reduce, [])
+    results = utils.get_all_results_reduce(results_dir, reduce, lambda: [])
 
     if not os.path.isdir(plot_dir):
         os.makedirs(plot_dir)

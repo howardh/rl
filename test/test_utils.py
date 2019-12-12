@@ -159,12 +159,9 @@ def test_save_results_and_get_results_reduce(tmpdir):
     results = utils.get_all_results_reduce(
              str(tmpdir), reduce, lambda: [])
     assert len(results) == 2
-    assert 6 in results[(('a', 1),)]
-    assert 9 in results[(('a', 1),)]
-    assert 4+5+6 in results[(('b', 1),)]
-
-    results = utils.get_results_reduce(
-            {}, str(tmpdir), reduce, lambda: [])
+    assert 6 in results[frozenset({'a': 1}.items())]
+    assert 9 in results[frozenset({'a': 1}.items())]
+    assert 4+5+6 in results[frozenset({'b': 1}.items())]
 
 def test_find_best_params(tmpdir):
     # Note: This is not a proper test.
@@ -174,9 +171,9 @@ def test_find_best_params(tmpdir):
     utils.save_results({'a': 1, 'b': 2}, [4,5,6], directory=str(tmpdir))
     utils.save_results({'a': 2, 'b': 1}, [1,1,1], directory=str(tmpdir))
     utils.save_results({'a': 2, 'b': 2}, [4,3,2], directory=str(tmpdir))
-    def reduce(results,s=[]):
+    def reduce(results,s):
         return s + [results]
-    results = utils.get_all_results_reduce(str(tmpdir), reduce, [])
+    results = utils.get_all_results_reduce(str(tmpdir), reduce, lambda: [])
     performance = {}
     for k,v in results.items():
         """
@@ -205,6 +202,7 @@ def test_find_best_params(tmpdir):
         mean_max_mean = np.mean(max_means)
         performance[k] = mean_max_mean
 
+    print(performance)
     assert len(performance) == 4
     assert performance[frozenset({'a': 1, 'b': 1}.items())] == ((1+2+3)/3+3/3)/2
     assert performance[frozenset({'a': 1, 'b': 2}.items())] == (4+5+6)/3
