@@ -339,7 +339,7 @@ def run_gridsearch(proc=1):
 def run_refinement(proc=1,runs_per_agent=1,
         agent_name='HDQNAgentWithDelayAC_v3'):
     directory = os.path.join(utils.get_results_directory(),__name__)
-    scores = compute_score(directory)
+    scores = compute_score(directory,'ucb1')
     scores_by_agent = defaultdict(lambda: [])
     for p,s in scores:
         p = dict(p)
@@ -406,15 +406,34 @@ def map_func(params):
         p[k] = v
     return frozenset(p.items())
 
-def compute_score(directory,params={}):
+def compute_score(directory,params={},sortby='mean'):
     def reduce(r,acc):
-        acc.append(np.mean(r['steps_to_reward'][50:]))
+        if len(r['steps_to_reward']) == 100:
+            acc.append(np.mean(r['steps_to_reward'][50:]))
         return acc
     scores = utils.get_all_results_map_reduce(
             directory, map_func, reduce, lambda: [])
+    n = defaultdict(lambda: 0)
     for k,v in scores.items():
-        scores[k] = np.mean(v)
-    sorted_scores = sorted(scores.items(),key=lambda x: x[1])
+        an = dict(k)['agent_name']
+        n[an] += len([x for x in v if x==x])
+    for k,v in scores.items():
+        if len(v) == 0:
+            scores[k] = {
+                    'mean': np.nan,
+                    'ucb1': -np.inf,
+                    'count': len(v)
+            }
+        else:
+            m = np.nanmean(v)
+            c = len([x for x in v if x==x])
+            t = n[dict(k)['agent_name']]
+            scores[k] = {
+                    'mean': m,
+                    'ucb1': m-500*np.sqrt(2*np.log(t)/c),
+                    'count': c
+            }
+    sorted_scores = sorted(scores.items(),key=lambda x: x[1][sortby])
     return sorted_scores
 
 def compute_series(directory,params={}):
@@ -446,14 +465,17 @@ def run():
     for an in agent_names:
         p = scores_by_agent[an][0][0]
         s = series[map_func(p)]
-        data[an]['x'] = range(0,p['total_steps'],p['epoch'])
-        data[an]['y'] = s
+        print(scores_by_agent[an][0][1], an)
+        label = '%s (%d)' % (an,scores_by_agent[an][0][1]['count'])
+        data[label]['x'] = range(0,p['total_steps'],p['epoch'])
+        data[label]['y'] = s
     plot(data,plot_directory)
 
     #for _ in range(10):
     while True:
-        run_refinement(agent_name='ActorCritic')
+        #run_refinement(agent_name='ActorCritic')
         run_refinement(agent_name='HDQNAgentWithDelayAC_v3')
+        #run_refinement(agent_name='HDQNAgentWithDelayAC_v2')
     #    plot(results_directory=directory,plot_directory=plot_directory)
     #    run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
     #    #plot(results_directory=directory,plot_directory=plot_directory)
