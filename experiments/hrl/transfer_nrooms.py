@@ -33,35 +33,6 @@ class TimeLimit(gym.Wrapper):
         self._elapsed_steps = 0
         return self.env.reset(**kwargs)
 
-rooms_map_1 = """
-xxxxxxxxxxxxxxx
-x       x     x
-x       x     x
-x       x     x
-x       x     x
-x    xx x     x
-x    x  x     x
-x    x xx     x
-x    x        x
-x    x        x
-x    x        x
-x    x        x
-xxxxxxxxxxxxxxx"""
-rooms_map_2 = """
-xxxxxxxxxxxxxxx
-x             x
-x             x
-x             x
-x             x
-xxxxxxxxx     x
-x       x     x
-x     x       x
-x     xxxxxxxxx
-x             x
-x             x
-x             x
-xxxxxxxxxxxxxxx"""
-
 def create_agent(agent_name, env, device, **agent_params):
     before_step = lambda s: None
     after_step = lambda s: None
@@ -337,9 +308,9 @@ def run_gridsearch(proc=1):
     return utils.get_all_results(directory)
 
 def run_refinement(proc=1,runs_per_agent=1,
-        agent_name='HDQNAgentWithDelayAC_v3'):
+        agent_name='HDQNAgentWithDelayAC_v3',sortby='ucb1'):
     directory = os.path.join(utils.get_results_directory(),__name__)
-    scores = compute_score(directory,'ucb1')
+    scores = compute_score(directory,sortby=sortby)
     scores_by_agent = defaultdict(lambda: [])
     for p,s in scores:
         p = dict(p)
@@ -351,6 +322,20 @@ def run_refinement(proc=1,runs_per_agent=1,
     print(p)
     funcs = [lambda: run_trial(**p) for _ in range(runs_per_agent)]
     utils.cc(funcs,proc=proc)
+
+def compute_refinement_params(num_params=10,agent_name='HDQNAgentWithDelayAC_v3'):
+    directory = os.path.join(utils.get_results_directory(),__name__)
+    scores = compute_score(directory,sortby='ucb1')
+    params = []
+    for p,s in scores:
+        p = dict(p)
+        if p['agent_name'] != agent_name:
+            continue
+        print(s)
+        params.append(p)
+        if len(params) >= num_params:
+            break
+    #print(params)
 
 def plot(results_directory,plot_directory):
     import matplotlib
@@ -397,6 +382,26 @@ def plot(data, plot_directory):
     plt.close()
     print('Saved plot %s' % plot_path)
 
+def plot_score_distribution(results_directory,plot_directory):
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+
+    if not os.path.isdir(plot_directory):
+        os.makedirs(plot_directory)
+
+    scores = compute_score(results_directory,sortby='count')
+    params,score = scores[-1]
+    params = dict(params)
+    data = score['data']
+
+    plot_path = os.path.join(plot_directory,'hist.png')
+    plt.hist(data,bins=10)
+    plt.title('%s (%d)' % (params['agent_name'],len(data)))
+    plt.savefig(plot_path)
+    plt.close()
+    print('Saved plot %s' % plot_path)
+
 def map_func(params):
     p = params
     ap = p.pop('agent_params',{})
@@ -406,7 +411,8 @@ def map_func(params):
         p[k] = v
     return frozenset(p.items())
 
-def compute_score(directory,params={},sortby='mean'):
+def compute_score(directory,params={},sortby='mean',
+        keys=['mean','ucb1','count']):
     def reduce(r,acc):
         if len(r['steps_to_reward']) == 100:
             acc.append(np.mean(r['steps_to_reward'][50:]))
@@ -420,15 +426,18 @@ def compute_score(directory,params={},sortby='mean'):
     for k,v in scores.items():
         if len(v) == 0:
             scores[k] = {
+                    #'data': [],
                     'mean': np.nan,
                     'ucb1': -np.inf,
                     'count': len(v)
             }
         else:
             m = np.nanmean(v)
-            c = len([x for x in v if x==x])
+            d = [x for x in v if x==x]
+            c = len(d)
             t = n[dict(k)['agent_name']]
             scores[k] = {
+                    #'data': d,
                     'mean': m,
                     'ucb1': m-500*np.sqrt(2*np.log(t)/c),
                     'count': c
@@ -464,18 +473,27 @@ def run():
     data = defaultdict(lambda: {'x': None, 'y': None})
     for an in agent_names:
         p = scores_by_agent[an][0][0]
-        s = series[map_func(p)]
-        print(scores_by_agent[an][0][1], an)
+        y = series[map_func(p)]
+        s = scores_by_agent[an][0][1]
+        print(s, an)
+        print(p)
         label = '%s (%d)' % (an,scores_by_agent[an][0][1]['count'])
         data[label]['x'] = range(0,p['total_steps'],p['epoch'])
-        data[label]['y'] = s
+        data[label]['y'] = y
     plot(data,plot_directory)
+
+    #plot_score_distribution(directory,plot_directory)
+
+    #compute_refinement_params(30,agent_name='ActorCritic')
+    #compute_refinement_params(np.inf,agent_name='ActorCritic')
+    #compute_refinement_params(20,agent_name='HDQNAgentWithDelayAC_v2')
+    #compute_refinement_params(np.inf,agent_name='HDQNAgentWithDelayAC_v3')
 
     #for _ in range(10):
     while True:
-        #run_refinement(agent_name='ActorCritic')
-        run_refinement(agent_name='HDQNAgentWithDelayAC_v3')
-        #run_refinement(agent_name='HDQNAgentWithDelayAC_v2')
+        #run_refinement(agent_name='ActorCritic',sortby='ucb1')
+        #run_refinement(agent_name='HDQNAgentWithDelayAC_v3',sortby='ucb1')
+        run_refinement(agent_name='HDQNAgentWithDelayAC_v2', sortby='ucb1')
     #    plot(results_directory=directory,plot_directory=plot_directory)
     #    run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
     #    #plot(results_directory=directory,plot_directory=plot_directory)
