@@ -92,7 +92,8 @@ def create_agent(agent_name, env, device, **agent_params):
                     input_size=4,output_size=4),
         )
         def before_step(steps):
-            agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            pass
         def after_step(steps):
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
@@ -128,7 +129,8 @@ def create_agent(agent_name, env, device, **agent_params):
                     input_size=4,output_size=4),
         )
         def before_step(steps):
-            agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            pass
         def after_step(steps):
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
@@ -208,7 +210,8 @@ def create_agent(agent_name, env, device, **agent_params):
                     input_size=4,output_size=4),
         )
         def before_step(steps):
-            agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            pass
         def after_step(steps):
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
@@ -293,9 +296,9 @@ def run_hyperparam_search(proc=1):
     params_ac = {
             'agent_name': 'ActorCritic',
             'gamma': 0.9,
-            'controller_learning_rate': LogUniform(0.001,0.01),
-            'subpolicy_learning_rate': LogUniform(0.001,0.01),
-            'q_net_learning_rate': LogUniform(0.001,0.01),
+            'controller_learning_rate': LogUniform(1e-4,1e-1),
+            'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
+            'q_net_learning_rate': LogUniform(1e-4,1e-1),
             'eps_b': Uniform(0,0.5),
             'polyak_rate': 0.001,
             'batch_size': 256,
