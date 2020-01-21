@@ -14,6 +14,9 @@ from .model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
 from .long_trial import plot
 
 import utils
+import hyperparams
+import hyperparams.utils
+from hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
 
 class TimeLimit(gym.Wrapper):
     """ Copied from gym.wrappers.TimeLimit with small modifications."""
@@ -50,12 +53,23 @@ def create_agent(agent_name, env, device, **agent_params):
     replay_buffer_size = agent_params.pop('replay_buffer_size',10000)
     delay = agent_params.pop('delay',1)
     if agent_name == 'HDQNAgentWithDelayAC':
-        controller_net_structure = agent_params.pop(
-                'controller_net_structure',[2,2])
-        subpolicy_net_structure = agent_params.pop(
-                'subpolicy_net_structure',[3])
-        q_net_structure = agent_params.pop(
-                'q_net_structure',[15,15])
+        ['cnet_n_layers', 'cnet_layer_size', 'snet_n_layers',
+                'snet_layer_size', 'qnet_n_layers', 'qnet_layer_size']
+        cnet_n_layers = agent_params.pop(
+                'cnet_n_layers',None)
+        cnet_layer_size = agent_params.pop(
+                'cnet_layer_size',None)
+        snet_n_layers = agent_params.pop(
+                'snet_n_layers',None)
+        snet_layer_size = agent_params.pop(
+                'snet_layer_size',None)
+        qnet_n_layers = agent_params.pop(
+                'qnet_n_layers',None)
+        qnet_layer_size = agent_params.pop(
+                'qnet_layer_size',None)
+        controller_net_structure = tuple([cnet_layer_size]*cnet_n_layers)
+        subpolicy_net_structure = tuple([snet_layer_size]*snet_n_layers)
+        q_net_structure = tuple([qnet_layer_size]*qnet_n_layers)
         agent = HDQNAgentWithDelayAC(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
@@ -155,12 +169,23 @@ def create_agent(agent_name, env, device, **agent_params):
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
     elif agent_name == 'ActorCritic':
-        controller_net_structure = agent_params.pop(
-                'controller_net_structure',[2,2])
-        subpolicy_net_structure = agent_params.pop(
-                'subpolicy_net_structure',[3])
-        q_net_structure = agent_params.pop(
-                'q_net_structure',[15,15])
+        ['cnet_n_layers', 'cnet_layer_size', 'snet_n_layers',
+                'snet_layer_size', 'qnet_n_layers', 'qnet_layer_size']
+        cnet_n_layers = agent_params.pop(
+                'cnet_n_layers',None)
+        cnet_layer_size = agent_params.pop(
+                'cnet_layer_size',None)
+        snet_n_layers = agent_params.pop(
+                'snet_n_layers',None)
+        snet_layer_size = agent_params.pop(
+                'snet_layer_size',None)
+        qnet_n_layers = agent_params.pop(
+                'qnet_n_layers',None)
+        qnet_layer_size = agent_params.pop(
+                'qnet_layer_size',None)
+        controller_net_structure = tuple([cnet_layer_size]*cnet_n_layers)
+        subpolicy_net_structure = tuple([snet_layer_size]*snet_n_layers)
+        q_net_structure = tuple([qnet_layer_size]*qnet_n_layers)
         agent = HDQNAgentWithDelayAC(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
@@ -200,6 +225,7 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
         agent_name='HDQNAgentWithDelayAC', **agent_params):
     args = locals()
     env_name='gym_fourrooms:fourrooms-v0'
+    print(args)
 
     env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
     env = TimeLimit(env,36)
@@ -262,26 +288,31 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
 
     return (args, rewards, state_action_values)
 
-def run_gridsearch(proc=1):
+def run_hyperparam_search(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params_ac = {
-            'agent_name': ['ActorCritic'],
-            'gamma': [0.9],
-            'controller_learning_rate': [0.01,0.001],
-            'subpolicy_learning_rate': [0.01,0.001],
-            'q_net_learning_rate': [0.01,0.001],
-            'eps_b': [0.05],
-            'polyak_rate': [0.001],
-            'batch_size': [256],
-            'min_replay_buffer_size': [1000],
-            'steps_per_task': [100000],
-            'epoch': [1000],
-            'test_iters': [5],
-            'verbose': [True],
-            'controller_net_structure': [(10,10),(20,20)],
-            'subpolicy_net_structure': [(5,5),(3,)],
-            'q_net_structure': [(10,10),(20,20)],
-            'directory': [directory]
+            'agent_name': 'ActorCritic',
+            'gamma': 0.9,
+            'controller_learning_rate': LogUniform(0.001,0.01),
+            'subpolicy_learning_rate': LogUniform(0.001,0.01),
+            'q_net_learning_rate': LogUniform(0.001,0.01),
+            'eps_b': Uniform(0,0.5),
+            'polyak_rate': 0.001,
+            'batch_size': 256,
+            'min_replay_buffer_size': 1000,
+            'steps_per_task': 10000,
+            'total_steps': 100000,
+            'epoch': 1000,
+            'test_iters': 5,
+            'verbose': True,
+            'num_options': DiscreteUniform(2,10),
+            'cnet_n_layers': DiscreteUniform(1,2),
+            'cnet_layer_size': DiscreteUniform(1,20),
+            'snet_n_layers': DiscreteUniform(1,2),
+            'snet_layer_size': DiscreteUniform(1,5),
+            'qnet_n_layers': DiscreteUniform(1,2),
+            'qnet_layer_size': DiscreteUniform(10,20),
+            'directory': directory
     }
     params_v3 = {
             'agent_name': ['HDQNAgentWithDelayAC_v3'],
@@ -303,7 +334,8 @@ def run_gridsearch(proc=1):
             'q_net_structure': [(10,10),(20,20)],
             'directory': [directory]
     }
-    funcs = utils.gridsearch(params, run_trial)
+    params = [hyperparams.utils.sample_hyperparam(params_ac)]
+    funcs = [lambda: run_trial(**p) for p in params]
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
 
@@ -458,45 +490,29 @@ def compute_series(directory,params={}):
 
 def run():
     utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'hrl'))
+            os.path.join(utils.get_results_root_directory(),'hrl-2'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
 
-    #run_gridsearch()
-    series = compute_series(directory)
-    scores = compute_score(directory)
-    scores_by_agent = defaultdict(lambda: [])
-    for p,s in scores:
-        p = dict(p)
-        scores_by_agent[p['agent_name']].append((p,s))
-    agent_names = scores_by_agent.keys()
-    data = defaultdict(lambda: {'x': None, 'y': None})
-    for an in agent_names:
-        p = scores_by_agent[an][0][0]
-        y = series[map_func(p)]
-        s = scores_by_agent[an][0][1]
-        print(s, an)
-        print(p)
-        label = '%s (%d)' % (an,scores_by_agent[an][0][1]['count'])
-        data[label]['x'] = range(0,p['total_steps'],p['epoch'])
-        data[label]['y'] = y
-    plot(data,plot_directory)
+    ##run_gridsearch()
+    #series = compute_series(directory)
+    #scores = compute_score(directory)
+    #scores_by_agent = defaultdict(lambda: [])
+    #for p,s in scores:
+    #    p = dict(p)
+    #    scores_by_agent[p['agent_name']].append((p,s))
+    #agent_names = scores_by_agent.keys()
+    #data = defaultdict(lambda: {'x': None, 'y': None})
+    #for an in agent_names:
+    #    p = scores_by_agent[an][0][0]
+    #    y = series[map_func(p)]
+    #    s = scores_by_agent[an][0][1]
+    #    print(s, an)
+    #    print(p)
+    #    label = '%s (%d)' % (an,scores_by_agent[an][0][1]['count'])
+    #    data[label]['x'] = range(0,p['total_steps'],p['epoch'])
+    #    data[label]['y'] = y
+    #plot(data,plot_directory)
 
-    #plot_score_distribution(directory,plot_directory)
-
-    #compute_refinement_params(30,agent_name='ActorCritic')
-    #compute_refinement_params(np.inf,agent_name='ActorCritic')
-    #compute_refinement_params(20,agent_name='HDQNAgentWithDelayAC_v2')
-    #compute_refinement_params(np.inf,agent_name='HDQNAgentWithDelayAC_v3')
-
-    #for _ in range(10):
     while True:
-        #run_refinement(agent_name='ActorCritic',sortby='ucb1')
-        #run_refinement(agent_name='HDQNAgentWithDelayAC_v3',sortby='ucb1')
-        run_refinement(agent_name='HDQNAgentWithDelayAC_v2', sortby='ucb1')
-    #    plot(results_directory=directory,plot_directory=plot_directory)
-    #    run_trial(gamma=0.9,agent_name='ActorCritic',steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-    #    #plot(results_directory=directory,plot_directory=plot_directory)
-    #    #run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v2',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
-    #    plot(results_directory=directory,plot_directory=plot_directory)
-    #    run_trial(gamma=0.9,agent_name='HDQNAgentWithDelayAC_v3',delay=1,steps_per_task=10000,total_steps=100000,epoch=1000,test_iters=10,verbose=True,directory=directory)
+        run_hyperparam_search()
