@@ -437,6 +437,75 @@ def plot_score_distribution(results_directory,plot_directory):
     plt.close()
     print('Saved plot %s' % plot_path)
 
+def plot_single_param(results_directory, plot_directory, agent_name, param,
+        log=False):
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+
+    if not os.path.isdir(plot_directory):
+        os.makedirs(plot_directory)
+
+    scores = compute_score(results_directory)
+
+    x = []
+    y = []
+    for k,v in scores:
+        p = dict(k)
+        if log:
+            x.append(np.log(p[param]))
+        else:
+            x.append(p[param])
+        y.append(v['mean'])
+    plt.scatter(x,y)
+    plt.xlabel(param)
+    plt.ylabel('Score')
+    #plt.legend(loc='best')
+    plt.grid(which='both')
+    plot_path = os.path.join(plot_directory,'plot.png')
+    plt.savefig(plot_path)
+    plt.close()
+    print('Saved plot %s' % plot_path)
+
+def plot_tsne(results_directory, plot_directory, agent_name):
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+    import sklearn
+    from sklearn.manifold import TSNE
+
+    if not os.path.isdir(plot_directory):
+        os.makedirs(plot_directory)
+
+    scores = compute_score(results_directory)
+
+    log_params = ['controller_learning_rate','subpolicy_learning_rate','q_net_learning_rate']
+    ignore_params = ['agent_name','gamma','test_iters','verbose','directory']
+
+    params = []
+    values = []
+    for p,s in scores:
+        p = sorted(p,key=lambda a: a[0])
+        pvals = []
+        for k,v in p:
+            if k in ignore_params:
+                continue
+            elif k in log_params:
+                pvals.append(np.log(v))
+            else:
+                pvals.append(v)
+        params.append(pvals)
+        values.append(s['mean'])
+    params = np.array(params)
+    params = (params-np.mean(params,axis=1,keepdims=True))/np.std(params,axis=1,keepdims=True)
+    x_embedded = TSNE(n_components=2).fit_transform(params)
+    plt.scatter([x for x,y in x_embedded], [y for x,y in x_embedded],c=values,s=10)
+    plt.colorbar()
+    plot_path = os.path.join(plot_directory,'tsne.png')
+    plt.savefig(plot_path)
+    plt.close()
+    print('Saved plot %s' % plot_path)
+
 def map_func(params):
     p = params
     ap = p.pop('agent_params',{})
@@ -517,5 +586,12 @@ def run():
     #    data[label]['y'] = y
     #plot(data,plot_directory)
 
-    while True:
-        run_hyperparam_search()
+    #plot_single_param(directory, plot_directory, 'ActorCritic', 'num_options')
+    #plot_single_param(directory, plot_directory, 'ActorCritic', 'eps_b')
+    #plot_single_param(directory, plot_directory, 'ActorCritic', 'qnet_layer_size')
+    #plot_single_param(directory, plot_directory, 'ActorCritic', 'controller_learning_rate', log=True)
+
+    plot_tsne(directory, plot_directory, '')
+
+    #while True:
+    #    run_hyperparam_search()
