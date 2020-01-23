@@ -6,6 +6,7 @@ import dill
 import os
 import itertools
 from collections import defaultdict
+import pprint
 
 from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3
 from agent.policy import get_greedy_epsilon_policy
@@ -17,6 +18,51 @@ import utils
 import hyperparams
 import hyperparams.utils
 from hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
+
+actor_critic_hyperparam_space = {
+        'agent_name': 'ActorCritic',
+        'gamma': 0.9,
+        'controller_learning_rate': LogUniform(1e-4,1e-1),
+        'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
+        'q_net_learning_rate': LogUniform(1e-4,1e-1),
+        'eps_b': Uniform(0,0.5),
+        'polyak_rate': 0.001,
+        'batch_size': 256,
+        'min_replay_buffer_size': 1000,
+        'steps_per_task': 10000,
+        'total_steps': 100000,
+        'epoch': 1000,
+        'test_iters': 5,
+        'verbose': True,
+        'num_options': DiscreteUniform(2,10),
+        'cnet_n_layers': DiscreteUniform(1,2),
+        'cnet_layer_size': DiscreteUniform(1,20),
+        'snet_n_layers': DiscreteUniform(1,2),
+        'snet_layer_size': DiscreteUniform(1,5),
+        'qnet_n_layers': DiscreteUniform(1,2),
+        'qnet_layer_size': DiscreteUniform(10,20),
+        'directory': None
+}
+params_v3 = {
+        'agent_name': ['HDQNAgentWithDelayAC_v3'],
+        'gamma': [0.9],
+        'controller_learning_rate': [0.01,0.001],
+        'subpolicy_learning_rate': [0.01,0.001],
+        'q_net_learning_rate': [0.01,0.001],
+        'subpolicy_q_net_learning_rate': [0.01,0.001],
+        'eps_b': [0.05],
+        'polyak_rate': [0.001],
+        'batch_size': [256],
+        'min_replay_buffer_size': [1000],
+        'steps_per_task': [100000],
+        'epoch': [1000],
+        'test_iters': [5],
+        'verbose': [True],
+        'controller_net_structure': [(10,10),(20,20)],
+        'subpolicy_net_structure': [(5,5),(3,)],
+        'q_net_structure': [(10,10),(20,20)],
+        'directory': os.path.join(utils.get_results_directory(),__name__)
+}
 
 class TimeLimit(gym.Wrapper):
     """ Copied from gym.wrappers.TimeLimit with small modifications."""
@@ -228,7 +274,7 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
         agent_name='HDQNAgentWithDelayAC', **agent_params):
     args = locals()
     env_name='gym_fourrooms:fourrooms-v0'
-    print(args)
+    pprint.pprint(args)
 
     env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
     env = TimeLimit(env,36)
@@ -293,51 +339,7 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
 
 def run_hyperparam_search(proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
-    params_ac = {
-            'agent_name': 'ActorCritic',
-            'gamma': 0.9,
-            'controller_learning_rate': LogUniform(1e-4,1e-1),
-            'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
-            'q_net_learning_rate': LogUniform(1e-4,1e-1),
-            'eps_b': Uniform(0,0.5),
-            'polyak_rate': 0.001,
-            'batch_size': 256,
-            'min_replay_buffer_size': 1000,
-            'steps_per_task': 10000,
-            'total_steps': 100000,
-            'epoch': 1000,
-            'test_iters': 5,
-            'verbose': True,
-            'num_options': DiscreteUniform(2,10),
-            'cnet_n_layers': DiscreteUniform(1,2),
-            'cnet_layer_size': DiscreteUniform(1,20),
-            'snet_n_layers': DiscreteUniform(1,2),
-            'snet_layer_size': DiscreteUniform(1,5),
-            'qnet_n_layers': DiscreteUniform(1,2),
-            'qnet_layer_size': DiscreteUniform(10,20),
-            'directory': directory
-    }
-    params_v3 = {
-            'agent_name': ['HDQNAgentWithDelayAC_v3'],
-            'gamma': [0.9],
-            'controller_learning_rate': [0.01,0.001],
-            'subpolicy_learning_rate': [0.01,0.001],
-            'q_net_learning_rate': [0.01,0.001],
-            'subpolicy_q_net_learning_rate': [0.01,0.001],
-            'eps_b': [0.05],
-            'polyak_rate': [0.001],
-            'batch_size': [256],
-            'min_replay_buffer_size': [1000],
-            'steps_per_task': [100000],
-            'epoch': [1000],
-            'test_iters': [5],
-            'verbose': [True],
-            'controller_net_structure': [(10,10),(20,20)],
-            'subpolicy_net_structure': [(5,5),(3,)],
-            'q_net_structure': [(10,10),(20,20)],
-            'directory': [directory]
-    }
-    params = [hyperparams.utils.sample_hyperparam(params_ac)]
+    params = [hyperparams.utils.sample_hyperparam(actor_critic_hyperparam_space)]
     funcs = [lambda: run_trial(**p) for p in params]
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
@@ -358,19 +360,22 @@ def run_refinement(proc=1,runs_per_agent=1,
     funcs = [lambda: run_trial(**p) for _ in range(runs_per_agent)]
     utils.cc(funcs,proc=proc)
 
-def compute_refinement_params(num_params=10,agent_name='HDQNAgentWithDelayAC_v3'):
-    directory = os.path.join(utils.get_results_directory(),__name__)
-    scores = compute_score(directory,sortby='ucb1')
+def sample_convex_hull(results_directory, threshold=0.1):
+    """ Find the top {threshold}% of parameters, and sample a set of parameters
+    within the convex hull formed by those points.
+    """
+    scores = compute_score(results_directory,sortby='mean')
+    n_points = int(len(scores)*threshold)
+    weights = np.random.rand(n_points)
+    weights /= np.sum(weights)
     params = []
-    for p,s in scores:
-        p = dict(p)
-        if p['agent_name'] != agent_name:
-            continue
-        print(s)
-        params.append(p)
-        if len(params) >= num_params:
-            break
-    #print(params)
+    for p,s in scores[:n_points]:
+        params.append(hyperparams.utils.param_to_vec(p,actor_critic_hyperparam_space))
+    params = np.array(params)
+    output = (weights.reshape(n_points,1)*params).sum(0)
+    output = output.tolist()
+    output = hyperparams.utils.vec_to_param(output,actor_critic_hyperparam_space)
+    return output
 
 def plot(results_directory,plot_directory):
     import matplotlib
@@ -485,19 +490,8 @@ def plot_tsne(results_directory, plot_directory, agent_name):
     params = []
     values = []
     for p,s in scores:
-        p = sorted(p,key=lambda a: a[0])
-        pvals = []
-        for k,v in p:
-            if k in ignore_params:
-                continue
-            elif k in log_params:
-                pvals.append(np.log(v))
-            else:
-                pvals.append(v)
-        params.append(pvals)
+        params.append(hyperparams.utils.param_to_vec(p,actor_critic_hyperparam_space))
         values.append(s['mean'])
-    params = np.array(params)
-    params = (params-np.mean(params,axis=1,keepdims=True))/np.std(params,axis=1,keepdims=True)
     x_embedded = TSNE(n_components=2).fit_transform(params)
     plt.scatter([x for x,y in x_embedded], [y for x,y in x_embedded],c=values,s=10)
     plt.colorbar()
@@ -565,6 +559,7 @@ def run():
             os.path.join(utils.get_results_root_directory(),'hrl-2'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
+    actor_critic_hyperparam_space['directory'] = directory
 
     ##run_gridsearch()
     #series = compute_series(directory)
@@ -591,7 +586,10 @@ def run():
     #plot_single_param(directory, plot_directory, 'ActorCritic', 'qnet_layer_size')
     #plot_single_param(directory, plot_directory, 'ActorCritic', 'controller_learning_rate', log=True)
 
-    plot_tsne(directory, plot_directory, '')
+    #plot_tsne(directory, plot_directory, '')
 
-    #while True:
-    #    run_hyperparam_search()
+
+    while True:
+        #run_hyperparam_search()
+        param = sample_convex_hull(directory)
+        run_trial(**param)
