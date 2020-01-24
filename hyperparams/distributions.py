@@ -44,7 +44,7 @@ class LogUniform(Uniform):
     def __init__(self,min_val,max_val):
         super().__init__(np.log(min_val),np.log(max_val))
     def sample(self):
-        return np.exp(self.dist.sample())
+        return np.exp(self.dist.sample().item())
     def normalize(self,val):
         return super().normalize(np.log(val))
     def unnormalize(self,val):

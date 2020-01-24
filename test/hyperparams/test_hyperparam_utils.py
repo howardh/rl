@@ -32,4 +32,9 @@ def test_vec_conversion():
     vec = param_to_vec(output,space)
     unvec = vec_to_param(vec,space)
 
-    assert unvec == output
+    assert unvec['a'] == pytest.approx(output['a'])
+    assert unvec['b'] == output['b']
+    assert unvec['c'] == pytest.approx(output['c'])
+    assert unvec['d'] == output['d']
+    assert unvec['e'] == pytest.approx(output['e'])
+    assert unvec['f'] == pytest.approx(output['f'])
