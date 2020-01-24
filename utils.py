@@ -46,6 +46,9 @@ def get_results_root_directory():
     # Local
     if host_name.find('howard-pc') == 0:
         return "/home/howard/tmp/results"
+    # Travis
+    if hist_name.startswith('travis-'):
+        return './tmp'
     raise NotImplementedError("No default path defined for %s" % host_name)
 
 def get_results_directory():
