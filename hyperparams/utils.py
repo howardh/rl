@@ -40,3 +40,13 @@ def vec_to_param(vec, space):
             output[k] = space[k].unnormalize(vec[0])
             vec = vec[1:]
     return output
+
+def perturb_vec(vec, space, scale=0.01):
+    assert type(vec) is list or type(vec) is tuple
+    output = []
+    for k in sorted(space.keys()):
+        if not isinstance(space[k],hyperparams.distributions.Distribution):
+            continue
+        output.append(space[k].perturb(vec[0],scale))
+        vec = vec[1:]
+    return output

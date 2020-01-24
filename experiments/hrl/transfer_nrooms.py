@@ -360,22 +360,63 @@ def run_refinement(proc=1,runs_per_agent=1,
     funcs = [lambda: run_trial(**p) for _ in range(runs_per_agent)]
     utils.cc(funcs,proc=proc)
 
-def sample_convex_hull(results_directory, threshold=0.1):
+def random_lin_comb(vecs):
+    n_points = vecs.shape[0]
+    weights = np.random.rand(n_points)
+    weights /= np.sum(weights)
+    return (weights.reshape(n_points,1)*vecs).sum(0)
+
+def sample_convex_hull(results_directory, threshold=0.1, perturbance=0):
     """ Find the top {threshold}% of parameters, and sample a set of parameters
     within the convex hull formed by those points.
     """
     scores = compute_score(results_directory,sortby='mean')
-    n_points = int(len(scores)*threshold)
-    weights = np.random.rand(n_points)
-    weights /= np.sum(weights)
     params = []
     for p,s in scores[:n_points]:
         params.append(hyperparams.utils.param_to_vec(p,actor_critic_hyperparam_space))
     params = np.array(params)
-    output = (weights.reshape(n_points,1)*params).sum(0)
+    output = random_lin_comb(params)
     output = output.tolist()
+    if perturbance > 0:
+        output = hyperparams.utils.perturb_vec(output,actor_critic_hyperparam_space,perturbance)
     output = hyperparams.utils.vec_to_param(output,actor_critic_hyperparam_space)
     return output
+
+def sample_lsh(results_directory, n_planes=4, perturbance=0):
+    """ Split the data into a number of buckets through locality-sensitive
+    hashing. Find the bucket with the best average score and sample parameters
+    in the convex hull of parameters in that bucket.
+    """
+    scores = compute_score(results_directory)
+
+    random_planes = []
+    for _ in range(n_planes):
+        u = hyperparams.utils.sample_hyperparam(actor_critic_hyperparam_space)
+        v = hyperparams.utils.sample_hyperparam(actor_critic_hyperparam_space)
+        u = hyperparams.utils.param_to_vec(u,actor_critic_hyperparam_space)
+        v = hyperparams.utils.param_to_vec(v,actor_critic_hyperparam_space)
+        u = torch.tensor(u)
+        v = torch.tensor(v)
+        random_planes.append((u,v))
+
+    score_bins = [[] for _ in range(1<<n_planes)]
+    param_bins = [[] for _ in range(1<<n_planes)]
+    for p,s in scores:
+        if np.isnan(s['mean']):
+            continue
+        x = hyperparams.utils.param_to_vec(p,actor_critic_hyperparam_space)
+        x = torch.tensor(x)
+        bits = [torch.dot(v-u,x-u)>0 for u,v in random_planes]
+        index = sum([b*(1<<i) for i,b in enumerate(bits)])
+        score_bins[index].append(s['mean'])
+        param_bins[index].append(x.numpy())
+    min_index = np.nanargmin([np.nanmean(b) for b in score_bins])
+    param = random_lin_comb(np.array(param_bins[min_index])).tolist()
+    if perturbance > 0:
+        param = hyperparams.utils.perturb_vec(param,actor_critic_hyperparam_space,perturbance)
+    param = hyperparams.utils.vec_to_param(param,actor_critic_hyperparam_space)
+    print('Performance:',np.nanmean(score_bins[min_index]))
+    return param
 
 def plot(results_directory,plot_directory):
     import matplotlib
@@ -588,8 +629,9 @@ def run():
 
     #plot_tsne(directory, plot_directory, '')
 
-
     while True:
         #run_hyperparam_search()
-        param = sample_convex_hull(directory)
+        #param = sample_convex_hull(directory)
+        param = sample_lsh(directory, perturbance=0.05)
+        #pprint.pprint(param)
         run_trial(**param)

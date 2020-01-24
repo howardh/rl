@@ -10,6 +10,8 @@ class Distribution:
         raise NotImplementedError()
     def unnormalize(self,val):
         raise NotImplementedError()
+    def perturb(self,val,scale=0.1):
+        raise NotImplementedError()
 
 class Uniform(Distribution):
     def __init__(self,min_val,max_val):
@@ -29,6 +31,14 @@ class Uniform(Distribution):
     def unnormalize(self,val):
         sqrt12 = 3.46410161514
         return (val+sqrt12/2)/sqrt12*self.max_val+self.min_val
+    def perturb(self,val,scale=0.1):
+        sqrt12 = 3.46410161514
+        val += (np.random.rand()-0.5)*scale*sqrt12
+        if val < -sqrt12:
+            return -sqrt12
+        if val > sqrt12:
+            return sqrt12
+        return val
 
 class LogUniform(Uniform):
     def __init__(self,min_val,max_val):
@@ -39,6 +49,8 @@ class LogUniform(Uniform):
         return super().normalize(np.log(val))
     def unnormalize(self,val):
         return np.exp(super().unnormalize(val))
+    def perturb(self,val,scale=0.1):
+        return super().perturb(val,scale)
 
 class CategoricalUniform(Distribution):
     def __init__(self,vals):
@@ -53,16 +65,21 @@ class CategoricalUniform(Distribution):
         return val
     def unnormalize(self,val):
         return val
+    def perturb(self,val,scale=0.1):
+        if np.random.rand() < scale:
+            return self.sample()
 
-class DiscreteUniform(CategoricalUniform):
+class DiscreteUniform(Uniform):
     def __init__(self,min_val,max_val):
         assert min_val < max_val
-        super().__init__(list(range(min_val,max_val+1)))
+        super().__init__(min_val,max_val+1)
         self.min_val = min_val
         self.max_val = max_val
-    def normalize(self,val):
-        sqrt12 = 3.46410161514
-        return (val-self.min_val)/self.max_val*sqrt12-sqrt12/2
+    def sample(self):
+        return int(super().sample())
     def unnormalize(self,val):
-        sqrt12 = 3.46410161514
-        return int(np.rint((val+sqrt12/2)/sqrt12*self.max_val+self.min_val))
+        return int(np.rint(super().unnormalize(val)))
+    def perturb(self,val,scale=0.1):
+        min_scale = 1/(self.max_val-self.min_val)
+        scale = max(scale,min_scale)
+        return int(np.rint(super().perturb(val,scale)))
