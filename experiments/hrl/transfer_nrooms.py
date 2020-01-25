@@ -398,22 +398,6 @@ def run_hyperparam_search(space, proc=1):
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
 
-def run_refinement(proc=1,runs_per_agent=1,
-        agent_name='HDQNAgentWithDelayAC_v3',sortby='ucb1'):
-    directory = os.path.join(utils.get_results_directory(),__name__)
-    scores = compute_score(directory,sortby=sortby)
-    scores_by_agent = defaultdict(lambda: [])
-    for p,s in scores:
-        p = dict(p)
-        scores_by_agent[p['agent_name']].append((p,s))
-    s = scores_by_agent[agent_name][0][1]
-    p = dict(scores_by_agent[agent_name][0][0])
-    p['directory'] = directory
-    print(s)
-    print(p)
-    funcs = [lambda: run_trial(**p) for _ in range(runs_per_agent)]
-    utils.cc(funcs,proc=proc)
-
 def random_lin_comb(vecs):
     n_points = vecs.shape[0]
     weights = np.random.rand(n_points)
@@ -424,7 +408,7 @@ def sample_convex_hull(results_directory, agent_name='ActorCritic', threshold=0.
     """ Find the top {threshold}% of parameters, and sample a set of parameters
     within the convex hull formed by those points.
     """
-    scores = compute_score(results_directory,sortby='mean')
+    scores = compute_score(results_directory,sortby='mean')[agent_name]
     params = []
     for p,s in scores[:n_points]:
         params.append(hyperparams.utils.param_to_vec(p,space[agent_name]))
@@ -436,36 +420,40 @@ def sample_convex_hull(results_directory, agent_name='ActorCritic', threshold=0.
     output = hyperparams.utils.vec_to_param(output,space[agent_name])
     return output
 
+def bin_lsh(data, space, n_planes=4):
+    random_planes = []
+    for _ in range(n_planes):
+        u = hyperparams.utils.sample_hyperparam(space)
+        v = hyperparams.utils.sample_hyperparam(space)
+        u = hyperparams.utils.param_to_vec(u,space)
+        v = hyperparams.utils.param_to_vec(v,space)
+        u = torch.tensor(u)
+        v = torch.tensor(v)
+        random_planes.append((u,v))
+
+    bins = [[] for _ in range(1<<n_planes)]
+    for p,v in data:
+        # Convert params to vector
+        x = hyperparams.utils.param_to_vec(p,space)
+        x = torch.tensor(x)
+        # Compute random projections
+        bits = [torch.dot(v-u,x-u)>0 for u,v in random_planes]
+        index = sum([b*(1<<i) for i,b in enumerate(bits)])
+        # Place data in appropriate bin
+        bins[index].append((x.tolist(),v))
+    return bins
+
 def sample_lsh(results_directory, agent_name='ActorCritic', n_planes=4, perturbance=0):
     """ Split the data into a number of buckets through locality-sensitive
     hashing. Find the bucket with the best average score and sample parameters
     in the convex hull of parameters in that bucket.
     """
-    scores = compute_score(results_directory)
+    scores = compute_score(results_directory)[agent_name]
 
-    random_planes = []
-    for _ in range(n_planes):
-        u = hyperparams.utils.sample_hyperparam(space[agent_name])
-        v = hyperparams.utils.sample_hyperparam(space[agent_name])
-        u = hyperparams.utils.param_to_vec(u,space[agent_name])
-        v = hyperparams.utils.param_to_vec(v,space[agent_name])
-        u = torch.tensor(u)
-        v = torch.tensor(v)
-        random_planes.append((u,v))
-
-    score_bins = [[] for _ in range(1<<n_planes)]
-    param_bins = [[] for _ in range(1<<n_planes)]
-    for p,s in scores:
-        if np.isnan(s['mean']):
-            continue
-        x = hyperparams.utils.param_to_vec(p,space[agent_name])
-        x = torch.tensor(x)
-        bits = [torch.dot(v-u,x-u)>0 for u,v in random_planes]
-        index = sum([b*(1<<i) for i,b in enumerate(bits)])
-        score_bins[index].append(s['mean'])
-        param_bins[index].append(x.numpy())
-    min_index = np.nanargmin([np.nanmean(b) for b in score_bins])
-    param = random_lin_comb(np.array(param_bins[min_index])).tolist()
+    bins = bin_lsh(scores,space[agent_name])
+    score_bins = [np.nanmean([v['mean'] for k,v in b]) for b in bins]
+    min_index = np.nanargmin(score_bins)
+    param = random_lin_comb(np.array([k for k,v in bins[min_index]])).tolist()
     if perturbance > 0:
         param = hyperparams.utils.perturb_vec(param,space[agent_name],perturbance)
     param = hyperparams.utils.vec_to_param(param,space[agent_name])
@@ -517,26 +505,6 @@ def plot(data, plot_directory):
     plt.close()
     print('Saved plot %s' % plot_path)
 
-def plot_score_distribution(results_directory,plot_directory):
-    import matplotlib
-    matplotlib.use('Agg')
-    from matplotlib import pyplot as plt
-
-    if not os.path.isdir(plot_directory):
-        os.makedirs(plot_directory)
-
-    scores = compute_score(results_directory,sortby='count')
-    params,score = scores[-1]
-    params = dict(params)
-    data = score['data']
-
-    plot_path = os.path.join(plot_directory,'hist.png')
-    plt.hist(data,bins=10)
-    plt.title('%s (%d)' % (params['agent_name'],len(data)))
-    plt.savefig(plot_path)
-    plt.close()
-    print('Saved plot %s' % plot_path)
-
 def plot_single_param(results_directory, plot_directory, agent_name, param,
         log=False):
     import matplotlib
@@ -546,7 +514,7 @@ def plot_single_param(results_directory, plot_directory, agent_name, param,
     if not os.path.isdir(plot_directory):
         os.makedirs(plot_directory)
 
-    scores = compute_score(results_directory)
+    scores = compute_score(results_directory)[agent_name]
 
     x = []
     y = []
@@ -577,7 +545,7 @@ def plot_tsne(results_directory, plot_directory, agent_name):
     if not os.path.isdir(plot_directory):
         os.makedirs(plot_directory)
 
-    scores = compute_score(results_directory)
+    scores = compute_score(results_directory)[agent_name]
 
     log_params = ['controller_learning_rate','subpolicy_learning_rate','q_net_learning_rate']
     ignore_params = ['agent_name','gamma','test_iters','verbose','directory']
@@ -595,6 +563,32 @@ def plot_tsne(results_directory, plot_directory, agent_name):
     plt.close()
     print('Saved plot %s' % plot_path)
 
+def plot_tsne_smooth(results_directory, plot_directory, agent_name):
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+    import sklearn
+    from sklearn.manifold import TSNE
+
+    if not os.path.isdir(plot_directory):
+        os.makedirs(plot_directory)
+
+    scores = smoothen_scores_lsh(results_directory,agent_name)
+
+    params = []
+    values = []
+    for p,s in scores.items():
+        params.append(p)
+        values.append(np.log(s)) # Log so we can better distinguish smaller values
+    x_embedded = TSNE(n_components=2).fit_transform(params)
+    plt.scatter([x for x,y in x_embedded], [y for x,y in x_embedded],
+            c=values, s=5)
+    plt.colorbar()
+    plot_path = os.path.join(plot_directory,'tsne_smooth.png')
+    plt.savefig(plot_path,dpi=200)
+    plt.close()
+    print('Saved plot %s' % plot_path)
+
 def flatten_params(params):
     p = params
     ap = p.pop('agent_params',{})
@@ -604,10 +598,10 @@ def flatten_params(params):
         p[k] = v
     return dict(p.items())
 
-def compute_score(directory,params={},sortby='mean',
+def compute_score(directory,sortby='mean',
         keys=['mean','ucb1','count']):
     results = utils.get_all_results(directory)
-    scores = []
+    scores = defaultdict(lambda: [])
     for param,values in results:
         param = flatten_params(param)
         d = values['steps_to_reward']
@@ -618,18 +612,20 @@ def compute_score(directory,params={},sortby='mean',
                 'data': d,
                 'mean': m
         }
-        scores.append((param,s))
-    sorted_scores = sorted(scores,key=lambda x: x[1][sortby])
+        scores[param['agent_name']].append((param,s))
+    sorted_scores = {}
+    for an in scores.keys():
+        sorted_scores[an] = sorted(scores[an],key=lambda x: x[1][sortby])
     return sorted_scores
 
 def compute_series_all(directory):
     results = utils.get_all_results(directory)
-    series = []
+    series = defaultdict(lambda: [])
     for k,v in results:
         s = v['steps_to_reward']
         if len(s) < 100:
             continue
-        series.append(s)
+        series[k['agent_name']].append(s)
     return series
 
 def compute_series_euclidean(directory,agent_name='ActorCritic',params={},radius=0.1):
@@ -639,6 +635,8 @@ def compute_series_euclidean(directory,agent_name='ActorCritic',params={},radius
     results = utils.get_all_results(directory)
     series = []
     for k,v in results:
+        if d['agent_name'] != agent_name:
+            continue
         k = hyperparams.utils.param_to_vec(k, space[agent_name])
         k = torch.tensor(k)
         if ((k-param)**2).sum() > radius:
@@ -646,13 +644,51 @@ def compute_series_euclidean(directory,agent_name='ActorCritic',params={},radius
         series.append(v['steps_to_reward'])
     return series
 
-def compute_series_lsh(directory):
-    results = utils.get_all_results(directory)
-    series = []
-    for k,v in results:
-        # TODO: Filter data with LSH
-        series.append(v['steps_to_reward'])
-    return series
+def compute_series_lsh(directory, iterations=10, n_planes=4):
+    scores = compute_score(directory)
+    output = defaultdict(lambda: [])
+    for agent_name in scores.keys():
+        for _ in tqdm(range(iterations),desc='Computing series (LSH)'):
+            bins = bin_lsh(scores[agent_name], space[agent_name],
+                    n_planes=n_planes)
+            score_bins = [np.nanmean([v['mean'] for k,v in b]) for b in bins]
+            min_index = np.nanargmin(score_bins)
+            min_series = np.array([v['data'] for k,v in bins[min_index]]).mean(0)
+            output[agent_name].append(min_series)
+        output[agent_name] = np.array(output[agent_name]).mean(0)
+    return output
+
+def smoothen_scores_lsh(results_directory, agent_name, iterations=10):
+    scores = compute_score(results_directory)[agent_name]
+
+    output = defaultdict(lambda: 0)
+    for _ in range(iterations):
+        bins = bin_lsh(scores,space[agent_name])
+        for b in bins:
+            if len(b) == 0:
+                continue
+            score = np.nanmean([v['mean'] for k,v in b])
+            for k,_ in b:
+                output[tuple(k)] += score
+    for k,v in output.items():
+        output[k] /= iterations
+    return output
+
+def smoothen_series_lsh(results_directory, agent_name, iterations=10):
+    data = compute_series(results_directory)[agent_name]
+
+    output = defaultdict(lambda: 0)
+    for _ in range(iterations):
+        bins = bin_lsh(scores,space[agent_name])
+        for b in bins:
+            if len(b) == 0:
+                continue
+            series = np.nanmean([v['mean'] for k,v in b])
+            for k,_ in b:
+                output[tuple(k)] += score
+    for k,v in output.items():
+        output[k] /= iterations
+    return output
 
 def run():
     utils.set_results_directory(
@@ -662,22 +698,23 @@ def run():
     for agent_name in space.keys():
         space[agent_name]['directory'] = directory
 
-    series = compute_series_all(directory)
-    series = np.array(series).mean(0)
-    #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
-    data = {'all': {}}
-    data['all']['x'] = range(0,100000,1000)
-    data['all']['y'] = series
+    series = compute_series_lsh(directory,iterations=100)
+    data = defaultdict(lambda: {})
+    for an,s in series.items():
+        #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
+        data[an]['x'] = range(0,100000,1000)
+        data[an]['y'] = s
     plot(data,plot_directory)
 
-    #plot_tsne(directory, plot_directory, '')
+    plot_tsne(directory, plot_directory, 'ActorCritic')
+    plot_tsne_smooth(directory, plot_directory, 'ActorCritic')
 
-    while True:
-        #run_hyperparam_search(space['ActorCritic'])
-        run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-        run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
+    #while True:
+    #    #run_hyperparam_search(space['ActorCritic'])
+    #    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
+    #    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
-        #param = sample_convex_hull(directory)
-        #param = sample_lsh(directory, perturbance=0.05)
-        #pprint.pprint(param)
-        #run_trial(**param)
+    #    #param = sample_convex_hull(directory)
+    #    param = sample_lsh(directory, perturbance=0.05)
+    #    pprint.pprint(param)
+    #    #run_trial(**param)
