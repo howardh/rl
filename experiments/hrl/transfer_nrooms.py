@@ -568,7 +568,31 @@ def compute_score(directory,params={},sortby='mean',
     sorted_scores = sorted(scores,key=lambda x: x[1][sortby])
     return sorted_scores
 
-def compute_series(directory,params={}):
+def compute_series_all(directory):
+    results = utils.get_all_results(directory)
+    series = []
+    for k,v in results:
+        s = v['steps_to_reward']
+        if len(s) < 100:
+            continue
+        series.append(s)
+    return series
+
+def compute_series_euclidean(directory,params={},radius=0.1):
+    params = hyperparams.utils.param_to_vec(
+            params, actor_critic_hyperparam_space)
+    params = torch.tensor(params)
+    results = utils.get_all_results(directory)
+    series = []
+    for k,v in results:
+        k = hyperparams.utils.param_to_vec(k, actor_critic_hyperparam_space)
+        k = torch.tensor(k)
+        if ((k-param)**2).sum() > radius:
+            continue
+        series.append(v['steps_to_reward'])
+    return series
+
+def compute_series_lsh(directory):
     results = utils.get_all_results(directory)
     series = []
     for k,v in results:
@@ -583,30 +607,13 @@ def run():
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     actor_critic_hyperparam_space['directory'] = directory
 
-    ##run_gridsearch()
-    #series = compute_series(directory)
-    #scores = compute_score(directory)
-    #scores_by_agent = defaultdict(lambda: [])
-    #for p,s in scores:
-    #    p = dict(p)
-    #    scores_by_agent[p['agent_name']].append((p,s))
-    #agent_names = scores_by_agent.keys()
-    #data = defaultdict(lambda: {'x': None, 'y': None})
-    #for an in agent_names:
-    #    p = scores_by_agent[an][0][0]
-    #    y = series[map_func(p)]
-    #    s = scores_by_agent[an][0][1]
-    #    print(s, an)
-    #    print(p)
-    #    label = '%s (%d)' % (an,scores_by_agent[an][0][1]['count'])
-    #    data[label]['x'] = range(0,p['total_steps'],p['epoch'])
-    #    data[label]['y'] = y
-    #plot(data,plot_directory)
-
-    #plot_single_param(directory, plot_directory, 'ActorCritic', 'num_options')
-    #plot_single_param(directory, plot_directory, 'ActorCritic', 'eps_b')
-    #plot_single_param(directory, plot_directory, 'ActorCritic', 'qnet_layer_size')
-    #plot_single_param(directory, plot_directory, 'ActorCritic', 'controller_learning_rate', log=True)
+    series = compute_series_all(directory)
+    series = np.array(series).mean(0)
+    #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
+    data = {'all': {}}
+    data['all']['x'] = range(0,100000,1000)
+    data['all']['y'] = series
+    plot(data,plot_directory)
 
     #plot_tsne(directory, plot_directory, '')
 
