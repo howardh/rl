@@ -541,58 +541,39 @@ def plot_tsne(results_directory, plot_directory, agent_name):
     plt.close()
     print('Saved plot %s' % plot_path)
 
-def map_func(params):
+def flatten_params(params):
     p = params
     ap = p.pop('agent_params',{})
     if 'directory' in p:
         del p['directory']
     for k,v in ap.items():
         p[k] = v
-    return frozenset(p.items())
+    return dict(p.items())
 
 def compute_score(directory,params={},sortby='mean',
         keys=['mean','ucb1','count']):
-    def reduce(r,acc):
-        if len(r['steps_to_reward']) == 100:
-            acc.append(np.mean(r['steps_to_reward'][50:]))
-        return acc
-    scores = utils.get_all_results_map_reduce(
-            directory, map_func, reduce, lambda: [])
-    n = defaultdict(lambda: 0)
-    for k,v in scores.items():
-        an = dict(k)['agent_name']
-        n[an] += len([x for x in v if x==x])
-    for k,v in scores.items():
-        if len(v) == 0:
-            scores[k] = {
-                    #'data': [],
-                    'mean': np.nan,
-                    'ucb1': -np.inf,
-                    'count': len(v)
-            }
-        else:
-            m = np.nanmean(v)
-            d = [x for x in v if x==x]
-            c = len(d)
-            t = n[dict(k)['agent_name']]
-            scores[k] = {
-                    #'data': d,
-                    'mean': m,
-                    'ucb1': m-500*np.sqrt(2*np.log(t)/c),
-                    'count': c
-            }
-    sorted_scores = sorted(scores.items(),key=lambda x: x[1][sortby])
+    results = utils.get_all_results(directory)
+    scores = []
+    for param,values in results:
+        param = flatten_params(param)
+        d = values['steps_to_reward']
+        if len(d) < 100:
+            continue
+        m = np.mean(d[50:])
+        s = {
+                'data': d,
+                'mean': m
+        }
+        scores.append((param,s))
+    sorted_scores = sorted(scores,key=lambda x: x[1][sortby])
     return sorted_scores
 
 def compute_series(directory,params={}):
-    def reduce(r,acc):
-        acc.append(r['steps_to_reward'])
-        return acc
-    series = utils.get_all_results_map_reduce(
-            directory, map_func, reduce, lambda: [])
-    for k,v in series.items():
-        max_len = max([len(x) for x in v])
-        series[k] = np.nanmean(np.array(list(itertools.zip_longest(*v,fillvalue=np.nan))),axis=1)
+    results = utils.get_all_results(directory)
+    series = []
+    for k,v in results:
+        # TODO: Filter data with LSH
+        series.append(v['steps_to_reward'])
     return series
 
 def run():
@@ -633,5 +614,5 @@ def run():
         #run_hyperparam_search()
         #param = sample_convex_hull(directory)
         param = sample_lsh(directory, perturbance=0.05)
-        #pprint.pprint(param)
-        run_trial(**param)
+        pprint.pprint(param)
+        #run_trial(**param)
