@@ -266,7 +266,8 @@ def create_agent(agent_name, env, device, **agent_params):
                     input_size=4,output_size=4),
         )
         def before_step(steps):
-            agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            pas
         def after_step(steps):
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
@@ -603,16 +604,19 @@ def compute_score(directory,sortby='mean',
     results = utils.get_all_results(directory)
     scores = defaultdict(lambda: [])
     for param,values in results:
-        param = flatten_params(param)
-        d = values['steps_to_reward']
-        if len(d) < 100:
-            continue
-        m = np.mean(d[50:])
-        s = {
-                'data': d,
-                'mean': m
-        }
-        scores[param['agent_name']].append((param,s))
+        try:
+            param = flatten_params(param)
+            d = values['steps_to_reward']
+            if len(d) < 100:
+                continue
+            m = np.mean(d[50:])
+            s = {
+                    'data': d,
+                    'mean': m
+            }
+            scores[param['agent_name']].append((param,s))
+        except:
+            pass # Invalid file
     sorted_scores = {}
     for an in scores.keys():
         sorted_scores[an] = sorted(scores[an],key=lambda x: x[1][sortby])
@@ -698,23 +702,24 @@ def run():
     for agent_name in space.keys():
         space[agent_name]['directory'] = directory
 
-    series = compute_series_lsh(directory,iterations=100)
-    data = defaultdict(lambda: {})
-    for an,s in series.items():
-        #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
-        data[an]['x'] = range(0,100000,1000)
-        data[an]['y'] = s
-    plot(data,plot_directory)
+    #series = compute_series_lsh(directory,iterations=100)
+    #data = defaultdict(lambda: {})
+    #for an,s in series.items():
+    #    #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
+    #    data[an]['x'] = range(0,100000,1000)
+    #    data[an]['y'] = s
+    #plot(data,plot_directory)
 
-    plot_tsne(directory, plot_directory, 'ActorCritic')
-    plot_tsne_smooth(directory, plot_directory, 'ActorCritic')
+    #plot_tsne(directory, plot_directory, 'ActorCritic')
+    #plot_tsne_smooth(directory, plot_directory, 'ActorCritic')
+    #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2')
 
-    #while True:
-    #    #run_hyperparam_search(space['ActorCritic'])
-    #    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    #    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
+    while True:
+        #run_hyperparam_search(space['ActorCritic'])
+        #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
+        #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
-    #    #param = sample_convex_hull(directory)
-    #    param = sample_lsh(directory, perturbance=0.05)
-    #    pprint.pprint(param)
-    #    #run_trial(**param)
+        #param = sample_convex_hull(directory)
+        param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', perturbance=0.05)
+    #pprint.pprint(param)
+        run_trial(**param)

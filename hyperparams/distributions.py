@@ -68,6 +68,7 @@ class CategoricalUniform(Distribution):
     def perturb(self,val,scale=0.1):
         if np.random.rand() < scale:
             return self.sample()
+        return val
 
 class DiscreteUniform(Uniform):
     def __init__(self,min_val,max_val):
@@ -79,7 +80,3 @@ class DiscreteUniform(Uniform):
         return int(super().sample())
     def unnormalize(self,val):
         return int(np.rint(super().unnormalize(val)))
-    def perturb(self,val,scale=0.1):
-        min_scale = 1/(self.max_val-self.min_val)
-        scale = max(scale,min_scale)
-        return int(np.rint(super().perturb(val,scale)))
