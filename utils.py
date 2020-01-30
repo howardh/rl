@@ -115,6 +115,20 @@ def get_all_results(directory):
             with open(os.path.join(d,fn), 'rb') as f:
                 yield dill.load(f)
 
+def modify_all_results(directory):
+    """ A tool to modify all results. For each result, return the file's entire content, along with a function that takes the updated value as an argument. """
+    for d,_,file_names in tqdm(os.walk(directory)):
+        for fn in file_names:
+            with open(os.path.join(d,fn), 'rb') as f:
+                val = dill.load(f)
+            def save(val):
+                if val is None:
+                    os.remove(os.path.join(d,fn))
+                else:
+                    with open(os.path.join(d,fn), 'wb') as f:
+                        dill.dump(val,f)
+            yield val,save
+
 def get_results(params, directory, match_exactly=False):
     """ Return a generator containing all results whose parameters match the provided parameters
     """

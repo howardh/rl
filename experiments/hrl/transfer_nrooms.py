@@ -26,7 +26,8 @@ def get_search_space():
             'controller_learning_rate': LogUniform(1e-4,1e-1),
             'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
             'q_net_learning_rate': LogUniform(1e-4,1e-1),
-            'eps_b': Uniform(0,0.5),
+            #'eps_b': Uniform(0,0.5),
+            'eps_b': 0,
             'polyak_rate': 0.001,
             'batch_size': 256,
             'min_replay_buffer_size': 1000,
@@ -51,7 +52,8 @@ def get_search_space():
             'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
             'q_net_learning_rate': LogUniform(1e-4,1e-1),
             'subpolicy_q_net_learning_rate': LogUniform(1e-4,1e-1),
-            'eps_b': Uniform(0,0.5),
+            #'eps_b': Uniform(0,0.5),
+            'eps_b': 0,
             'polyak_rate': 0.001,
             'batch_size': 256,
             'min_replay_buffer_size': 1000,
@@ -76,7 +78,8 @@ def get_search_space():
             'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
             'q_net_learning_rate': LogUniform(1e-4,1e-1),
             'subpolicy_q_net_learning_rate': LogUniform(1e-4,1e-1),
-            'eps_b': Uniform(0,0.5),
+            #'eps_b': Uniform(0,0.5),
+            'eps_b': 0,
             'polyak_rate': 0.001,
             'batch_size': 256,
             'min_replay_buffer_size': 1000,
@@ -712,7 +715,7 @@ def run():
 
     #plot_tsne(directory, plot_directory, 'ActorCritic')
     #plot_tsne_smooth(directory, plot_directory, 'ActorCritic')
-    #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2')
+    plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2')
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
@@ -720,6 +723,6 @@ def run():
 
     #param = sample_convex_hull(directory)
     #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', perturbance=0.05)
-    param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
-    param['eps_b'] = 0.5
-    run_trial(**param)
+    #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
+    #param['eps_b'] = 0.5
+    #run_trial(**param)
