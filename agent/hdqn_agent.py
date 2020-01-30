@@ -200,7 +200,6 @@ class HDQNAgentWithDelay(Agent):
             (obs0,obs1),mask = compute_mask(self.prev_obs,self.current_obs)
             vals = self.q_net(obs0,obs1,mask,self.behaviour_temperature).squeeze()
             policy = self.behaviour_policy
-        self.last_vals = vals
         dist = policy(vals)
         action = dist.sample().item()
         self.current_action = action
@@ -369,6 +368,23 @@ class HDQNAgentWithDelayAC(Agent):
 
     def act(self, testing=False):
         """Return a random action according to the current behaviour policy"""
+
+        obs = self.get_current_obs(testing)
+
+        # Sample an action
+        if np.random.rand() < self.behaviour_epsilon:
+            action = self.action_space.sample()
+        else:
+            action_probs = self.policy_net(*obs).squeeze()
+            dist = torch.distributions.Categorical(action_probs)
+            action = dist.sample().item()
+        self.current_action = action
+
+        return action
+
+    def get_current_obs(self,testing=False):
+        """ Return the observation the agent needs to act on. This can be fed
+        directly to the policy network.  """
         if testing:
             (obs0,obs1),mask = compute_mask(self.obs_stack_testing[0],self.current_obs_testing)
         else:
@@ -380,14 +396,7 @@ class HDQNAgentWithDelayAC(Agent):
         obs1 = obs1.to(self.device)
         mask = mask.to(self.device)
 
-        # Sample an action
-        action_probs = self.policy_net(obs0,obs1,mask).squeeze()
-
-        dist = torch.distributions.Categorical(action_probs)
-        action = dist.sample().item()
-        self.current_action = action
-        self.last_vals = self.q_net(obs1)[0,action].item()
-        return action
+        return obs0,obs1,mask
 
     def get_state_action_value(self, obs, action):
         vals = self.q_net(torch.tensor(obs).to(self.device).float())[action]
@@ -493,6 +502,7 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
             sub_prob0 = self.controller_net(s0).view(-1,num_subpolicies,1) # batch * subpolicy * 1
             sub_prob1 = self.controller_net(s1).view(-1,num_subpolicies,1) # batch * subpolicy * 1
             vals = torch.empty([batch_size,num_subpolicies,num_subpolicies]) # batch * subpolicy * subpolicy
+            vals = vals.to(self.device)
             for om0,om1 in itertools.product(range(num_subpolicies),range(num_subpolicies)):
                 # pi(om0|s0)*pi_om0(a|s1)*Q_om1(a|s1)
                 val = self.subpolicy_nets[om0](s1)*self.subpolicy_q_nets[om1](s1) # batch * actions
@@ -652,12 +662,14 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
         obs0,action0,obs1,mask = self.get_current_obs(testing)
 
         # Sample an action
-        action_probs = self.policy_net(obs0,action0,obs1,mask).squeeze()
-
-        dist = torch.distributions.Categorical(action_probs)
-        action = dist.sample().item()
+        if np.random.rand() < self.behaviour_epsilon:
+            action = self.action_space.sample()
+        else:
+            action_probs = self.policy_net(obs0,action0,obs1,mask).squeeze()
+            dist = torch.distributions.Categorical(action_probs)
+            action = dist.sample().item()
         self.current_action = action
-        self.last_vals = self.q_net(obs1)[0,action].item()
+
         if testing:
             self.obs_stack_testing.append((obs1,action))
         else:

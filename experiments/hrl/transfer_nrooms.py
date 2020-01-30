@@ -267,7 +267,7 @@ def create_agent(agent_name, env, device, **agent_params):
         )
         def before_step(steps):
             #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
-            pas
+            pass
         def after_step(steps):
             if steps >= min_replay_buffer_size:
                 agent.train(batch_size=batch_size,iterations=1)
@@ -438,7 +438,7 @@ def bin_lsh(data, space, n_planes=4):
         x = hyperparams.utils.param_to_vec(p,space)
         x = torch.tensor(x)
         # Compute random projections
-        bits = [torch.dot(v-u,x-u)>0 for u,v in random_planes]
+        bits = [torch.dot(v,x-u)>0 for u,v in random_planes]
         index = sum([b*(1<<i) for i,b in enumerate(bits)])
         # Place data in appropriate bin
         bins[index].append((x.tolist(),v))
@@ -714,12 +714,12 @@ def run():
     #plot_tsne_smooth(directory, plot_directory, 'ActorCritic')
     #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2')
 
-    while True:
-        #run_hyperparam_search(space['ActorCritic'])
-        #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-        #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
+    #run_hyperparam_search(space['ActorCritic'])
+    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
+    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
-        #param = sample_convex_hull(directory)
-        param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', perturbance=0.05)
-    #pprint.pprint(param)
-        run_trial(**param)
+    #param = sample_convex_hull(directory)
+    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', perturbance=0.05)
+    param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
+    param['eps_b'] = 0.5
+    run_trial(**param)
