@@ -52,8 +52,7 @@ def get_search_space():
             'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
             'q_net_learning_rate': LogUniform(1e-4,1e-1),
             'subpolicy_q_net_learning_rate': LogUniform(1e-4,1e-1),
-            #'eps_b': Uniform(0,0.5),
-            'eps_b': 0,
+            'eps_b': Uniform(0,0.5),
             'polyak_rate': 0.001,
             'batch_size': 256,
             'min_replay_buffer_size': 1000,
@@ -454,7 +453,7 @@ def sample_lsh(results_directory, agent_name='ActorCritic', n_planes=4, perturba
     """
     scores = compute_score(results_directory)[agent_name]
 
-    bins = bin_lsh(scores,space[agent_name])
+    bins = bin_lsh(scores,space[agent_name], n_planes=n_planes)
     score_bins = [np.nanmean([v['mean'] for k,v in b]) for b in bins]
     min_index = np.nanargmin(score_bins)
     param = random_lin_comb(np.array([k for k,v in bins[min_index]])).tolist()
@@ -567,7 +566,7 @@ def plot_tsne(results_directory, plot_directory, agent_name):
     plt.close()
     print('Saved plot %s' % plot_path)
 
-def plot_tsne_smooth(results_directory, plot_directory, agent_name):
+def plot_tsne_smooth(results_directory, plot_directory, agent_name, n_planes=4):
     import matplotlib
     matplotlib.use('Agg')
     from matplotlib import pyplot as plt
@@ -577,13 +576,14 @@ def plot_tsne_smooth(results_directory, plot_directory, agent_name):
     if not os.path.isdir(plot_directory):
         os.makedirs(plot_directory)
 
-    scores = smoothen_scores_lsh(results_directory,agent_name)
+    scores = smoothen_scores_lsh(results_directory,agent_name,n_planes=n_planes)
 
     params = []
     values = []
     for p,s in scores.items():
         params.append(p)
-        values.append(np.log(s)) # Log so we can better distinguish smaller values
+        #values.append(np.log(s)) # Log so we can better distinguish smaller values
+        values.append(s) # Log so we can better distinguish smaller values
     x_embedded = TSNE(n_components=2).fit_transform(params)
     plt.scatter([x for x,y in x_embedded], [y for x,y in x_embedded],
             c=values, s=5)
@@ -665,28 +665,28 @@ def compute_series_lsh(directory, iterations=10, n_planes=4):
         output[agent_name] = np.array(output[agent_name]).mean(0)
     return output
 
-def smoothen_scores_lsh(results_directory, agent_name, iterations=10):
+def smoothen_scores_lsh(results_directory, agent_name, iterations=10, n_planes=4):
     scores = compute_score(results_directory)[agent_name]
 
-    output = defaultdict(lambda: 0)
+    output = defaultdict(lambda: [])
     for _ in range(iterations):
-        bins = bin_lsh(scores,space[agent_name])
+        bins = bin_lsh(scores,space[agent_name],n_planes=n_planes)
         for b in bins:
             if len(b) == 0:
                 continue
             score = np.nanmean([v['mean'] for k,v in b])
             for k,_ in b:
-                output[tuple(k)] += score
+                output[tuple(k)].append(score)
     for k,v in output.items():
-        output[k] /= iterations
+        output[k] = np.mean(output[k])
     return output
 
-def smoothen_series_lsh(results_directory, agent_name, iterations=10):
+def smoothen_series_lsh(results_directory, agent_name, iterations=10,n_planes=4):
     data = compute_series(results_directory)[agent_name]
 
     output = defaultdict(lambda: 0)
     for _ in range(iterations):
-        bins = bin_lsh(scores,space[agent_name])
+        bins = bin_lsh(scores,space[agent_name],n_planes=n_planes)
         for b in bins:
             if len(b) == 0:
                 continue
@@ -705,7 +705,7 @@ def run():
     for agent_name in space.keys():
         space[agent_name]['directory'] = directory
 
-    #series = compute_series_lsh(directory,iterations=100)
+    #series = compute_series_lsh(directory,iterations=100,n_planes=4)
     #data = defaultdict(lambda: {})
     #for an,s in series.items():
     #    #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
@@ -714,8 +714,9 @@ def run():
     #plot(data,plot_directory)
 
     #plot_tsne(directory, plot_directory, 'ActorCritic')
-    #plot_tsne_smooth(directory, plot_directory, 'ActorCritic')
-    plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2')
+    #plot_tsne_smooth(directory, plot_directory, 'ActorCritic',n_planes=6)
+    #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2',n_planes=6)
+    #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v3',n_planes=6)
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
@@ -726,3 +727,6 @@ def run():
     #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
     #param['eps_b'] = 0.5
     #run_trial(**param)
+
+    #s = smoothen_scores_lsh(directory, 'HDQNAgentWithDelayAC_v2')
+    #pprint.pprint(sorted(s.values()))

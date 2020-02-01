@@ -372,7 +372,7 @@ class HDQNAgentWithDelayAC(Agent):
         obs = self.get_current_obs(testing)
 
         # Sample an action
-        if np.random.rand() < self.behaviour_epsilon:
+        if not testing and np.random.rand() < self.behaviour_epsilon:
             action = self.action_space.sample()
         else:
             action_probs = self.policy_net(*obs).squeeze()
@@ -662,7 +662,7 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
         obs0,action0,obs1,mask = self.get_current_obs(testing)
 
         # Sample an action
-        if np.random.rand() < self.behaviour_epsilon:
+        if not testing and np.random.rand() < self.behaviour_epsilon:
             action = self.action_space.sample()
         else:
             action_probs = self.policy_net(obs0,action0,obs1,mask).squeeze()
