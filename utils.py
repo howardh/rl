@@ -120,7 +120,10 @@ def modify_all_results(directory):
     for d,_,file_names in tqdm(os.walk(directory)):
         for fn in file_names:
             with open(os.path.join(d,fn), 'rb') as f:
-                val = dill.load(f)
+                try:
+                    val = dill.load(f)
+                except EOFError:
+                    val = None
             def save(val):
                 if val is None:
                     os.remove(os.path.join(d,fn))

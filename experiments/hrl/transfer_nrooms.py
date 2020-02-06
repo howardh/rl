@@ -7,6 +7,7 @@ import os
 import itertools
 from collections import defaultdict
 import pprint
+from skopt import gp_minimize
 
 from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3
 from agent.policy import get_greedy_epsilon_policy
@@ -26,8 +27,7 @@ def get_search_space():
             'controller_learning_rate': LogUniform(1e-4,1e-1),
             'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
             'q_net_learning_rate': LogUniform(1e-4,1e-1),
-            #'eps_b': Uniform(0,0.5),
-            'eps_b': 0,
+            'eps_b': Uniform(0,0.5),
             'polyak_rate': 0.001,
             'batch_size': 256,
             'min_replay_buffer_size': 1000,
@@ -77,8 +77,7 @@ def get_search_space():
             'subpolicy_learning_rate': LogUniform(1e-4,1e-1),
             'q_net_learning_rate': LogUniform(1e-4,1e-1),
             'subpolicy_q_net_learning_rate': LogUniform(1e-4,1e-1),
-            #'eps_b': Uniform(0,0.5),
-            'eps_b': 0,
+            'eps_b': Uniform(0,0.5),
             'polyak_rate': 0.001,
             'batch_size': 256,
             'min_replay_buffer_size': 1000,
@@ -392,11 +391,12 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
         # Update weights
         after_step(steps)
 
-    return (args, rewards, state_action_values)
+    return np.mean(steps_to_reward[50:])
+    #return (args, rewards, state_action_values)
 
 def run_hyperparam_search(space, proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
-    params = [hyperparams.utils.sample_hyperparam(space)]
+    params = [hyperparams.utils.sample_hyperparam(space) for _ in range(proc)]
     funcs = [lambda: run_trial(**p) for p in params]
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
@@ -462,6 +462,39 @@ def sample_lsh(results_directory, agent_name='ActorCritic', n_planes=4, perturba
     param = hyperparams.utils.vec_to_param(param,space[agent_name])
     print('Performance:',np.nanmean(score_bins[min_index]))
     return param
+
+def run_bayes_opt(results_directory, agent_name='ActorCritic'):
+    scores = compute_score(results_directory)[agent_name]
+    x0 = []
+    y0 = []
+    count = 0
+    for p,v in scores:
+        if p['agent_name'] != agent_name:
+            continue
+        vec = hyperparams.utils.param_to_vec(p,space[agent_name])
+        for a in vec:
+            if np.abs(a) > 1.7320508075688772*100:
+                count += 1
+                break
+        else:
+            x0.append(vec)
+            y0.append(v['mean'])
+    print('Out of bounds:',count,len(x0))
+    def func(vec):
+        p = hyperparams.utils.vec_to_param(vec,space[agent_name])
+        return run_trial(**p)
+    res = gp_minimize(
+            func,                  # the function to minimize
+            hyperparams.utils.space_to_ranges(space[agent_name]),      # the bounds on each dimension of x
+            acq_func="EI",      # the acquisition function
+            n_calls=0,         # the number of evaluations of f
+            n_random_starts=0,  # the number of random initialization points
+            noise=25, # Variance of the function output
+            x0=x0,y0=y0)
+    vec = res.x
+    val = res.fun
+    print('Optimal parameters (score: %f):' % val)
+    pprint.pprint(hyperparams.utils.vec_to_param(vec,space[agent_name]))
 
 def plot(results_directory,plot_directory):
     import matplotlib
@@ -653,7 +686,7 @@ def compute_series_euclidean(directory,agent_name='ActorCritic',params={},radius
 
 def compute_series_lsh(directory, iterations=10, n_planes=4):
     scores = compute_score(directory)
-    output = defaultdict(lambda: [])
+    output = defaultdict(lambda: {'series': [], 'bin_size': []})
     for agent_name in scores.keys():
         for _ in tqdm(range(iterations),desc='Computing series (LSH)'):
             bins = bin_lsh(scores[agent_name], space[agent_name],
@@ -661,8 +694,9 @@ def compute_series_lsh(directory, iterations=10, n_planes=4):
             score_bins = [np.nanmean([v['mean'] for k,v in b]) for b in bins]
             min_index = np.nanargmin(score_bins)
             min_series = np.array([v['data'] for k,v in bins[min_index]]).mean(0)
-            output[agent_name].append(min_series)
-        output[agent_name] = np.array(output[agent_name]).mean(0)
+            output[agent_name]['series'].append(min_series)
+            output[agent_name]['bin_size'].append(len(bins[min_index]))
+        output[agent_name]['series'] = np.array(output[agent_name]['series']).mean(0)
     return output
 
 def smoothen_scores_lsh(results_directory, agent_name, iterations=10, n_planes=4):
@@ -705,12 +739,13 @@ def run():
     for agent_name in space.keys():
         space[agent_name]['directory'] = directory
 
-    #series = compute_series_lsh(directory,iterations=100,n_planes=4)
+    #series = compute_series_lsh(directory,iterations=100,n_planes=8)
     #data = defaultdict(lambda: {})
     #for an,s in series.items():
     #    #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
     #    data[an]['x'] = range(0,100000,1000)
-    #    data[an]['y'] = s
+    #    data[an]['y'] = s['series']
+    #    print(an,np.mean(s['series'][50:]),np.mean(s['bin_size']))
     #plot(data,plot_directory)
 
     #plot_tsne(directory, plot_directory, 'ActorCritic')
@@ -719,14 +754,22 @@ def run():
     #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v3',n_planes=6)
 
     #run_hyperparam_search(space['ActorCritic'])
-    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
+    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'],1)
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
     #param = sample_convex_hull(directory)
-    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', perturbance=0.05)
+    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=6, perturbance=0.05)
     #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
-    #param['eps_b'] = 0.5
     #run_trial(**param)
+
+    run_bayes_opt(directory,'ActorCritic')
+    #run_bayes_opt(directory,'HDQNAgentWithDelayAC_v2')
 
     #s = smoothen_scores_lsh(directory, 'HDQNAgentWithDelayAC_v2')
     #pprint.pprint(sorted(s.values()))
+
+    #count = 0
+    #for v,save in utils.modify_all_results(directory):
+    #    if 'steps_to_reward' not in v[1] or len(v[1]['steps_to_reward']) < 100:
+    #        count += 1
+    #print(count)

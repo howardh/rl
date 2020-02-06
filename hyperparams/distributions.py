@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+SQRT12 = np.sqrt(12)
+
 class Distribution:
     def __init__(self):
         pass
@@ -26,31 +28,31 @@ class Uniform(Distribution):
         # Variance of normal distribution is (b-a)^2/12
         # (b-a)^2/12 = 1
         # b-a = sqrt(12)
-        sqrt12 = 3.46410161514
-        return (val-self.min_val)/self.max_val*sqrt12-sqrt12/2
+        return (val-self.min_val)/(self.max_val-self.min_val)*SQRT12-SQRT12/2
     def unnormalize(self,val):
-        sqrt12 = 3.46410161514
-        return (val+sqrt12/2)/sqrt12*self.max_val+self.min_val
+        return (val+SQRT12/2)/SQRT12*(self.max_val-self.min_val)+self.min_val
     def perturb(self,val,scale=0.1):
-        sqrt12 = 3.46410161514
-        val += (np.random.rand()-0.5)*scale*sqrt12
-        if val < -sqrt12:
-            return -sqrt12
-        if val > sqrt12:
-            return sqrt12
+        val += (np.random.rand()-0.5)*scale*SQRT12
+        if val < -SQRT12/2:
+            return -SQRT12/2
+        if val > SQRT12/2:
+            return SQRT12/2
         return val
+    def range(self):
+        return (self.min_val,self.max_val)
+    def normalized_range(self):
+        #return (-SQRT12/2,SQRT12/2)
+        return (-SQRT12*1000,SQRT12*1000)
 
 class LogUniform(Uniform):
     def __init__(self,min_val,max_val):
         super().__init__(np.log(min_val),np.log(max_val))
     def sample(self):
-        return np.exp(self.dist.sample().item())
+        return np.exp(super().sample())
     def normalize(self,val):
         return super().normalize(np.log(val))
     def unnormalize(self,val):
         return np.exp(super().unnormalize(val))
-    def perturb(self,val,scale=0.1):
-        return super().perturb(val,scale)
 
 class CategoricalUniform(Distribution):
     def __init__(self,vals):

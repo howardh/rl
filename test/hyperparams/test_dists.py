@@ -8,24 +8,38 @@ def test_uniform():
     x = dist.sample()
     assert x >= 5
     assert x <= 10
+    a,b = dist.normalized_range()
     x_norm = dist.normalize(x)
     x_unnorm = dist.unnormalize(x_norm)
+    assert a <= x_norm and x_norm <= b
     assert x == x_unnorm
     x2 = dist.unnormalize(dist.perturb(x_norm,0.1))
     assert x2 >= 5
     assert x2 <= 10
 
+    x_norm = dist.normalize(5)
+    assert a <= x_norm and x_norm <= b
+    x_norm = dist.normalize(10)
+    assert a <= x_norm and x_norm <= b
+
 def test_loguniform():
-    dist = hyperparams.distributions.LogUniform(5,10)
+    dist = hyperparams.distributions.LogUniform(1e-10,1e-5)
     x = dist.sample()
-    assert x >= 5
-    assert x <= 10
+    assert x >= 1e-10
+    assert x <= 1e-5
+    a,b = dist.normalized_range()
     x_norm = dist.normalize(x)
     x_unnorm = dist.unnormalize(x_norm)
-    assert x == x_unnorm
+    assert a <= x_norm and x_norm <= b
+    assert x == pytest.approx(x_unnorm)
     x2 = dist.unnormalize(dist.perturb(x_norm,0.1))
-    assert x2 >= 5
-    assert x2 <= 10
+    assert x2 >= 1e-10
+    assert x2 <= 1e-5
+
+    x_norm = dist.normalize(1e-5)
+    assert a <= x_norm and x_norm <= b
+    x_norm = dist.normalize(1e-10)
+    assert a <= x_norm and x_norm <= b
 
 def test_categoricaluniform():
     vals = ['a','b','c']
@@ -43,9 +57,16 @@ def test_discreteuniform():
     x = dist.sample()
     assert x >= 5
     assert x <= 10
+    a,b = dist.normalized_range()
     x_norm = dist.normalize(x)
     x_unnorm = dist.unnormalize(x_norm)
+    assert a <= x_norm and x_norm <= b
     assert x == x_unnorm
     x2 = dist.unnormalize(dist.perturb(x_norm,0.1))
     assert x2 >= 5
     assert x2 <= 10
+
+    x_norm = dist.normalize(5)
+    assert a <= x_norm and x_norm <= b
+    x_norm = dist.normalize(10)
+    assert a <= x_norm and x_norm <= b
