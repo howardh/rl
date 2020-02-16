@@ -411,12 +411,14 @@ def sample_convex_hull(results_directory, agent_name='ActorCritic', threshold=0.
     """ Find the top {threshold}% of parameters, and sample a set of parameters
     within the convex hull formed by those points.
     """
+    from scipy.spatial import ConvexHull
     scores = compute_score(results_directory,sortby='mean')[agent_name]
     params = []
     for p,s in scores[:n_points]:
         params.append(hyperparams.utils.param_to_vec(p,space[agent_name]))
     params = np.array(params)
-    output = random_lin_comb(params)
+    hull = ConvexHull(params)
+    output = random_lin_comb(hull)
     output = output.tolist()
     if perturbance > 0:
         output = hyperparams.utils.perturb_vec(output,space[agent_name],perturbance)
@@ -446,7 +448,14 @@ def bin_lsh(data, space, n_planes=4):
         bins[index].append((x.tolist(),v))
     return bins
 
-def sample_lsh(results_directory, agent_name='ActorCritic', n_planes=4, perturbance=0):
+def hoeffding(vals,target,score_range):
+    t = np.nanmean(vals) - target
+    n = len(vals)
+    d = score_range[1]-score_range[0]
+    return np.exp(-2*n**2*t**2/d**2)
+
+def sample_lsh(results_directory, agent_name='ActorCritic', n_planes=4, perturbance=0,
+        scoring='mean', target_score=None, score_range=[0,500]):
     """ Split the data into a number of buckets through locality-sensitive
     hashing. Find the bucket with the best average score and sample parameters
     in the convex hull of parameters in that bucket.
@@ -454,13 +463,20 @@ def sample_lsh(results_directory, agent_name='ActorCritic', n_planes=4, perturba
     scores = compute_score(results_directory)[agent_name]
 
     bins = bin_lsh(scores,space[agent_name], n_planes=n_planes)
-    score_bins = [np.nanmean([v['mean'] for k,v in b]) for b in bins]
-    min_index = np.nanargmin(score_bins)
-    param = random_lin_comb(np.array([k for k,v in bins[min_index]])).tolist()
+    if scoring=='mean':
+        score_bins = [np.nanmean([v['mean'] for k,v in b]) for b in bins]
+        best_index = np.nanargmin(score_bins) # Lower score is better
+    elif scoring=='improvement_prob':
+        score_bins = [hoeffding([v['mean'] for k,v in b],target_score,score_range) for b in bins]
+        best_index = np.nanargmax(score_bins) # Want highest probability of improvement
+    param = random_lin_comb(np.array([k for k,v in bins[best_index]])).tolist()
     if perturbance > 0:
         param = hyperparams.utils.perturb_vec(param,space[agent_name],perturbance)
     param = hyperparams.utils.vec_to_param(param,space[agent_name])
-    print('Performance:',np.nanmean(score_bins[min_index]))
+    print('Performance:',np.nanmean([v['mean'] for k,v in bins[best_index]]))
+    print('Number of points',len(bins[best_index]))
+    if target_score is not None:
+        print('Improvement Probability:',hoeffding([v['mean'] for k,v in bins[best_index]],target_score,score_range))
     return param
 
 def run_bayes_opt(results_directory, agent_name='ActorCritic'):
@@ -636,7 +652,7 @@ def flatten_params(params):
     return dict(p.items())
 
 def compute_score(directory,sortby='mean',
-        keys=['mean','ucb1','count']):
+        keys=['mean']):
     results = utils.get_all_results(directory)
     scores = defaultdict(lambda: [])
     for param,values in results:
@@ -731,6 +747,35 @@ def smoothen_series_lsh(results_directory, agent_name, iterations=10,n_planes=4)
         output[k] /= iterations
     return output
 
+def fit_gaussian_process(directory, agent_name):
+    results = utils.get_all_results(directory)
+    scores = defaultdict(lambda: [])
+    x = []
+    y = []
+    for param,values in results:
+        try:
+            if param['agent_name'] != agent_name:
+                continue
+
+            param = flatten_params(param)
+            vec = hyperparams.utils.param_to_vec(param,space[agent_name])
+
+            d = values['steps_to_reward']
+            if len(d) < 100:
+                continue
+            m = np.mean(d[50:])
+
+            x.append(vec)
+            y.append(m)
+        except:
+            pass # Invalid file
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import RBF
+    kernel = RBF()
+    gpr = GaussianProcessRegressor(kernel=kernel,random_state=0).fit(x,y)
+    breakpoint()
+    return x,y
+
 def run():
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl-2'))
@@ -754,15 +799,17 @@ def run():
     #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v3',n_planes=6)
 
     #run_hyperparam_search(space['ActorCritic'])
-    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'],1)
+    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
     #param = sample_convex_hull(directory)
-    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=6, perturbance=0.05)
+    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.0)
+    param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.01, scoring='improvement_prob', target_score=182.58163722924036)
+    #param = sample_lsh(directory, 'ActorCritic', n_planes=8, perturbance=0.01)
     #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
-    #run_trial(**param)
+    run_trial(**param)
 
-    run_bayes_opt(directory,'ActorCritic')
+    #run_bayes_opt(directory,'ActorCritic')
     #run_bayes_opt(directory,'HDQNAgentWithDelayAC_v2')
 
     #s = smoothen_scores_lsh(directory, 'HDQNAgentWithDelayAC_v2')
@@ -771,5 +818,8 @@ def run():
     #count = 0
     #for v,save in utils.modify_all_results(directory):
     #    if 'steps_to_reward' not in v[1] or len(v[1]['steps_to_reward']) < 100:
+    #        #save(None)
     #        count += 1
     #print(count)
+
+    #x,y = fit_gaussian_process(directory, 'ActorCritic')

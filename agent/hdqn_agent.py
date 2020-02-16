@@ -485,9 +485,10 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
             # Update subpolicy Q functions
             subpolicy_critic_optimizer.zero_grad()
             subpolicy_loss_total = 0
+            q_s2 = self.q_net_target(s2)
             for q_net,p_net in zip(self.subpolicy_q_nets,self.subpolicy_nets):
                 action_probs = p_net(s1)
-                next_state_vals = (action_probs * self.q_net_target(s2)).sum(1)
+                next_state_vals = (action_probs * q_s2).sum(1)
                 val_target = r2+gamma*next_state_vals*(1-t)
                 val_pred = q_net(s1)[range(batch_size),a1.squeeze()]
                 loss = ((val_target-val_pred)**2).mean()
