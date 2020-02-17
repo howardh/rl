@@ -1,7 +1,7 @@
 import pytest
 
 import hyperparams
-from hyperparams.utils import sample_hyperparam, param_to_vec, vec_to_param
+from hyperparams.utils import sample_hyperparam, list_extremes, param_to_vec, vec_to_param
 from hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
 
 def test_sample_empty():
@@ -16,6 +16,38 @@ def test_sample():
     output = sample_hyperparam(space)
     assert output['a'] > -10
     assert output['a'] < 10
+
+def test_extremes():
+    space = {
+        'a': Uniform(-10,10)
+    }
+    output = list_extremes(space)
+    assert len(output) == 2
+    assert {'a':-10} in output
+    assert {'a':10} in output
+
+    space = {
+        'a': Uniform(-10,10),
+        'b': Uniform(-5,5)
+    }
+    output = list_extremes(space)
+    assert len(output) == 4
+    assert {'a':-10,'b':5} in output
+    assert {'a':10,'b':5} in output
+    assert {'a':-10,'b':-5} in output
+    assert {'a':10,'b':-5} in output
+
+    space = {
+        'a': Uniform(-10,10),
+        'b': Uniform(-5,5),
+        'c': 'foo'
+    }
+    output = list_extremes(space)
+    assert len(output) == 4
+    assert {'c': 'foo', 'a':-10,'b':5} in output
+    assert {'c': 'foo', 'a':10,'b':5} in output
+    assert {'c': 'foo', 'a':-10,'b':-5} in output
+    assert {'c': 'foo', 'a':10,'b':-5} in output
 
 def test_vec_conversion():
     space = {

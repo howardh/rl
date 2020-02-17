@@ -16,6 +16,28 @@ def sample_hyperparam(space):
             output[k] = v
     return output
 
+def list_extremes(space):
+    """Return a list of hyperparameters at the vertices of the search space."""
+    # Type checking
+    if type(space) is not dict:
+        raise ValueError('Argument "space" must be a dictionary.')
+    # Sample
+    def foo(output={}, keys=list(space.keys())):
+        if len(keys) == 0:
+            return [output]
+        k = keys[0]
+        try:
+            r = space[k].range()
+        except:
+            output[k] = space[k]
+            return foo(output,keys[1:])
+        o1 = output.copy()
+        o2 = output.copy()
+        o1[k] = r[0]
+        o2[k] = r[1]
+        return foo(o1,keys[1:])+foo(o2,keys[1:])
+    return foo()
+
 def space_to_ranges(space):
     return [space[k].normalized_range() for k in sorted(space.keys()) if isinstance(space[k],Distribution)]
 

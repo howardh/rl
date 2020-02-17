@@ -394,6 +394,14 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
     return np.mean(steps_to_reward[50:])
     #return (args, rewards, state_action_values)
 
+def run_hyperparam_search_extremes(space, proc=1):
+    directory = os.path.join(utils.get_results_directory(),__name__)
+    params = hyperparams.utils.list_extremes(space)
+    params = utils.split_params(params)
+    funcs = [lambda: run_trial(**p) for p in params]
+    utils.cc(funcs,proc=proc)
+    return utils.get_all_results(directory)
+
 def run_hyperparam_search(space, proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = [hyperparams.utils.sample_hyperparam(space) for _ in range(proc)]
@@ -800,14 +808,15 @@ def run():
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
+    run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
     #param = sample_convex_hull(directory)
     #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.0)
-    param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.01, scoring='improvement_prob', target_score=182.58163722924036)
+    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=6, perturbance=0.05, scoring='improvement_prob', target_score=182.58163722924036)
     #param = sample_lsh(directory, 'ActorCritic', n_planes=8, perturbance=0.01)
     #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
-    run_trial(**param)
+    #run_trial(**param)
 
     #run_bayes_opt(directory,'ActorCritic')
     #run_bayes_opt(directory,'HDQNAgentWithDelayAC_v2')

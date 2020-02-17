@@ -53,6 +53,8 @@ class LogUniform(Uniform):
         return super().normalize(np.log(val))
     def unnormalize(self,val):
         return np.exp(super().unnormalize(val))
+    def range(self):
+        return (np.exp(self.min_val),np.exp(self.max_val))
 
 class CategoricalUniform(Distribution):
     def __init__(self,vals):
