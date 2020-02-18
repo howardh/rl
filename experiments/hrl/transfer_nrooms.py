@@ -436,7 +436,7 @@ def save_checkpoint(steps, agent_name, agent_params, agent, results_file_path,
 def delete_checkpoint():
     os.remove(checkpoint_path())
 
-def run_trial2(directory=None, steps_per_task=100, total_steps=1000,
+def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=1000,
         epoch=50, test_iters=1, verbose=False,
         agent_name='HDQNAgentWithDelayAC', **agent_params):
     args = locals()
@@ -539,8 +539,8 @@ def run_trial2(directory=None, steps_per_task=100, total_steps=1000,
 def run_hyperparam_search_extremes(space, proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = hyperparams.utils.list_extremes(space)
-    params = utils.split_params(params)
-    funcs = [lambda: run_trial(**p) for p in params]
+    params = utils.split_params(params[:1000])
+    funcs = [lambda: run_trial_with_checkpoint(**p) for p in params]
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
 
@@ -973,31 +973,4 @@ def run():
     #        count += 1
     #print(count)
 
-<<<<<<< HEAD
     #x,y = fit_gaussian_process(directory, 'ActorCritic')
-=======
-    param = {'batch_size': 3,
-            'cnet_layer_size': 1,
-            'cnet_n_layers': 1,
-            'controller_learning_rate': 0.00010000000000000009,
-            'eps_b': 0,
-            'gamma': 0.9,
-            'min_replay_buffer_size': 10,
-            'num_options': 2,
-            'polyak_rate': 0.001,
-            'q_net_learning_rate': 0.10000000000000002,
-            'qnet_layer_size': 1,
-            'qnet_n_layers': 1,
-            'snet_layer_size': 1,
-            'snet_n_layers': 1,
-            'subpolicy_learning_rate': 0.00010000000000000009,
-            #'subpolicy_q_net_learning_rate': 0.00010000000000000009,
-            'steps_per_task': 10,
-            'total_steps': 1000,
-            'agent_name': 'ActorCritic',
-            #'agent_name': 'HDQNAgentWithDelayAC_v2',
-            'verbose': True,
-            'directory': directory
-    }
-    run_trial2(**param)
->>>>>>> Checkpoints
