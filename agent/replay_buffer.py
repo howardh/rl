@@ -35,6 +35,18 @@ class ReplayBuffer(torch.utils.data.Dataset):
     def __getitem__(self, index):
         return self.buffer[index]
 
+    def state_dict(self):
+        return {
+                'buffer': self.buffer,
+                'index': self.index,
+                'prev_transition': self.prev_transition
+        }
+
+    def load_state_dict(self, state):
+        self.buffer = state['buffer']
+        self.index = state['index']
+        self.prev_transition = state['prev_transition']
+
 class ReplayBufferStackedObs(ReplayBuffer):
     def __init__(self, max_size, num_obs):
         super().__init__(max_size)
@@ -56,6 +68,16 @@ class ReplayBufferStackedObs(ReplayBuffer):
         if terminal:
             self.obs_stack.clear()
 
+    def state_dict(self):
+        d = super().state_dict()
+        d['obs_stack'] = tuple(self.obs_stack)
+        return d
+
+    def load_state_dict(self, state):
+        super().load_state_dict(state)
+        for o in state['obs_stack']:
+            self.obs_stack.append(o)
+
 class ReplayBufferStackedObsAction(ReplayBuffer):
     def __init__(self, max_size):
         super().__init__(max_size)
@@ -76,3 +98,11 @@ class ReplayBufferStackedObsAction(ReplayBuffer):
             self.transition_stack.clear()
         else:
             self.transition_stack.append((obs, reward, action))
+    def state_dict(self):
+        d = super().state_dict()
+        d['transition_stack'] = tuple(self.transition_stack)
+        return d
+    def load_state_dict(self, state):
+        super().load_state_dict(state)
+        for o in state['transition_stack']:
+            self.transition_stack.append(o)

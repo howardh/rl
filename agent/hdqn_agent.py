@@ -437,6 +437,36 @@ class HDQNAgentWithDelayAC(Agent):
     def test(self, env, iterations, render=False, record=True, processors=1):
         return [self.test_once(env, render=render) for _ in range(iterations)]
 
+    def state_dict(self):
+        return {
+                'q_net': self.q_net.state_dict(),
+                'q_net_target': self.q_net_target.state_dict(),
+                'controller_net': self.controller_net.state_dict(),
+                'controller_net_target': self.controller_net_target.state_dict(),
+                'subpolicy_nets': [net.state_dict() for net in self.subpolicy_nets],
+                'subpolicy_net_targets': [net.state_dict() for net in self.subpolicy_net_targets],
+                'policy_net': self.policy_net.state_dict(),
+                'policy_net_target': self.policy_net_target.state_dict(),
+                'actor_optimizer': self.actor_optimizer.state_dict(),
+                'critic_optimizer': self.critic_optimizer.state_dict(),
+                'replay_buffer': self.replay_buffer.state_dict()
+        }
+
+    def load_state_dict(self, state):
+        self.q_net.load_state_dict(state['q_net'])
+        self.q_net_target.load_state_dict(state['q_net_target'])
+        self.controller_net.load_state_dict(state['controller_net'])
+        self.controller_net_target.load_state_dict(state['controller_net_target'])
+        for net,s in zip(self.subpolicy_nets,state['subpolicy_nets']):
+            net.load_state_dict(s)
+        for net,s in zip(self.subpolicy_net_targets,state['subpolicy_net_targets']):
+            net.load_state_dict(s)
+        self.policy_net.load_state_dict(state['policy_net'])
+        self.policy_net_target.load_state_dict(state['policy_net_target'])
+        self.actor_optimizer.load_state_dict(state['actor_optimizer'])
+        self.critic_optimizer.load_state_dict(state['critic_optimizer'])
+        self.replay_buffer.load_state_dict(state['replay_buffer'])
+
 class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
     def __init__(self, subpolicy_q_net_learning_rate=1e-3, **kwargs):
         super().__init__(**kwargs)
@@ -522,6 +552,19 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
                 params.append(zip(net1.parameters(),net2.parameters()))
             for p1,p2 in itertools.chain.from_iterable(params):
                 p1.data = (1-tau)*p1+tau*p2
+
+    def state_dict(self):
+        d = super().state_dict()
+        d['subpolicy_q_nets'] = [net.state_dict() for net in self.subpolicy_q_nets],
+        d['subpolicy_critic_optimizer'] = self.subpolicy_critic_optimizer.state_dict()
+        return d
+
+    def load_state_dict(self, state):
+        super().load_state_dict(state)
+        for net,s in zip(self.subpolicy_q_nets,state['subpolicy_q_nets']):
+            net.load_state_dict(s)
+        self.subpolicy_critic_optimizer.load_state_dict(state['subpolicy_critic_optimizer'])
+        print('Loading state dict for HDQNAgentWithDelayAC_v2', state['subpolicy_critic_optimizer'])
 
 def compute_mask_augmented_state(obs0,action0,obs1):
     mask = torch.tensor([[obs0 is not None, obs1 is not None]]).float()

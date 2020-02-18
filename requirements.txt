@@ -38,6 +38,7 @@ pytz==2018.7
 requests==2.20.0
 roboschool==1.0.48
 scikit-learn==0.22.1
+scikit-optimize
 scipy==1.1.0
 six==1.11.0
 torch==1.0.1.post2

@@ -353,8 +353,9 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
             directory=directory,
             file_name_prefix=agent_name)
 
+    step_range = range(total_steps)
     if verbose:
-        step_range = tqdm(range(total_steps))
+        step_range = tqdm(step_range)
 
     rewards = []
     state_action_values = []
@@ -390,6 +391,147 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
         agent.observe_change(obs, reward, terminal=done)
         # Update weights
         after_step(steps)
+
+    return np.mean(steps_to_reward[50:])
+    #return (args, rewards, state_action_values)
+
+def checkpoint_path():
+    directory = os.path.join(utils.get_results_directory(),__name__)
+    checkpoint_directory = os.path.join(utils.get_results_directory(),'checkpoints')
+    if not os.path.isdir(checkpoint_directory):
+        os.makedirs(checkpoint_directory)
+
+    job_id = os.environ['SLURM_JOB_ID']
+    task_id = os.environ['SLURM_ARRAY_TASK_ID']
+    file_name = '%s_%s.checkpoint.pkl' % (job_id,task_id)
+    file_path = os.path.join(checkpoint_directory,file_name)
+    return file_path
+
+def load_checkpoint():
+    file_name = checkpoint_path()
+    if os.path.isfile(file_name):
+        try:
+            with open(file_name,'rb') as f:
+                data = dill.load(f)
+            return data
+        except:
+            pass
+    return None
+
+def save_checkpoint(steps, agent_name, agent_params, agent, results_file_path,
+        rewards, state_action_values, steps_to_reward, **kwargs):
+    data = {
+        'agent_name': agent_name,
+        'agent_params': agent_params,
+        'agent_state': agent.state_dict(),
+        'results_file_path': results_file_path,
+        'rewards': rewards,
+        'state_action_values': state_action_values,
+        'steps_to_reward': steps_to_reward,
+        'steps': steps
+    }
+    with open(checkpoint_path(),'wb') as f:
+        dill.dump(data,f)
+
+def delete_checkpoint():
+    os.remove(checkpoint_path())
+
+def run_trial2(directory=None, steps_per_task=100, total_steps=1000,
+        epoch=50, test_iters=1, verbose=False,
+        agent_name='HDQNAgentWithDelayAC', **agent_params):
+    args = locals()
+    env_name='gym_fourrooms:fourrooms-v0'
+    pprint.pprint(args)
+
+    env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
+    env = TimeLimit(env,36)
+    test_env = gym.make(env_name,goal_duration_steps=float('inf')).unwrapped
+    test_env = TimeLimit(test_env,500)
+
+    print(env, test_env)
+
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
+
+    checkpoint = load_checkpoint()
+    if checkpoint is not None:
+        print('Found Checkpoint. Restoring state...')
+        file_name = checkpoint_path()
+        with open(file_name,'rb') as f:
+            data = dill.load(f)
+        agent_name = data['agent_name']
+        agent_params = data['agent_params']
+
+        agent, before_step, after_step = create_agent(
+                agent_name, env, device, **agent_params)
+
+        agent.load_state_dict(data['agent_state'])
+        results_file_path = data['results_file_path']
+        rewards = data['rewards']
+        state_action_values = data['state_action_values']
+        steps_to_reward = data['steps_to_reward']
+        step_range = range(data['steps'],total_steps)
+    else:
+        print('No Checkpoint. Initializing...')
+        agent, before_step, after_step = create_agent(
+                agent_name, env, device, **agent_params)
+        # Create file to save results
+        results_file_path = utils.save_results(args,
+                {'rewards': [], 'state_action_values': []},
+                directory=directory,
+                file_name_prefix=agent_name)
+        rewards = []
+        state_action_values = []
+        steps_to_reward = []
+        step_range = range(total_steps)
+
+    if verbose:
+        step_range = tqdm(step_range, total=total_steps, initial=step_range.start)
+
+    done = True
+    def run_step(steps):
+        nonlocal done
+        nonlocal agent_name
+        nonlocal agent_params
+
+        # Checkpoint
+        if steps % steps_per_task == 0:
+            l = locals()
+            save_checkpoint(**l)
+        # Run tests
+        if steps % epoch == 0:
+            test_env.reset_goal(env.goal)
+            test_results = agent.test(
+                    test_env, test_iters, render=False, processors=1)
+            rewards.append(np.mean(
+                [r['total_rewards'] for r in test_results]))
+            state_action_values.append(np.mean(
+                [r['state_action_values'] for r in test_results]))
+            steps_to_reward.append(np.mean(
+                [r['steps'] for r in test_results]))
+            if verbose:
+                tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (
+                    steps, rewards[-1], steps_to_reward[-1]))
+            utils.save_results(args,
+                    {'rewards': rewards,
+                    'state_action_values': state_action_values,
+                    'steps_to_reward': steps_to_reward},
+                    file_path=results_file_path)
+
+        before_step(steps)
+        # Run step
+        if done:
+            obs = env.reset()
+            agent.observe_change(obs, None)
+        obs, reward, done, _ = env.step(agent.act())
+        agent.observe_change(obs, reward, terminal=done)
+        # Update weights
+        after_step(steps)
+    for steps in step_range:
+        run_step(steps)
+    delete_checkpoint()
 
     return np.mean(steps_to_reward[50:])
     #return (args, rewards, state_action_values)
@@ -831,4 +973,31 @@ def run():
     #        count += 1
     #print(count)
 
+<<<<<<< HEAD
     #x,y = fit_gaussian_process(directory, 'ActorCritic')
+=======
+    param = {'batch_size': 3,
+            'cnet_layer_size': 1,
+            'cnet_n_layers': 1,
+            'controller_learning_rate': 0.00010000000000000009,
+            'eps_b': 0,
+            'gamma': 0.9,
+            'min_replay_buffer_size': 10,
+            'num_options': 2,
+            'polyak_rate': 0.001,
+            'q_net_learning_rate': 0.10000000000000002,
+            'qnet_layer_size': 1,
+            'qnet_n_layers': 1,
+            'snet_layer_size': 1,
+            'snet_n_layers': 1,
+            'subpolicy_learning_rate': 0.00010000000000000009,
+            #'subpolicy_q_net_learning_rate': 0.00010000000000000009,
+            'steps_per_task': 10,
+            'total_steps': 1000,
+            'agent_name': 'ActorCritic',
+            #'agent_name': 'HDQNAgentWithDelayAC_v2',
+            'verbose': True,
+            'directory': directory
+    }
+    run_trial2(**param)
+>>>>>>> Checkpoints
