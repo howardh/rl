@@ -555,16 +555,17 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
 
     def state_dict(self):
         d = super().state_dict()
-        d['subpolicy_q_nets'] = [net.state_dict() for net in self.subpolicy_q_nets],
+        d['subpolicy_q_nets'] = [net.state_dict() for net in self.subpolicy_q_nets]
         d['subpolicy_critic_optimizer'] = self.subpolicy_critic_optimizer.state_dict()
         return d
 
     def load_state_dict(self, state):
         super().load_state_dict(state)
+        print('subpolicy_q_nets', state['subpolicy_q_nets'])
         for net,s in zip(self.subpolicy_q_nets,state['subpolicy_q_nets']):
+            print('Loading state dict for HDQNAgentWithDelayAC_v2', s)
             net.load_state_dict(s)
         self.subpolicy_critic_optimizer.load_state_dict(state['subpolicy_critic_optimizer'])
-        print('Loading state dict for HDQNAgentWithDelayAC_v2', state['subpolicy_critic_optimizer'])
 
 def compute_mask_augmented_state(obs0,action0,obs1):
     mask = torch.tensor([[obs0 is not None, obs1 is not None]]).float()

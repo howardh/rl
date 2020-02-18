@@ -174,3 +174,44 @@ def test_HDQNAC_v3():
     assert a0 is not None
     assert (s1 == torch.tensor([[0,0,1]]).float()).all()
     assert (s2 == torch.tensor([[0,1,0]]).float()).all()
+
+def test_HDQNAC_v2_state_dict():
+    action_space = gym.spaces.Discrete(2)
+    observation_space = gym.spaces.Box(
+            high=np.array([1,1,1]),low=np.array([0,0,0]))
+
+    class DummyPolicy(torch.nn.Module):
+        def __init__(self,ret_val):
+            super().__init__()
+            self.fc = torch.nn.Linear(1,1)
+            self.call_stack = []
+            self.ret_val = ret_val
+        def forward(self,*params):
+            self.call_stack.append(params)
+            return self.ret_val.float()
+
+    agent1 = HDQNAgentWithDelayAC_v3(
+                action_space=action_space,
+                observation_space=observation_space,
+                discount_factor=1,
+                behaviour_epsilon=0,
+                replay_buffer_size=10,
+                controller_net=DummyPolicy(torch.tensor([[0.5,0.5]])),
+                subpolicy_nets=[DummyPolicy(torch.tensor([[0.5,0.5]])),DummyPolicy(torch.tensor([[0.5,0.5]]))],
+                q_net=DummyPolicy(torch.tensor([[0,0]]))
+            )
+    agent2 = HDQNAgentWithDelayAC_v3(
+                action_space=action_space,
+                observation_space=observation_space,
+                discount_factor=1,
+                behaviour_epsilon=0,
+                replay_buffer_size=10,
+                controller_net=DummyPolicy(torch.tensor([[0.5,0.5]])),
+                subpolicy_nets=[DummyPolicy(torch.tensor([[0.5,0.5]])),DummyPolicy(torch.tensor([[0.5,0.5]]))],
+                q_net=DummyPolicy(torch.tensor([[0,0]]))
+            )
+
+    state = agent1.state_dict()
+    agent2.load_state_dict(state)
+
+    # TODO: verify equality?

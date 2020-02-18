@@ -950,7 +950,7 @@ def run():
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
     #param = sample_convex_hull(directory)
