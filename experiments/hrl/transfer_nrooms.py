@@ -401,9 +401,13 @@ def checkpoint_path():
     if not os.path.isdir(checkpoint_directory):
         os.makedirs(checkpoint_directory)
 
-    job_id = os.environ['SLURM_JOB_ID']
-    task_id = os.environ['SLURM_ARRAY_TASK_ID']
-    file_name = '%s_%s.checkpoint.pkl' % (job_id,task_id)
+    try:
+        job_id = os.environ['SLURM_ARRAY_JOB_ID']
+        task_id = os.environ['SLURM_ARRAY_TASK_ID']
+        file_name = '%s_%s.checkpoint.pkl' % (job_id,task_id)
+    except:
+        job_id = os.environ['SLURM_JOB_ID']
+        file_name = '%s.checkpoint.pkl' % (job_id)
     file_path = os.path.join(checkpoint_directory,file_name)
     return file_path
 
@@ -517,7 +521,8 @@ def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=10
             utils.save_results(args,
                     {'rewards': rewards,
                     'state_action_values': state_action_values,
-                    'steps_to_reward': steps_to_reward},
+                    'steps_to_reward': steps_to_reward,
+                    'from_checkpoint': checkpoint is not None},
                     file_path=results_file_path)
 
         before_step(steps)
@@ -539,7 +544,7 @@ def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=10
 def run_hyperparam_search_extremes(space, proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = hyperparams.utils.list_extremes(space)
-    params = utils.split_params(params[:1000])
+    params = utils.split_params(params[3000:4000])[:1]
     funcs = [lambda: run_trial_with_checkpoint(**p) for p in params]
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
@@ -934,14 +939,14 @@ def run():
     for agent_name in space.keys():
         space[agent_name]['directory'] = directory
 
-    #series = compute_series_lsh(directory,iterations=100,n_planes=8)
-    #data = defaultdict(lambda: {})
-    #for an,s in series.items():
-    #    #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
-    #    data[an]['x'] = range(0,100000,1000)
-    #    data[an]['y'] = s['series']
-    #    print(an,np.mean(s['series'][50:]),np.mean(s['bin_size']))
-    #plot(data,plot_directory)
+    series = compute_series_lsh(directory,iterations=100,n_planes=8)
+    data = defaultdict(lambda: {})
+    for an,s in series.items():
+        #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
+        data[an]['x'] = range(0,100000,1000)
+        data[an]['y'] = s['series']
+        print(an,np.mean(s['series'][50:]),np.mean(s['bin_size']))
+    plot(data,plot_directory)
 
     #plot_tsne(directory, plot_directory, 'ActorCritic')
     #plot_tsne_smooth(directory, plot_directory, 'ActorCritic',n_planes=6)
@@ -950,12 +955,12 @@ def run():
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+    run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
     #param = sample_convex_hull(directory)
     #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.0)
-    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=6, perturbance=0.05, scoring='improvement_prob', target_score=182.58163722924036)
+    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.05, scoring='improvement_prob', target_score=182.58163722924036)
     #param = sample_lsh(directory, 'ActorCritic', n_planes=8, perturbance=0.01)
     #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
     #run_trial(**param)

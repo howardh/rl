@@ -241,19 +241,23 @@ class HDQNAgentWithDelay(Agent):
             sa_vals.append(sav)
         return rewards, sa_vals
 
+def worker_init_fn(worker_id):
+    pass
+
 class HDQNAgentWithDelayAC(Agent):
     def __init__(self, action_space, observation_space, discount_factor,
             behaviour_epsilon, delay_steps=1, replay_buffer_size=50000,
             controller_learning_rate=1e-3, subpolicy_learning_rate=1e-3,
             q_net_learning_rate=1e-3,
             polyak_rate=0.001, device=torch.device('cpu'),
-            controller_net=None, subpolicy_nets=None, q_net=None):
+            controller_net=None, subpolicy_nets=None, q_net=None, seed=None):
         self.action_space = action_space
         self.observation_space = observation_space
         self.discount_factor = discount_factor
         self.polyak_rate = polyak_rate
         self.behaviour_epsilon = behaviour_epsilon
         self.device = device
+        self.rand = np.random.RandomState(seed)
 
         # State (training)
         self.obs_stack = deque(maxlen=delay_steps+1)
@@ -372,7 +376,7 @@ class HDQNAgentWithDelayAC(Agent):
         obs = self.get_current_obs(testing)
 
         # Sample an action
-        if not testing and np.random.rand() < self.behaviour_epsilon:
+        if not testing and self.rand.rand() < self.behaviour_epsilon:
             action = self.action_space.sample()
         else:
             action_probs = self.policy_net(*obs).squeeze()
@@ -561,9 +565,7 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
 
     def load_state_dict(self, state):
         super().load_state_dict(state)
-        print('subpolicy_q_nets', state['subpolicy_q_nets'])
         for net,s in zip(self.subpolicy_q_nets,state['subpolicy_q_nets']):
-            print('Loading state dict for HDQNAgentWithDelayAC_v2', s)
             net.load_state_dict(s)
         self.subpolicy_critic_optimizer.load_state_dict(state['subpolicy_critic_optimizer'])
 

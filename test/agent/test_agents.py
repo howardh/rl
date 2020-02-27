@@ -214,4 +214,10 @@ def test_HDQNAC_v2_state_dict():
     state = agent1.state_dict()
     agent2.load_state_dict(state)
 
-    # TODO: verify equality?
+    ## TODO: verify equality?
+    #x = observation_space.sample()
+    #agent1.observe_change(x)
+    #agent2.observe_change(x)
+    #a1 = agent1.act()
+    #a2 = agent2.act()
+    #assert a1 == a2
