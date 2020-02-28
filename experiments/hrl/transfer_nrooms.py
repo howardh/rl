@@ -121,7 +121,7 @@ class TimeLimit(gym.Wrapper):
         self._elapsed_steps = 0
         return self.env.reset(**kwargs)
 
-def create_agent(agent_name, env, device, **agent_params):
+def create_agent(agent_name, env, device, seed, **agent_params):
     before_step = lambda s: None
     after_step = lambda s: None
 
@@ -173,6 +173,7 @@ def create_agent(agent_name, env, device, **agent_params):
                     for _ in range(num_options)],
                 q_net=QFunction(layer_sizes=q_net_structure,
                     input_size=4,output_size=4),
+                seed=seed,
         )
         def before_step(steps):
             #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
@@ -219,6 +220,7 @@ def create_agent(agent_name, env, device, **agent_params):
                     for _ in range(num_options)],
                 q_net=QFunction(layer_sizes=q_net_structure,
                     input_size=4,output_size=4),
+                seed=seed,
         )
         def before_step(steps):
             #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
@@ -265,6 +267,7 @@ def create_agent(agent_name, env, device, **agent_params):
                     for _ in range(num_options)],
                 q_net=QFunction(layer_sizes=q_net_structure,
                     input_size=4,output_size=4),
+                seed=seed,
         )
         def before_step(steps):
             #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
@@ -310,6 +313,7 @@ def create_agent(agent_name, env, device, **agent_params):
                     for _ in range(num_options)],
                 q_net=QFunction(layer_sizes=q_net_structure,
                     input_size=4,output_size=4),
+                seed=seed,
         )
         def before_step(steps):
             #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
@@ -423,7 +427,7 @@ def load_checkpoint():
     return None
 
 def save_checkpoint(steps, agent_name, agent_params, agent, results_file_path,
-        rewards, state_action_values, steps_to_reward, **kwargs):
+        rewards, state_action_values, steps_to_reward, env, test_env, done, **kwargs):
     data = {
         'agent_name': agent_name,
         'agent_params': agent_params,
@@ -432,7 +436,11 @@ def save_checkpoint(steps, agent_name, agent_params, agent, results_file_path,
         'rewards': rewards,
         'state_action_values': state_action_values,
         'steps_to_reward': steps_to_reward,
-        'steps': steps
+        'steps': steps,
+        'env': env.state_dict(),
+        'test_env': test_env.state_dict(),
+        'env_steps': env._elapsed_steps,
+        'done': done
     }
     with open(checkpoint_path(),'wb') as f:
         dill.dump(data,f)
@@ -441,15 +449,21 @@ def delete_checkpoint():
     os.remove(checkpoint_path())
 
 def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=1000,
-        epoch=50, test_iters=1, verbose=False,
+        epoch=50, test_iters=1, verbose=False, seed=None, keep_checkpoint=False,
         agent_name='HDQNAgentWithDelayAC', **agent_params):
     args = locals()
     env_name='gym_fourrooms:fourrooms-v0'
     pprint.pprint(args)
+    if seed is not None:
+        torch.manual_seed(seed) # Required for consistent random initialization of neural net weights
+
+    rand = np.random.RandomState(seed)
 
     env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
+    env.seed(seed)
     env = TimeLimit(env,36)
     test_env = gym.make(env_name,goal_duration_steps=float('inf')).unwrapped
+    test_env.seed(seed+1) # Use a different seed so we don't get the same sequence of states as env
     test_env = TimeLimit(test_env,500)
 
     print(env, test_env)
@@ -465,22 +479,30 @@ def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=10
         file_name = checkpoint_path()
         with open(file_name,'rb') as f:
             data = dill.load(f)
+
+        # Env
+        env.load_state_dict(data['env'])
+        test_env.load_state_dict(data['test_env'])
+        env._elapsed_steps = data['env_steps']
+        
+        # Agent
         agent_name = data['agent_name']
         agent_params = data['agent_params']
-
         agent, before_step, after_step = create_agent(
-                agent_name, env, device, **agent_params)
-
+                agent_name, env, device, seed, **agent_params)
         agent.load_state_dict(data['agent_state'])
+
+        # Experiment progress
         results_file_path = data['results_file_path']
         rewards = data['rewards']
         state_action_values = data['state_action_values']
         steps_to_reward = data['steps_to_reward']
         step_range = range(data['steps'],total_steps)
+        done = data['done']
     else:
         print('No Checkpoint. Initializing...')
         agent, before_step, after_step = create_agent(
-                agent_name, env, device, **agent_params)
+                agent_name, env, device, seed, **agent_params)
         # Create file to save results
         results_file_path = utils.save_results(args,
                 {'rewards': [], 'state_action_values': []},
@@ -490,11 +512,11 @@ def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=10
         state_action_values = []
         steps_to_reward = []
         step_range = range(total_steps)
+        done = True
 
     if verbose:
         step_range = tqdm(step_range, total=total_steps, initial=step_range.start)
 
-    done = True
     def run_step(steps):
         nonlocal done
         nonlocal agent_name
@@ -504,6 +526,7 @@ def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=10
         if steps % steps_per_task == 0:
             l = locals()
             save_checkpoint(**l)
+            tqdm.write('Checkpoint saved')
         # Run tests
         if steps % epoch == 0:
             test_env.reset_goal(env.goal)
@@ -534,11 +557,15 @@ def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=10
         agent.observe_change(obs, reward, terminal=done)
         # Update weights
         after_step(steps)
-    for steps in step_range:
-        run_step(steps)
-    delete_checkpoint()
+    try:
+        for steps in step_range:
+            run_step(steps)
+        if not keep_checkpoint:
+            delete_checkpoint()
+    except KeyboardInterrupt:
+        pass
 
-    return np.mean(steps_to_reward[50:])
+    return steps_to_reward
     #return (args, rewards, state_action_values)
 
 def run_hyperparam_search_extremes(space, proc=1):
@@ -932,21 +959,23 @@ def fit_gaussian_process(directory, agent_name):
     return x,y
 
 def run():
+    #utils.set_results_directory(
+    #        os.path.join(utils.get_results_root_directory(),'hrl-2'))
     utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'hrl-2'))
+            os.path.join(utils.get_results_root_directory(),'dev'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     for agent_name in space.keys():
         space[agent_name]['directory'] = directory
 
-    series = compute_series_lsh(directory,iterations=100,n_planes=8)
-    data = defaultdict(lambda: {})
-    for an,s in series.items():
-        #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
-        data[an]['x'] = range(0,100000,1000)
-        data[an]['y'] = s['series']
-        print(an,np.mean(s['series'][50:]),np.mean(s['bin_size']))
-    plot(data,plot_directory)
+    #series = compute_series_lsh(directory,iterations=100,n_planes=8)
+    #data = defaultdict(lambda: {})
+    #for an,s in series.items():
+    #    #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
+    #    data[an]['x'] = range(0,100000,1000)
+    #    data[an]['y'] = s['series']
+    #    print(an,np.mean(s['series'][50:]),np.mean(s['bin_size']))
+    #plot(data,plot_directory)
 
     #plot_tsne(directory, plot_directory, 'ActorCritic')
     #plot_tsne_smooth(directory, plot_directory, 'ActorCritic',n_planes=6)
@@ -955,7 +984,7 @@ def run():
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
     #param = sample_convex_hull(directory)
@@ -978,4 +1007,52 @@ def run():
     #        count += 1
     #print(count)
 
-    #x,y = fit_gaussian_process(directory, 'ActorCritic')
+    param1 = {'agent_name': 'ActorCritic',
+                      'batch_size': 32,
+		      'cnet_layer_size': 3,
+		      'cnet_n_layers': 2,
+		      'controller_learning_rate': 0.10000000000000002,
+		      'eps_b': 0.5,
+		      'gamma': 0.9,
+		      'min_replay_buffer_size': 100,
+		      'num_options': 2,
+		      'polyak_rate': 0.001,
+		      'q_net_learning_rate': 0.10000000000000002,
+		      'qnet_layer_size': 3,
+		      'qnet_n_layers': 1,
+		      'snet_layer_size': 1,
+		      'snet_n_layers': 2,
+		      'subpolicy_learning_rate': 0.00010000000000000009,
+     'directory': directory,
+     'epoch': 50,
+     'steps_per_task': 100,
+     'test_iters': 2,
+     'total_steps': 300,
+     'verbose': True,
+     'seed': 50}
+    param2 = {'agent_name': 'HDQNAgentWithDelayAC_v3',
+                      'batch_size': 32,
+		      'cnet_layer_size': 3,
+		      'cnet_n_layers': 2,
+		      'controller_learning_rate': 0.10000000000000002,
+		      'eps_b': 0.5,
+		      'gamma': 0.9,
+		      'min_replay_buffer_size': 100,
+		      'num_options': 2,
+		      'polyak_rate': 0.001,
+		      'q_net_learning_rate': 0.10000000000000002,
+		      'qnet_layer_size': 3,
+		      'qnet_n_layers': 1,
+		      'snet_layer_size': 1,
+		      'snet_n_layers': 2,
+		      'subpolicy_learning_rate': 0.00010000000000000009,
+		      'subpolicy_q_net_learning_rate': 0.00010000000000000009,
+     'directory': directory,
+     'epoch': 50,
+     'steps_per_task': 100,
+     'test_iters': 2,
+     'total_steps': 300,
+     'verbose': True,
+     #'keep_checkpoint': True,
+     'seed': 0}
+    run_trial_with_checkpoint(**param2)

@@ -87,6 +87,20 @@ class HierarchicalPolicyNetworkAugmentedState(torch.nn.Module):
 
         return action_probs
 
+class SeedableRandomSampler(torch.utils.data.sampler.RandomSampler):
+    def __init__(self, data_source, replacement=False, num_samples=None, generator=None):
+        super().__init__(data_source, replacement, num_samples)
+        if generator is None:
+            self.generator = torch.Generator()
+        else:
+            self.generator = generator
+
+    def __iter__(self):
+        n = len(self.data_source)
+        if self.replacement:
+            return iter(torch.randint(high=n, size=(self.num_samples,), dtype=torch.int64, generator=self.generator).tolist())
+        return iter(torch.randperm(n).tolist())
+
 def compute_mask(*obs):
     mask = torch.tensor([[o is not None for o in obs]]).float()
     def to_tensor(o):
@@ -241,9 +255,6 @@ class HDQNAgentWithDelay(Agent):
             sa_vals.append(sav)
         return rewards, sa_vals
 
-def worker_init_fn(worker_id):
-    pass
-
 class HDQNAgentWithDelayAC(Agent):
     def __init__(self, action_space, observation_space, discount_factor,
             behaviour_epsilon, delay_steps=1, replay_buffer_size=50000,
@@ -251,13 +262,17 @@ class HDQNAgentWithDelayAC(Agent):
             q_net_learning_rate=1e-3,
             polyak_rate=0.001, device=torch.device('cpu'),
             controller_net=None, subpolicy_nets=None, q_net=None, seed=None):
-        self.action_space = action_space
+        self.action_space = action_space # TODO: Do I need to make a deep copy of this so changes to the random state doesn't affect other copies?
         self.observation_space = observation_space
         self.discount_factor = discount_factor
         self.polyak_rate = polyak_rate
         self.behaviour_epsilon = behaviour_epsilon
         self.device = device
+
         self.rand = np.random.RandomState(seed)
+        self.generator = torch.Generator()
+        if seed is not None:
+            self.generator.manual_seed(seed)
 
         # State (training)
         self.obs_stack = deque(maxlen=delay_steps+1)
@@ -304,6 +319,9 @@ class HDQNAgentWithDelayAC(Agent):
         self.policy_net.to(device)
         self.policy_net_target.to(device)
 
+    def set_random_state(self, rand):
+        self.rand = rand
+
     def observe_step(self,obs0, action0, reward1, obs1, terminal=False):
         obs0 = torch.Tensor(obs0)
         obs1 = torch.Tensor(obs1)
@@ -327,8 +345,9 @@ class HDQNAgentWithDelayAC(Agent):
     def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
+        sampler = SeedableRandomSampler(self.replay_buffer, generator=self.generator)
         dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=batch_size, shuffle=True)
+                self.replay_buffer, batch_size=batch_size, sampler=sampler)
         gamma = self.discount_factor
         tau = self.polyak_rate
         actor_optimizer = self.actor_optimizer
@@ -379,9 +398,10 @@ class HDQNAgentWithDelayAC(Agent):
         if not testing and self.rand.rand() < self.behaviour_epsilon:
             action = self.action_space.sample()
         else:
-            action_probs = self.policy_net(*obs).squeeze()
-            dist = torch.distributions.Categorical(action_probs)
-            action = dist.sample().item()
+            action_probs = self.policy_net(*obs).squeeze().detach().numpy()
+            #dist = torch.distributions.Categorical(action_probs)
+            #action = dist.sample().item()
+            action = self.rand.choice(len(action_probs),p=action_probs)
         self.current_action = action
 
         return action
@@ -453,7 +473,13 @@ class HDQNAgentWithDelayAC(Agent):
                 'policy_net_target': self.policy_net_target.state_dict(),
                 'actor_optimizer': self.actor_optimizer.state_dict(),
                 'critic_optimizer': self.critic_optimizer.state_dict(),
-                'replay_buffer': self.replay_buffer.state_dict()
+                'replay_buffer': self.replay_buffer.state_dict(),
+                'obs_stack': self.obs_stack,
+                'current_obs': self.current_obs,
+                'current_action': self.current_action,
+                'current_terminal': self.current_terminal,
+                'rand': self.rand.get_state(),
+                'generator': self.generator.get_state()
         }
 
     def load_state_dict(self, state):
@@ -471,6 +497,14 @@ class HDQNAgentWithDelayAC(Agent):
         self.critic_optimizer.load_state_dict(state['critic_optimizer'])
         self.replay_buffer.load_state_dict(state['replay_buffer'])
 
+        self.obs_stack = state['obs_stack']
+        self.current_obs = state['current_obs']
+        self.current_action = state['current_action']
+        self.current_terminal = state['current_terminal']
+
+        self.rand.set_state(state['rand'])
+        self.generator.set_state(state['generator'])
+
 class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
     def __init__(self, subpolicy_q_net_learning_rate=1e-3, **kwargs):
         super().__init__(**kwargs)
@@ -486,8 +520,9 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
     def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
+        sampler = SeedableRandomSampler(self.replay_buffer, generator=self.generator)
         dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=batch_size, shuffle=True)
+                self.replay_buffer, batch_size=batch_size, sampler=sampler)
         gamma = self.discount_factor
         tau = self.polyak_rate
         actor_optimizer = self.actor_optimizer
@@ -607,8 +642,9 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
     def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
+        sampler = SeedableRandomSampler(self.replay_buffer, generator=self.generator)
         dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=batch_size, shuffle=True)
+                self.replay_buffer, batch_size=batch_size, sampler=sampler)
         gamma = self.discount_factor
         tau = self.polyak_rate
         actor_optimizer = self.actor_optimizer
@@ -710,12 +746,11 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
         obs0,action0,obs1,mask = self.get_current_obs(testing)
 
         # Sample an action
-        if not testing and np.random.rand() < self.behaviour_epsilon:
+        if not testing and self.rand.rand() < self.behaviour_epsilon:
             action = self.action_space.sample()
         else:
-            action_probs = self.policy_net(obs0,action0,obs1,mask).squeeze()
-            dist = torch.distributions.Categorical(action_probs)
-            action = dist.sample().item()
+            action_probs = self.policy_net(obs0,action0,obs1,mask).squeeze().detach().numpy()
+            action = self.rand.choice(len(action_probs),p=action_probs)
         self.current_action = action
 
         if testing:

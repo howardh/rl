@@ -4,11 +4,11 @@ import numpy as np
 import torch
 
 import agent
-from experiments.hrl.model import QFunction, PolicyFunction
-from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v3
+from experiments.hrl.model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
+from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3
 from agent.dqn_agent import DQNAgent
 
-def create_agent(agent_name, env):
+def create_agent(agent_name, env, seed=None):
     num_actions = env.action_space.n
     state_size = env.observation_space.low.shape[0]
     if agent_name == 'HDQNAgentWithDelayAC':
@@ -22,11 +22,54 @@ def create_agent(agent_name, env):
                 discount_factor=0.9,
                 polyak_rate=0.001,
                 behaviour_epsilon=0.01,
+                replay_buffer_size=10,
                 controller_net=PolicyFunction(
                     layer_sizes=[],input_size=state_size,output_size=num_options),
                 subpolicy_nets=[PolicyFunction(layer_sizes=[],input_size=state_size,output_size=num_actions) 
                     for _ in range(num_options)],
                 q_net=QFunction(layer_sizes=[],input_size=state_size,output_size=num_actions),
+                seed=seed
+        )
+    elif agent_name == 'HDQNAgentWithDelayAC_v2':
+        num_options = 3
+        return HDQNAgentWithDelayAC_v2(
+                action_space=env.action_space,
+                observation_space=env.observation_space,
+                controller_learning_rate=0.01,
+                subpolicy_learning_rate=0.01,
+                subpolicy_q_net_learning_rate=0.01,
+                q_net_learning_rate=0.01,
+                discount_factor=0.9,
+                polyak_rate=0.001,
+                behaviour_epsilon=0.01,
+                replay_buffer_size=10,
+                controller_net=PolicyFunction(
+                    layer_sizes=[],input_size=state_size,output_size=num_options),
+                subpolicy_nets=[PolicyFunction(layer_sizes=[],input_size=state_size,output_size=num_actions) 
+                    for _ in range(num_options)],
+                q_net=QFunction(layer_sizes=[],input_size=state_size,output_size=num_actions),
+                seed=seed
+        )
+    elif agent_name == 'HDQNAgentWithDelayAC_v3':
+        num_options = 3
+        return HDQNAgentWithDelayAC_v3(
+                action_space=env.action_space,
+                observation_space=env.observation_space,
+                controller_learning_rate=0.01,
+                subpolicy_learning_rate=0.01,
+                subpolicy_q_net_learning_rate=0.01,
+                q_net_learning_rate=0.01,
+                discount_factor=0.9,
+                polyak_rate=0.001,
+                behaviour_epsilon=0.01,
+                replay_buffer_size=10,
+                controller_net=PolicyFunctionAugmentatedState(
+                    layer_sizes=[],state_size=state_size,
+                    num_actions=num_actions,output_size=num_options),
+                subpolicy_nets=[PolicyFunction(layer_sizes=[],input_size=state_size,output_size=num_actions) 
+                    for _ in range(num_options)],
+                q_net=QFunction(layer_sizes=[],input_size=state_size,output_size=num_actions),
+                seed=seed
         )
     elif agent_name == 'DQNAgent':
         return DQNAgent(
@@ -174,6 +217,57 @@ def test_HDQNAC_v3():
     assert a0 is not None
     assert (s1 == torch.tensor([[0,0,1]]).float()).all()
     assert (s2 == torch.tensor([[0,1,0]]).float()).all()
+
+@pytest.mark.parametrize('agent_name', ['HDQNAgentWithDelayAC','HDQNAgentWithDelayAC_v2','HDQNAgentWithDelayAC_v3'])
+def test_HDQNAC_state_dict(agent_name):
+    env = DummyEnv(actions='discrete',observations='box')
+
+    agent1 = create_agent(agent_name,env,seed=0)
+    agent2 = create_agent(agent_name,env,seed=0)
+    agent3 = create_agent(agent_name,env,seed=0)
+
+    state = agent1.state_dict()
+    agent2.load_state_dict(state)
+
+    # verify equality
+    done = True
+    for _ in range(10):
+        if done:
+            obs = env.reset()
+            agent1.observe_change(obs)
+            agent2.observe_change(obs)
+        a1 = agent1.act()
+        a2 = agent2.act()
+
+        assert a1 == a2
+
+        obs, reward, done, _ = env.step(a1)
+        agent1.observe_change(obs, reward, terminal=done)
+        agent2.observe_change(obs, reward, terminal=done)
+
+        agent1.train()
+        agent2.train()
+
+    state = agent1.state_dict()
+    agent3 = create_agent(agent_name,env,seed=0)
+    agent3.load_state_dict(state)
+
+    for _ in range(10):
+        if done:
+            obs = env.reset()
+            agent1.observe_change(obs)
+            agent3.observe_change(obs)
+        a1 = agent1.act()
+        a2 = agent3.act()
+
+        assert a1 == a2
+
+        obs, reward, done, _ = env.step(a1)
+        agent1.observe_change(obs, reward, terminal=done)
+        agent3.observe_change(obs, reward, terminal=done)
+
+        agent1.train()
+        agent3.train()
 
 def test_HDQNAC_v2_state_dict():
     action_space = gym.spaces.Discrete(2)
