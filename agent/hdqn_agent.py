@@ -609,7 +609,7 @@ def compute_mask_augmented_state(obs0,action0,obs1):
     def o_to_t(o):
         """ obs to tensor """
         if o is None:
-            return torch.empty(obs1.shape).float().squeeze().unsqueeze(0)
+            return torch.zeros(obs1.shape).float().squeeze().unsqueeze(0)
         return torch.tensor(o).float().squeeze().unsqueeze(0)
     def a_to_t(a):
         """ action to tensor """

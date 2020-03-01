@@ -571,7 +571,7 @@ def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=10
 def run_hyperparam_search_extremes(space, proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = hyperparams.utils.list_extremes(space)
-    params = utils.split_params(params[3000:4000])[:1]
+    params = utils.split_params(params[3000:4000])
     funcs = [lambda: run_trial_with_checkpoint(**p) for p in params]
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
@@ -959,10 +959,10 @@ def fit_gaussian_process(directory, agent_name):
     return x,y
 
 def run():
-    #utils.set_results_directory(
-    #        os.path.join(utils.get_results_root_directory(),'hrl-2'))
     utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'dev'))
+            os.path.join(utils.get_results_root_directory(),'hrl-2'))
+    #utils.set_results_directory(
+    #        os.path.join(utils.get_results_root_directory(),'dev'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     for agent_name in space.keys():
@@ -984,7 +984,7 @@ def run():
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+    run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
     #param = sample_convex_hull(directory)
@@ -1006,53 +1006,3 @@ def run():
     #        #save(None)
     #        count += 1
     #print(count)
-
-    param1 = {'agent_name': 'ActorCritic',
-                      'batch_size': 32,
-		      'cnet_layer_size': 3,
-		      'cnet_n_layers': 2,
-		      'controller_learning_rate': 0.10000000000000002,
-		      'eps_b': 0.5,
-		      'gamma': 0.9,
-		      'min_replay_buffer_size': 100,
-		      'num_options': 2,
-		      'polyak_rate': 0.001,
-		      'q_net_learning_rate': 0.10000000000000002,
-		      'qnet_layer_size': 3,
-		      'qnet_n_layers': 1,
-		      'snet_layer_size': 1,
-		      'snet_n_layers': 2,
-		      'subpolicy_learning_rate': 0.00010000000000000009,
-     'directory': directory,
-     'epoch': 50,
-     'steps_per_task': 100,
-     'test_iters': 2,
-     'total_steps': 300,
-     'verbose': True,
-     'seed': 50}
-    param2 = {'agent_name': 'HDQNAgentWithDelayAC_v3',
-                      'batch_size': 32,
-		      'cnet_layer_size': 3,
-		      'cnet_n_layers': 2,
-		      'controller_learning_rate': 0.10000000000000002,
-		      'eps_b': 0.5,
-		      'gamma': 0.9,
-		      'min_replay_buffer_size': 100,
-		      'num_options': 2,
-		      'polyak_rate': 0.001,
-		      'q_net_learning_rate': 0.10000000000000002,
-		      'qnet_layer_size': 3,
-		      'qnet_n_layers': 1,
-		      'snet_layer_size': 1,
-		      'snet_n_layers': 2,
-		      'subpolicy_learning_rate': 0.00010000000000000009,
-		      'subpolicy_q_net_learning_rate': 0.00010000000000000009,
-     'directory': directory,
-     'epoch': 50,
-     'steps_per_task': 100,
-     'test_iters': 2,
-     'total_steps': 300,
-     'verbose': True,
-     #'keep_checkpoint': True,
-     'seed': 0}
-    run_trial_with_checkpoint(**param2)
