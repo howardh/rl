@@ -349,7 +349,7 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
         device = torch.device('cpu')
 
     agent, before_step, after_step = create_agent(
-            agent_name, env, device, **agent_params)
+            agent_name, env, device, None, **agent_params)
 
     # Create file to save results
     results_file_path = utils.save_results(args,
@@ -399,11 +399,15 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
     return np.mean(steps_to_reward[50:])
     #return (args, rewards, state_action_values)
 
-def checkpoint_path():
+def checkpoint_directory():
     directory = os.path.join(utils.get_results_directory(),__name__)
     checkpoint_directory = os.path.join(utils.get_results_directory(),'checkpoints')
     if not os.path.isdir(checkpoint_directory):
         os.makedirs(checkpoint_directory)
+    return checkpoint_directory
+
+def checkpoint_path():
+    directory = checkpoint_directory()
 
     try:
         job_id = os.environ['SLURM_ARRAY_JOB_ID']
@@ -412,11 +416,19 @@ def checkpoint_path():
     except:
         job_id = os.environ['SLURM_JOB_ID']
         file_name = '%s.checkpoint.pkl' % (job_id)
-    file_path = os.path.join(checkpoint_directory,file_name)
+    file_path = os.path.join(directory,file_name)
     return file_path
 
-def load_checkpoint():
-    file_name = checkpoint_path()
+def list_checkpoints():
+    directory = checkpoint_directory()
+    for f in os.listdir(directory):
+        path = os.path.join(directory, f)
+        if os.path.isfile(path):
+            yield path
+
+def load_checkpoint(file_name=None):
+    if file_name is None:
+        file_name = checkpoint_path()
     if os.path.isfile(file_name):
         try:
             with open(file_name,'rb') as f:
@@ -426,147 +438,180 @@ def load_checkpoint():
             pass
     return None
 
-def save_checkpoint(steps, agent_name, agent_params, agent, results_file_path,
-        rewards, state_action_values, steps_to_reward, env, test_env, done, **kwargs):
-    data = {
-        'agent_name': agent_name,
-        'agent_params': agent_params,
-        'agent_state': agent.state_dict(),
-        'results_file_path': results_file_path,
-        'rewards': rewards,
-        'state_action_values': state_action_values,
-        'steps_to_reward': steps_to_reward,
-        'steps': steps,
-        'env': env.state_dict(),
-        'test_env': test_env.state_dict(),
-        'env_steps': env._elapsed_steps,
-        'done': done
-    }
-    with open(checkpoint_path(),'wb') as f:
-        dill.dump(data,f)
-
 def delete_checkpoint():
     os.remove(checkpoint_path())
 
-def run_trial_with_checkpoint(directory=None, steps_per_task=100, total_steps=1000,
-        epoch=50, test_iters=1, verbose=False, seed=None, keep_checkpoint=False,
-        agent_name='HDQNAgentWithDelayAC', **agent_params):
-    args = locals()
-    env_name='gym_fourrooms:fourrooms-v0'
-    pprint.pprint(args)
-    if seed is not None:
-        torch.manual_seed(seed) # Required for consistent random initialization of neural net weights
-
-    rand = np.random.RandomState(seed)
-
-    env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
-    env.seed(seed)
-    env = TimeLimit(env,36)
-    test_env = gym.make(env_name,goal_duration_steps=float('inf')).unwrapped
-    test_env.seed(seed+1) # Use a different seed so we don't get the same sequence of states as env
-    test_env = TimeLimit(test_env,500)
-
-    print(env, test_env)
-
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-    else:
-        device = torch.device('cpu')
-
-    checkpoint = load_checkpoint()
-    if checkpoint is not None:
+def run_trial_with_checkpoint(**params):
+    path = checkpoint_path()
+    exp = Experiment(**params)
+    state = load_checkpoint(path)
+    if state is not None:
         print('Found Checkpoint. Restoring state...')
-        file_name = checkpoint_path()
-        with open(file_name,'rb') as f:
-            data = dill.load(f)
-
-        # Env
-        env.load_state_dict(data['env'])
-        test_env.load_state_dict(data['test_env'])
-        env._elapsed_steps = data['env_steps']
-        
-        # Agent
-        agent_name = data['agent_name']
-        agent_params = data['agent_params']
-        agent, before_step, after_step = create_agent(
-                agent_name, env, device, seed, **agent_params)
-        agent.load_state_dict(data['agent_state'])
-
-        # Experiment progress
-        results_file_path = data['results_file_path']
-        rewards = data['rewards']
-        state_action_values = data['state_action_values']
-        steps_to_reward = data['steps_to_reward']
-        step_range = range(data['steps'],total_steps)
-        done = data['done']
+        for k,v in params.items():
+            if k in state['args'] and state['args'][k] != v:
+                print('Overwriting %s=%s with %s' % (k,state['args'][k],v))
+                state['args'][k] = v
+        exp.load_state_dict(state)
     else:
-        print('No Checkpoint. Initializing...')
-        agent, before_step, after_step = create_agent(
-                agent_name, env, device, seed, **agent_params)
+        print('No Checkpoint.')
+    return exp.run()
+
+class Experiment:
+    def __init__(self, directory=None, steps_per_task=100, total_steps=1000,
+            epoch=50, test_iters=1, verbose=False, seed=None, keep_checkpoint=False, checkpoint_path=None,
+            agent_name='HDQNAgentWithDelayAC', **agent_params):
+        self.args = locals()
+        del self.args['self']
+
+        self.directory = directory
+        self.steps_per_task = steps_per_task
+        self.total_steps = total_steps
+        self.epoch = epoch
+        self.test_iters = test_iters
+        self.verbose = verbose
+        self.seed = seed
+        self.keep_checkpoint = keep_checkpoint
+        self.checkpoint_path = checkpoint_path
+        self.checkpoint = None
+        self.agent_name = agent_name
+        self.agent_params = agent_params
+        self.steps = 0
+
+        env_name='gym_fourrooms:fourrooms-v0'
+        pprint.pprint(self.args)
+        if seed is not None:
+            torch.manual_seed(seed) # Required for consistent random initialization of neural net weights
+
+        rand = np.random.RandomState(seed)
+
+        self.env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
+        self.env = TimeLimit(self.env,36)
+        self.test_env = gym.make(env_name,goal_duration_steps=float('inf')).unwrapped
+        self.test_env = TimeLimit(self.test_env,500)
+        if seed is not None:
+            self.env.seed(seed)
+            self.test_env.seed(seed+1) # Use a different seed so we don't get the same sequence of states as env
+
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+
+        self.agent, self.before_step, self.after_step = create_agent(
+                agent_name, self.env, device, seed, **agent_params)
         # Create file to save results
-        results_file_path = utils.save_results(args,
+        self.results_file_path = utils.save_results(self.args,
                 {'rewards': [], 'state_action_values': []},
                 directory=directory,
                 file_name_prefix=agent_name)
-        rewards = []
-        state_action_values = []
-        steps_to_reward = []
-        step_range = range(total_steps)
-        done = True
+        self.rewards = []
+        self.state_action_values = []
+        self.steps_to_reward = []
+        self.step_range = range(total_steps)
+        self.done = True
 
-    if verbose:
-        step_range = tqdm(step_range, total=total_steps, initial=step_range.start)
+        if verbose:
+            self.step_range = tqdm(self.step_range, total=total_steps, initial=self.step_range.start)
 
-    def run_step(steps):
-        nonlocal done
-        nonlocal agent_name
-        nonlocal agent_params
-
+    def run_step(self):
         # Checkpoint
-        if steps % steps_per_task == 0:
-            l = locals()
-            save_checkpoint(**l)
+        if self.steps % self.steps_per_task == 0:
+            state = self.state_dict()
+            path = self.checkpoint_path
+            if path is None:
+                path = checkpoint_path()
+            with open(path,'wb') as f:
+                dill.dump(state,f)
             tqdm.write('Checkpoint saved')
         # Run tests
-        if steps % epoch == 0:
-            test_env.reset_goal(env.goal)
-            test_results = agent.test(
-                    test_env, test_iters, render=False, processors=1)
-            rewards.append(np.mean(
+        if self.steps % self.epoch == 0:
+            self.test_env.reset_goal(self.env.goal)
+            test_results = self.agent.test(
+                    self.test_env, self.test_iters, render=False, processors=1)
+            self.rewards.append(np.mean(
                 [r['total_rewards'] for r in test_results]))
-            state_action_values.append(np.mean(
+            self.state_action_values.append(np.mean(
                 [r['state_action_values'] for r in test_results]))
-            steps_to_reward.append(np.mean(
+            self.steps_to_reward.append(np.mean(
                 [r['steps'] for r in test_results]))
-            if verbose:
+            if self.verbose:
                 tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (
-                    steps, rewards[-1], steps_to_reward[-1]))
-            utils.save_results(args,
-                    {'rewards': rewards,
-                    'state_action_values': state_action_values,
-                    'steps_to_reward': steps_to_reward,
-                    'from_checkpoint': checkpoint is not None},
-                    file_path=results_file_path)
+                    self.steps, self.rewards[-1], self.steps_to_reward[-1]))
+            utils.save_results(self.args,
+                    {'rewards': self.rewards,
+                    'state_action_values': self.state_action_values,
+                    'steps_to_reward': self.steps_to_reward,
+                    'from_checkpoint': self.checkpoint is not None},
+                    file_path=self.results_file_path)
 
-        before_step(steps)
+        self.before_step(self.steps)
         # Run step
-        if done:
-            obs = env.reset()
-            agent.observe_change(obs, None)
-        obs, reward, done, _ = env.step(agent.act())
-        agent.observe_change(obs, reward, terminal=done)
+        if self.done:
+            self.obs = self.env.reset()
+            self.agent.observe_change(self.obs, None)
+        self.obs, self.reward, self.done, _ = self.env.step(self.agent.act())
+        self.agent.observe_change(self.obs, self.reward, terminal=self.done)
         # Update weights
-        after_step(steps)
-    try:
-        for steps in step_range:
-            run_step(steps)
-        if not keep_checkpoint:
-            delete_checkpoint()
-    except KeyboardInterrupt:
-        pass
+        self.after_step(self.steps)
 
-    return steps_to_reward
-    #return (args, rewards, state_action_values)
+    def run(self):
+        try:
+            for self.steps in self.step_range:
+                self.run_step()
+            if not self.keep_checkpoint:
+                delete_checkpoint()
+        except KeyboardInterrupt:
+            pass
+
+        return self.steps_to_reward
+
+    def state_dict(self):
+        return {
+            'args': self.args,
+            'agent_state': self.agent.state_dict(),
+            'results_file_path': self.results_file_path,
+            'rewards': self.rewards,
+            'state_action_values': self.state_action_values,
+            'steps_to_reward': self.steps_to_reward,
+            'steps': self.steps,
+            'env': self.env.state_dict(),
+            'test_env': self.test_env.state_dict(),
+            'env_steps': self.env._elapsed_steps,
+            'done': self.done
+        }
+
+    def load_state_dict(self, state):
+        # Env
+        self.env.load_state_dict(state['env'])
+        self.test_env.load_state_dict(state['test_env'])
+        self.env._elapsed_steps = state['env_steps']
+        
+        # Agent
+        if self.agent_name != state['args']['agent_name']:
+            raise Exception('Agent type mismatch. Expected %s, received %s.' % (self.agent_name, state['agent_name']))
+        self.agent.load_state_dict(state['agent_state'])
+
+        # Experiment progress
+        self.results_file_path = state['results_file_path']
+        self.rewards = state['rewards']
+        self.state_action_values = state['state_action_values']
+        self.steps_to_reward = state['steps_to_reward']
+        self.step_range = range(state['steps'],state['args']['total_steps'])
+        self.done = state['done']
+
+    @staticmethod
+    def from_checkpoint(file_name):
+        state = load_checkpoint(file_name)
+
+        if state is None:
+            raise Exception('Invalid Checkpoint')
+
+        agent_params = state['args']['agent_params']
+        del state['args']['agent_params']
+        exp = Experiment(**state['args'],**agent_params)
+        exp.load_state_dict(state)
+        exp.checkpoint = state
+        return exp
 
 def run_hyperparam_search_extremes(space, proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
@@ -959,10 +1004,10 @@ def fit_gaussian_process(directory, agent_name):
     return x,y
 
 def run():
-    utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'hrl-2'))
     #utils.set_results_directory(
-    #        os.path.join(utils.get_results_root_directory(),'dev'))
+    #        os.path.join(utils.get_results_root_directory(),'hrl-2'))
+    utils.set_results_directory(
+            os.path.join(utils.get_results_root_directory(),'dev'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     for agent_name in space.keys():
@@ -984,7 +1029,7 @@ def run():
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
     #param = sample_convex_hull(directory)
@@ -1002,7 +1047,13 @@ def run():
 
     #count = 0
     #for v,save in utils.modify_all_results(directory):
-    #    if 'steps_to_reward' not in v[1] or len(v[1]['steps_to_reward']) < 100:
-    #        #save(None)
+    #    if v is None or 'steps_to_reward' not in v[1] or len(v[1]['steps_to_reward']) < 100:
+    #        save(None)
     #        count += 1
     #print(count)
+
+    #for fn in list_checkpoints():
+    #    print('Running from checkpoint',fn)
+    #    exp = Experiment.from_checkpoint(fn)
+    #    exp.run()
+    #    break

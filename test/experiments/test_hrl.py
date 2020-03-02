@@ -73,7 +73,7 @@ def test_transfer_checkpoint(tmp_path):
         'qnet_n_layers': 0,
         'qnet_layer_size': 1,
         'directory': results_directory,
-        'seed': 0,
+        'seed': 1,
         'keep_checkpoint': False
     }
     r1 = run_trial_with_checkpoint(**params)
@@ -82,7 +82,49 @@ def test_transfer_checkpoint(tmp_path):
     params['total_steps'] = 12
     params['keep_checkpoint'] = True
     r3 = run_trial_with_checkpoint(**params)
+    assert len(r1) != len(r3)
     params['total_steps'] = 24
     params['keep_checkpoint'] = False
     r4 = run_trial_with_checkpoint(**params)
     assert r1 == r4
+
+def test_transfer_experiment_state_dict(tmp_path):
+    from experiments.hrl.transfer_nrooms import Experiment
+    results_directory = os.path.join(tmp_path,'results')
+    plot_directory = os.path.join(tmp_path,'plot')
+
+    params = {
+        'agent_name': 'HDQNAgentWithDelayAC_v3',
+        'gamma': 0.9,
+        'controller_learning_rate': 1e-3,
+        'subpolicy_learning_rate': 1e-3,
+        'subpolicy_q_net_learning_rate': 1e-3,
+        'q_net_learning_rate': 1e-3,
+        'eps_b': 0,
+        'polyak_rate': 0.001,
+        'batch_size': 2,
+        'min_replay_buffer_size': 5,
+        'steps_per_task': 3,
+        'total_steps': 24,
+        'epoch': 3,
+        'test_iters': 1,
+        'verbose': True,
+        'num_options': 2,
+        'cnet_n_layers': 0,
+        'cnet_layer_size': 0,
+        'snet_n_layers': 0,
+        'snet_layer_size': 0,
+        'qnet_n_layers': 0,
+        'qnet_layer_size': 1,
+        'directory': results_directory,
+        'seed': 0,
+        'keep_checkpoint': False
+    }
+
+    exp1 = Experiment(**params)
+    exp2 = Experiment(**params)
+    exp2.load_state_dict(exp1.state_dict())
+
+    r1 = exp1.run()
+    r2 = exp2.run()
+    assert r1 == r2

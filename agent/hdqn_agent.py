@@ -105,7 +105,7 @@ def compute_mask(*obs):
     mask = torch.tensor([[o is not None for o in obs]]).float()
     def to_tensor(o):
         if o is None:
-            return torch.empty(obs[-1].shape).float().unsqueeze(0)
+            return torch.zeros(obs[-1].shape).float().unsqueeze(0)
         return torch.tensor(o).float().unsqueeze(0)
     obs_tensors = [to_tensor(o) for o in obs]
     return obs_tensors, mask
