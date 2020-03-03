@@ -616,7 +616,7 @@ class Experiment:
 def run_hyperparam_search_extremes(space, proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
     params = hyperparams.utils.list_extremes(space)
-    params = utils.split_params(params[3000:4000])
+    params = utils.split_params(params[int(os.environ['SLURM_ARRAY_TASK_MIN']):(int(os.environ['SLURM_ARRAY_TASK_MAX'])+1)])
     funcs = [lambda: run_trial_with_checkpoint(**p) for p in params]
     utils.cc(funcs,proc=proc)
     return utils.get_all_results(directory)
@@ -1004,10 +1004,10 @@ def fit_gaussian_process(directory, agent_name):
     return x,y
 
 def run():
-    #utils.set_results_directory(
-    #        os.path.join(utils.get_results_root_directory(),'hrl-2'))
     utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'dev'))
+            os.path.join(utils.get_results_root_directory(),'hrl-2'))
+    #utils.set_results_directory(
+    #        os.path.join(utils.get_results_root_directory(),'dev'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     for agent_name in space.keys():
@@ -1029,8 +1029,9 @@ def run():
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+    run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
+    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
 
     #param = sample_convex_hull(directory)
     #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.0)
@@ -1048,7 +1049,7 @@ def run():
     #count = 0
     #for v,save in utils.modify_all_results(directory):
     #    if v is None or 'steps_to_reward' not in v[1] or len(v[1]['steps_to_reward']) < 100:
-    #        save(None)
+    #        #save(None)
     #        count += 1
     #print(count)
 
