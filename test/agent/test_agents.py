@@ -211,7 +211,13 @@ def test_HDQNAC_v2_state_dict():
                 q_net=DummyPolicy(torch.tensor([[0,0]]))
             )
 
+    assert agent1.q_net.fc.weight != agent2.q_net.fc.weight
+    assert agent1.controller_net.fc.weight != agent2.controller_net.fc.weight
+    assert agent1.policy_net.state_dict() != agent2.policy_net.state_dict()
+
     state = agent1.state_dict()
     agent2.load_state_dict(state)
 
-    # TODO: verify equality?
+    assert agent1.q_net.fc.weight == agent2.q_net.fc.weight
+    assert agent1.controller_net.fc.weight == agent2.controller_net.fc.weight
+    assert agent1.policy_net.state_dict() == agent2.policy_net.state_dict()
