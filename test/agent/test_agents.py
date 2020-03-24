@@ -2,6 +2,7 @@ import pytest
 import gym
 import numpy as np
 import torch
+import itertools
 
 import agent
 from experiments.hrl.model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
@@ -21,7 +22,7 @@ def create_agent(agent_name, env, seed=None):
                 q_net_learning_rate=0.01,
                 discount_factor=0.9,
                 polyak_rate=0.001,
-                behaviour_epsilon=0.01,
+                behaviour_epsilon=0.5,
                 replay_buffer_size=10,
                 controller_net=PolicyFunction(
                     layer_sizes=[],input_size=state_size,output_size=num_options),
@@ -41,7 +42,7 @@ def create_agent(agent_name, env, seed=None):
                 q_net_learning_rate=0.01,
                 discount_factor=0.9,
                 polyak_rate=0.001,
-                behaviour_epsilon=0.01,
+                behaviour_epsilon=0.5,
                 replay_buffer_size=10,
                 controller_net=PolicyFunction(
                     layer_sizes=[],input_size=state_size,output_size=num_options),
@@ -61,7 +62,7 @@ def create_agent(agent_name, env, seed=None):
                 q_net_learning_rate=0.01,
                 discount_factor=0.9,
                 polyak_rate=0.001,
-                behaviour_epsilon=0.01,
+                behaviour_epsilon=0.5,
                 replay_buffer_size=10,
                 controller_net=PolicyFunctionAugmentatedState(
                     layer_sizes=[],state_size=state_size,
@@ -218,20 +219,22 @@ def test_HDQNAC_v3():
     assert (s1 == torch.tensor([[0,0,1]]).float()).all()
     assert (s2 == torch.tensor([[0,1,0]]).float()).all()
 
-@pytest.mark.parametrize('agent_name', ['HDQNAgentWithDelayAC','HDQNAgentWithDelayAC_v2','HDQNAgentWithDelayAC_v3'])
-def test_HDQNAC_state_dict(agent_name):
+@pytest.mark.parametrize('agent_name,seed', list(itertools.product(['HDQNAgentWithDelayAC','HDQNAgentWithDelayAC_v2','HDQNAgentWithDelayAC_v3'],[0])))
+def test_HDQNAC_state_dict_all(agent_name,seed,num_steps=100):
     env = DummyEnv(actions='discrete',observations='box')
 
-    agent1 = create_agent(agent_name,env,seed=0)
-    agent2 = create_agent(agent_name,env,seed=0)
-    agent3 = create_agent(agent_name,env,seed=0)
+    agent1 = create_agent(agent_name,env,seed=seed)
+    agent2 = create_agent(agent_name,env)
+    agent3 = create_agent(agent_name,env)
 
     state = agent1.state_dict()
     agent2.load_state_dict(state)
 
+    assert agent1.obs_stack == agent2.obs_stack
+
     # verify equality
     done = True
-    for _ in range(10):
+    for _ in range(num_steps):
         if done:
             obs = env.reset()
             agent1.observe_change(obs)
@@ -249,10 +252,9 @@ def test_HDQNAC_state_dict(agent_name):
         agent2.train()
 
     state = agent1.state_dict()
-    agent3 = create_agent(agent_name,env,seed=0)
     agent3.load_state_dict(state)
 
-    for _ in range(10):
+    for _ in range(num_steps):
         if done:
             obs = env.reset()
             agent1.observe_change(obs)
@@ -266,52 +268,95 @@ def test_HDQNAC_state_dict(agent_name):
         agent1.observe_change(obs, reward, terminal=done)
         agent3.observe_change(obs, reward, terminal=done)
 
-        agent1.train()
-        agent3.train()
+        #agent1.train()
+        #agent3.train()
 
-def test_HDQNAC_v2_state_dict():
-    action_space = gym.spaces.Discrete(2)
-    observation_space = gym.spaces.Box(
-            high=np.array([1,1,1]),low=np.array([0,0,0]))
+@pytest.mark.parametrize('agent_name', ['HDQNAgentWithDelayAC','HDQNAgentWithDelayAC_v3'])
+def test_HDQNAC_state_dict_same_action_choices(agent_name,seed=0):
+    env = DummyEnv(actions='discrete',observations='box')
 
-    class DummyPolicy(torch.nn.Module):
-        def __init__(self,ret_val):
-            super().__init__()
-            self.fc = torch.nn.Linear(1,1)
-            self.call_stack = []
-            self.ret_val = ret_val
-        def forward(self,*params):
-            self.call_stack.append(params)
-            return self.ret_val.float()
+    agent1 = create_agent(agent_name,env,seed=seed)
+    agent2 = create_agent(agent_name,env)
 
-    agent1 = HDQNAgentWithDelayAC_v3(
-                action_space=action_space,
-                observation_space=observation_space,
-                discount_factor=1,
-                behaviour_epsilon=0,
-                replay_buffer_size=10,
-                controller_net=DummyPolicy(torch.tensor([[0.5,0.5]])),
-                subpolicy_nets=[DummyPolicy(torch.tensor([[0.5,0.5]])),DummyPolicy(torch.tensor([[0.5,0.5]]))],
-                q_net=DummyPolicy(torch.tensor([[0,0]]))
-            )
-    agent2 = HDQNAgentWithDelayAC_v3(
-                action_space=action_space,
-                observation_space=observation_space,
-                discount_factor=1,
-                behaviour_epsilon=0,
-                replay_buffer_size=10,
-                controller_net=DummyPolicy(torch.tensor([[0.5,0.5]])),
-                subpolicy_nets=[DummyPolicy(torch.tensor([[0.5,0.5]])),DummyPolicy(torch.tensor([[0.5,0.5]]))],
-                q_net=DummyPolicy(torch.tensor([[0,0]]))
-            )
+    state = agent1.state_dict()
+
+    obs = env.reset()
+    agent1.observe_change(obs)
+    a1 = [agent1.act() for _ in range(100)]
+    agent2.observe_change(obs)
+    a2 = [agent2.act() for _ in range(100)]
+
+    assert a1 != a2
+
+    agent2.load_state_dict(state)
+    agent2.observe_change(obs)
+    a2 = [agent2.act() for _ in range(100)]
+
+    assert a1 == a2
+
+@pytest.mark.parametrize('agent_name', ['HDQNAgentWithDelayAC','HDQNAgentWithDelayAC_v3'])
+def test_HDQNAC_state_dict_np_rng(agent_name,seed=0):
+    env = DummyEnv(actions='discrete',observations='box')
+
+    agent1 = create_agent(agent_name,env,seed=seed)
+    agent2 = create_agent(agent_name,env)
+
+    state = agent1.state_dict()
+
+    r1 = [agent1.rand.rand() for _ in range(100)]
+    r2 = [agent2.rand.rand() for _ in range(100)]
+
+    assert r1 != r2
+
+    agent2.load_state_dict(state)
+    r2 = [agent2.rand.rand() for _ in range(100)]
+
+    assert r1 == r2
+
+@pytest.mark.parametrize('agent_name', ['HDQNAgentWithDelayAC','HDQNAgentWithDelayAC_v3'])
+def test_HDQNAC_state_dict_torch_rng(agent_name,seed=0):
+    env = DummyEnv(actions='discrete',observations='box')
+
+    agent1 = create_agent(agent_name,env,seed=seed)
+    agent2 = create_agent(agent_name,env)
+
+    state = agent1.state_dict()
+
+    r1 = [torch.bernoulli(torch.tensor(0.5),generator=agent1.generator) for _ in range(100)]
+    r2 = [torch.bernoulli(torch.tensor(0.5),generator=agent2.generator) for _ in range(100)]
+
+    assert r1 != r2
+
+    agent2.load_state_dict(state)
+    r2 = [torch.bernoulli(torch.tensor(0.5),generator=agent2.generator) for _ in range(100)]
+
+    assert r1 == r2
+
+def test_HDQNAC_state_dict_dataloader(agent_name='HDQNAgentWithDelayAC',seed=0,num_steps=100):
+    env = DummyEnv(actions='discrete',observations='box')
+
+    agent1 = create_agent(agent_name,env,seed=seed)
+    agent2 = create_agent(agent_name,env)
 
     state = agent1.state_dict()
     agent2.load_state_dict(state)
 
-    ## TODO: verify equality?
-    #x = observation_space.sample()
-    #agent1.observe_change(x)
-    #agent2.observe_change(x)
-    #a1 = agent1.act()
-    #a2 = agent2.act()
-    #assert a1 == a2
+    assert agent1.obs_stack == agent2.obs_stack
+
+    # verify equality
+    done = True
+    for _ in range(num_steps):
+        if done:
+            obs = env.reset()
+            agent1.observe_change(obs)
+            agent2.observe_change(obs)
+        a1 = agent1.act()
+        a2 = agent2.act()
+
+        obs, reward, done, _ = env.step(a1)
+        agent1.observe_change(obs, reward, terminal=done)
+        agent2.observe_change(obs, reward, terminal=done)
+
+    for _ in range(10):
+        for x1,x2 in zip(agent1.get_dataloader(5),agent2.get_dataloader(5)):
+            assert str(x1) == str(x2)

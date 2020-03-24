@@ -99,7 +99,7 @@ class SeedableRandomSampler(torch.utils.data.sampler.RandomSampler):
         n = len(self.data_source)
         if self.replacement:
             return iter(torch.randint(high=n, size=(self.num_samples,), dtype=torch.int64, generator=self.generator).tolist())
-        return iter(torch.randperm(n).tolist())
+        return iter(torch.randperm(n,generator=self.generator).tolist())
 
 def compute_mask(*obs):
     mask = torch.tensor([[o is not None for o in obs]]).float()
@@ -342,12 +342,16 @@ class HDQNAgentWithDelayAC(Agent):
             self.current_obs = obs
             self.current_action = None
 
-    def train(self,batch_size=2,iterations=1):
-        if len(self.replay_buffer) < batch_size:
-            return
+    def get_dataloader(self,batch_size):
         sampler = SeedableRandomSampler(self.replay_buffer, generator=self.generator)
         dataloader = torch.utils.data.DataLoader(
                 self.replay_buffer, batch_size=batch_size, sampler=sampler)
+        return dataloader
+
+    def train(self,batch_size=2,iterations=1):
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = self.get_dataloader(batch_size)
         gamma = self.discount_factor
         tau = self.polyak_rate
         actor_optimizer = self.actor_optimizer
@@ -396,7 +400,7 @@ class HDQNAgentWithDelayAC(Agent):
 
         # Sample an action
         if not testing and self.rand.rand() < self.behaviour_epsilon:
-            action = self.action_space.sample()
+            action = self.rand.randint(self.action_space.n)
         else:
             action_probs = self.policy_net(*obs).squeeze().detach().numpy()
             #dist = torch.distributions.Categorical(action_probs)
@@ -463,6 +467,7 @@ class HDQNAgentWithDelayAC(Agent):
 
     def state_dict(self):
         return {
+                'behaviour_epsilon': self.behaviour_epsilon,
                 'q_net': self.q_net.state_dict(),
                 'q_net_target': self.q_net_target.state_dict(),
                 'controller_net': self.controller_net.state_dict(),
@@ -479,10 +484,11 @@ class HDQNAgentWithDelayAC(Agent):
                 'current_action': self.current_action,
                 'current_terminal': self.current_terminal,
                 'rand': self.rand.get_state(),
-                'generator': self.generator.get_state()
+                'generator': self.generator.get_state(),
         }
 
     def load_state_dict(self, state):
+        self.behaviour_epsilon = state['behaviour_epsilon']
         self.q_net.load_state_dict(state['q_net'])
         self.q_net_target.load_state_dict(state['q_net_target'])
         self.controller_net.load_state_dict(state['controller_net'])
@@ -497,7 +503,7 @@ class HDQNAgentWithDelayAC(Agent):
         self.critic_optimizer.load_state_dict(state['critic_optimizer'])
         self.replay_buffer.load_state_dict(state['replay_buffer'])
 
-        self.obs_stack = state['obs_stack']
+        self.obs_stack = copy.deepcopy(state['obs_stack'])
         self.current_obs = state['current_obs']
         self.current_action = state['current_action']
         self.current_terminal = state['current_terminal']
@@ -520,9 +526,7 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
     def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
-        sampler = SeedableRandomSampler(self.replay_buffer, generator=self.generator)
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=batch_size, sampler=sampler)
+        dataloader = self.get_dataloader(batch_size)
         gamma = self.discount_factor
         tau = self.polyak_rate
         actor_optimizer = self.actor_optimizer
@@ -551,19 +555,19 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
             critic_loss.backward()
             critic_optimizer.step()
 
-            # Update subpolicy Q functions
-            subpolicy_critic_optimizer.zero_grad()
-            subpolicy_loss_total = 0
-            q_s2 = self.q_net_target(s2)
-            for q_net,p_net in zip(self.subpolicy_q_nets,self.subpolicy_nets):
-                action_probs = p_net(s1)
-                next_state_vals = (action_probs * q_s2).sum(1)
-                val_target = r2+gamma*next_state_vals*(1-t)
-                val_pred = q_net(s1)[range(batch_size),a1.squeeze()]
-                loss = ((val_target-val_pred)**2).mean()
-                subpolicy_loss_total += loss
-            subpolicy_loss_total.backward()
-            subpolicy_critic_optimizer.step()
+            ## Update subpolicy Q functions
+            #subpolicy_critic_optimizer.zero_grad()
+            #subpolicy_loss_total = 0
+            #q_s2 = self.q_net_target(s2)
+            #for q_net,p_net in zip(self.subpolicy_q_nets,self.subpolicy_nets):
+            #    action_probs = p_net(s1)
+            #    next_state_vals = (action_probs * q_s2).sum(1)
+            #    val_target = r2+gamma*next_state_vals*(1-t)
+            #    val_pred = q_net(s1)[range(batch_size),a1.squeeze()]
+            #    loss = ((val_target-val_pred)**2).mean()
+            #    subpolicy_loss_total += loss
+            #subpolicy_loss_total.backward()
+            #subpolicy_critic_optimizer.step()
 
             # Update policy function
             num_subpolicies = len(self.subpolicy_nets)
@@ -642,9 +646,7 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
     def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
-        sampler = SeedableRandomSampler(self.replay_buffer, generator=self.generator)
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=batch_size, sampler=sampler)
+        dataloader = self.get_dataloader(batch_size)
         gamma = self.discount_factor
         tau = self.polyak_rate
         actor_optimizer = self.actor_optimizer
@@ -747,7 +749,7 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
 
         # Sample an action
         if not testing and self.rand.rand() < self.behaviour_epsilon:
-            action = self.action_space.sample()
+            action = self.rand.randint(self.action_space.n)
         else:
             action_probs = self.policy_net(obs0,action0,obs1,mask).squeeze().detach().numpy()
             action = self.rand.choice(len(action_probs),p=action_probs)

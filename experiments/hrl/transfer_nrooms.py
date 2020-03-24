@@ -125,7 +125,6 @@ def create_agent(agent_name, env, device, seed, **agent_params):
     before_step = lambda s: None
     after_step = lambda s: None
 
-    # FIXME: This won't warn me if I make a typo in the param name.
     gamma = agent_params.pop('gamma',0.9)
     eps_b = agent_params.pop('eps_b',0.05)
     num_options = agent_params.pop('num_options',3)
@@ -478,7 +477,7 @@ class Experiment:
         self.steps = 0
 
         env_name='gym_fourrooms:fourrooms-v0'
-        pprint.pprint(self.args)
+        #pprint.pprint(self.args)
         if seed is not None:
             torch.manual_seed(seed) # Required for consistent random initialization of neural net weights
 
@@ -597,6 +596,8 @@ class Experiment:
         self.state_action_values = state['state_action_values']
         self.steps_to_reward = state['steps_to_reward']
         self.step_range = range(state['steps'],state['args']['total_steps'])
+        if state['args']['verbose']:
+            self.step_range = tqdm(self.step_range, total=state['args']['total_steps'], initial=self.step_range.start)
         self.done = state['done']
 
     @staticmethod
@@ -1003,11 +1004,14 @@ def fit_gaussian_process(directory, agent_name):
     breakpoint()
     return x,y
 
+def aggregate_results(results_directory):
+    pass
+
 def run():
-    utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'hrl-2'))
     #utils.set_results_directory(
-    #        os.path.join(utils.get_results_root_directory(),'dev'))
+    #        os.path.join(utils.get_results_root_directory(),'hrl-2'))
+    utils.set_results_directory(
+            os.path.join(utils.get_results_root_directory(),'dev'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     for agent_name in space.keys():
@@ -1029,7 +1033,7 @@ def run():
 
     #run_hyperparam_search(space['ActorCritic'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
     #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
 
@@ -1038,7 +1042,33 @@ def run():
     #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.05, scoring='improvement_prob', target_score=182.58163722924036)
     #param = sample_lsh(directory, 'ActorCritic', n_planes=8, perturbance=0.01)
     #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
-    #run_trial(**param)
+    param = {'agent_name': 'HDQNAgentWithDelayAC',
+        'batch_size': 256,
+        'cnet_layer_size': 0,
+        'cnet_n_layers': 0,
+        'controller_learning_rate': 0.00010000000000000009,
+        'eps_b': 0,
+        'gamma': 0.9,
+        'min_replay_buffer_size': 10,
+        'num_options': 3,
+        'polyak_rate': 0.001,
+        'q_net_learning_rate': 0.00010000000000000009,
+        'qnet_layer_size': 0,
+        'qnet_n_layers': 0,
+        'snet_layer_size': 0,
+        'snet_n_layers': 0,
+        'subpolicy_learning_rate': 0.00010000000000000009,
+        #'subpolicy_q_net_learning_rate': 0.10000000000000002,
+        'checkpoint_path': None,
+        'directory': directory,
+        'epoch': 100,
+        'keep_checkpoint': False,
+        'seed': 3,
+        'steps_per_task': 300,
+        'test_iters': 2,
+        'total_steps': 1000,
+        'verbose': True}
+    run_trial_with_checkpoint(**param)
 
     #run_bayes_opt(directory,'ActorCritic')
     #run_bayes_opt(directory,'HDQNAgentWithDelayAC_v2')
@@ -1058,3 +1088,13 @@ def run():
     #    exp = Experiment.from_checkpoint(fn)
     #    exp.run()
     #    break
+
+    #fns = [
+    #    '/network/tmp1/huanghow/hrl-2/checkpoints/382536_238.checkpoint.pkl',
+    #    '/network/tmp1/huanghow/hrl-2/checkpoints/382536_607.checkpoint.pkl',
+    #    '/network/tmp1/huanghow/hrl-2/checkpoints/382536_895.checkpoint.pkl',
+    #    '/network/tmp1/huanghow/hrl-2/checkpoints/382536_979.checkpoint.pkl',
+    #]
+    #for fn in fns:
+    #    exp = Experiment.from_checkpoint(fn)
+    #    exp.run()
