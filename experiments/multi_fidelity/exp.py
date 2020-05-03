@@ -11,7 +11,7 @@ from agent.mf_dqn_agent import MultiFidelityDQNAgent, MultiFidelityDiscreteAgent
 from agent.policy import get_greedy_epsilon_policy
 
 import warnings
-warnings.warn = lambda x: None
+warnings.warn = lambda *x,**y: None
 
 class RewardNetwork(torch.nn.Module):
     def __init__(self,in_size):
@@ -339,16 +339,18 @@ def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=N
             directory=directory)
     return (args, rewards, state_action_values)
 
-def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False):
+def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10]):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
     test_env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
     test_env.reward = env.reward
-    oracles = [
-            env.create_reward_estimates(100),
-            env.reward
-    ]
-    oracle_costs = [1,10]
+    oracles = []
+    for iters in oracle_iters:
+        if iters is None:
+            oracles.append(env.reward)
+        else:
+            oracles.append(env.create_reward_estimates(100))
+    true_reward = env.reward
 
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -367,6 +369,7 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_de
             oracles=[
                     lambda x: oracle(torch.tensor(x).float()).item() for oracle in oracles
             ],
+            true_reward = lambda x: true_reward(torch.tensor(x).float()).item(),
             oracle_costs=oracle_costs,
             transition_function=transition_function,
             max_depth=max_depth
@@ -387,7 +390,6 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_de
             if steps % epoch == 0:
                 r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
                 rewards.append(r)
-                state_action_values.append(sa_vals)
                 if verbose:
                     tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
 
@@ -397,7 +399,7 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_de
                 continue
 
             # Linearly Anneal epsilon
-            agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/min(1000000,max_steps),1))*(1-eps_b)+eps_b)
+            #agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/min(1000000,max_steps),1))*(1-eps_b)+eps_b)
 
             # Run step
             if done:
@@ -423,6 +425,27 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_de
             directory=directory)
     return (args, rewards, state_action_values)
 
+def plot(results_directory, plot_directory, exp_names):
+    import matplotlib
+    from matplotlib import pyplot as plt
+    for exp_name in exp_names:
+        print('searching',os.path.join(results_directory,exp_name))
+        results = utils.get_all_results(os.path.join(results_directory,exp_name))
+        data = [np.array(r[1]['rewards']).flatten() for r in results]
+        if len(data) == 0:
+            continue
+        if len(data) > 1:
+            max_len = max(*[len(d) for d in data])
+            data = [d for d in data if len(d) == max_len]
+        data = np.array(data)
+        x = range(0,501,10)
+        y = data.mean(axis=0)
+        plt.plot(x,y,label=exp_name)
+    plt.xlabel('Resources Spent')
+    plt.ylabel('Instantaneous Regret')
+    plt.legend(loc='best')
+    plt.show()
+
 def run():
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'multifid'))
@@ -430,7 +453,25 @@ def run():
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     print(directory)
 
-    run_trial_mf_discrete(directory=directory,verbose=True)
+    experiments = {
+            'baseline-hf': {
+                'oracle_iters': [None],
+                'oracle_costs': [10]
+            },
+            'baseline-lf-100': {
+                'oracle_iters': [100],
+                'oracle_costs': [1]
+            },
+            'mf-100': {
+                'oracle_iters': [100,None],
+                'oracle_costs': [1,10]
+            },
+    }
+
+    exp_name = 'mf-100'
+    #exp_name = 'baseline-hf'
+    run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
+    plot(directory,plot_directory,experiments.keys())
 
 if __name__=='__main__':
     pass

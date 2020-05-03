@@ -15,9 +15,9 @@ from .policy import get_greedy_epsilon_policy, greedy_action
 
 """
 TODO:
-- Don't call the oracle on a state if it's already been called on that state
 - Set the beta/lambda/zeta parameters properly (As described by the paper)
 - Store values exactly instead of with a functoin approximator to make sure the algorithm works first
+- Learn a second value function that represents the true value for exploitation purposes
 """
 
 class MultiFidelityDQNAgent(DQNAgent):
@@ -200,7 +200,7 @@ class MultiFidelityDQNAgent(DQNAgent):
         return rewards, sa_vals
 
 class MultiFidelityDiscreteAgent(Agent):
-    def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], warmup_steps=100, max_depth=5):
+    def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5):
         self.action_space = action_space
         self.observation_space = observation_space
         self.behaviour_policy = behaviour_policy
@@ -211,6 +211,7 @@ class MultiFidelityDiscreteAgent(Agent):
         self.state_values_exploit = {}
 
         self.oracles = oracles
+        self.true_reward = true_reward
         self.transition_function = transition_function
 
         self.zeta = 0.1 # Max difference between levels of fidelity
@@ -219,9 +220,17 @@ class MultiFidelityDiscreteAgent(Agent):
         self.estimates = [GaussianProcessRegressor() for _ in oracles]
         self.oracle_data = None # Values from oracle calls
         self.oracle_costs = oracle_costs # Runtime costs for each oracle
+        self.last_query = [0]*len(oracles) # Number of iterations since each oracle was queried
 
         self.warmup_steps = warmup_steps
         self.warmup_states = []
+
+        max_val = -float('inf')
+        for s in self.all_states():
+            val = self.true_reward(torch.tensor(s).float())
+            max_val = max(max_val,val)
+        #print('max val ',max_val)
+        self.max_val = max_val
 
     def observe_change(self, obs, testing=False):
         if testing:
@@ -251,7 +260,7 @@ class MultiFidelityDiscreteAgent(Agent):
         phi = mu + (beta**(1/2))*std+zeta
         return phi.item()
 
-    def compute_state_value(self, state):
+    def compute_state_value_explore(self, state):
         """
         state - a single state (np.array)
         """
@@ -260,42 +269,56 @@ class MultiFidelityDiscreteAgent(Agent):
             max_val = max(*[self.state_values_explore[tuple(s.astype(np.int).tolist())] for s in n])
         else:
             max_val = -float('inf')
-        max_phi = max(*[self.compute_state_value_ucb(state,fidelity) for fidelity in range(len(self.oracles))])
+        phi = [self.compute_state_value_ucb(state,fidelity) for fidelity in range(len(self.oracles))]
+        if len(phi) == 1:
+            max_phi = phi[0]
+        else:
+            max_phi = max(*phi)
         return max(max_val,max_phi)
 
-    def train(self):
-        if self.oracle_data is None:
-            return # Don't train until we're done with warmup
-        def all_states(starting_state=np.zeros(self.observation_space.low.shape),max_depth=self.max_depth):
+    def compute_state_value_exploit(self, state):
+        n = list(self.neighbours(state))
+        if len(n) > 0:
+            max_val = max(*[self.state_values_exploit[tuple(s.astype(np.int).tolist())] for s in n])
+        else:
+            max_val = -float('inf')
+        current_val = self.estimates[-1].predict(state.reshape(1,-1)).item()
+        return max(max_val,current_val)
+
+    def all_states(self):    
+        def generate(starting_state=np.zeros(self.observation_space.low.shape),max_depth=self.max_depth):
             if max_depth > 0:
                 for a in range(self.action_space.n):
                     diff = np.zeros(self.observation_space.low.shape)
                     diff[a] = 1
-                    yield from all_states(starting_state+diff,max_depth-1)
+                    yield from generate(starting_state+diff,max_depth-1)
             yield starting_state
+        return generate()
+
+    def train(self):
+        if self.oracle_data is None:
+            return # Don't train until we're done with warmup
 
         #for s in tqdm(list(all_states()),desc='training'):
-        for s in all_states():
-            self.state_values_explore[tuple(s.tolist())] = self.compute_state_value(s)
+        for s in self.all_states():
+            self.state_values_explore[tuple(s.tolist())] = self.compute_state_value_explore(s)
+            self.state_values_exploit[tuple(s.tolist())] = self.compute_state_value_exploit(s)
 
     def act(self, testing=False):
         """ Check if we need more information on current state. """
-        #observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
         if testing:
             obs = self.current_obs_testing
             policy = self.target_policy
+            val_func = self.state_values_exploit
         else:
-            # TODO
-            # Check if we need more info on current state
-            # If so, check which fidelity we need to evaluate at
-            # If not, transition to next best state
             obs = self.current_obs
             policy = self.behaviour_policy
+            val_func = self.state_values_explore
         if len(self.state_values_explore) == 0:
             self.warmup_states.append(obs)
             return self.action_space.sample()
         next_obs = [self.transition_function(obs,a) for a in range(self.action_space.n)]
-        vals = torch.tensor([self.state_values_explore[tuple(o.astype(np.int).tolist())] for o in next_obs])
+        vals = torch.tensor([val_func[tuple(o.astype(np.int).tolist())] for o in next_obs])
         dist = policy(vals)
         action = dist.sample().item()
         self.current_action = action
@@ -319,20 +342,31 @@ class MultiFidelityDiscreteAgent(Agent):
             y = [self.oracle_data[i][k] for k in x]
             self.estimates[i].fit(x,y)
 
+    def update_gamma(self, fidelity):
+        """ To be called whenever an oracle is called. """
+        for i in range(len(self.oracles)):
+            self.last_query[i] += 1
+        self.last_query[fidelity] = 0
+        for i in range(len(self.oracles)-1):
+            if self.last_query[i] >= self.oracle_costs[i+1]/self.oracle_costs[i]:
+                self.gamma[i] *= 2
+
     def evaluate_obs(self):
         # Check if obs needs evaluating
         obs = self.current_obs
         #if self.oracle_data is None:
         if len(self.state_values_explore) == 0:
             return 0
-        #if self.compute_state_value(obs) >= self.state_values_explore[tuple(obs.tolist())]:
-        if True:
+        #if True:
+        if self.compute_state_value_explore(obs) >= self.state_values_explore[tuple(obs.tolist())]:
             # evaluate and return runtime
             for i in range(len(self.oracles)):
                 _,std = self.estimates[i].predict(obs.reshape(1,-1),return_std=True)
                 if np.sqrt(self.beta)*std < self.gamma[i] and i < len(self.oracles)-1:
                     # If we're reasonably certain of this estimate, move on to a higher fidelity
                     continue
+                # Update gamma
+                self.update_gamma(i)
                 # Evaluate at fidelity i
                 self.oracle_data[i][tuple(obs.tolist())] = self.oracles[i](obs)
                 # Update Gaussian processes
@@ -367,7 +401,8 @@ class MultiFidelityDiscreteAgent(Agent):
         fidelity = len(self.oracles)-1
         scores = [self.compute_state_value_ucb(obs,fidelity) for obs in all_obs]
         i = np.argmax(scores)
-        reward = self.oracles[-1](all_obs[i])
+        reward = self.true_reward(all_obs[i])
+        reward = self.max_val - reward # Regret
         return reward, None
 
     def test(self, env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
