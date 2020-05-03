@@ -475,10 +475,19 @@ def run():
             },
     }
 
-    exp_name = 'mf-100'
-    #exp_name = 'baseline-lf-100'
-    run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
-    plot(directory,plot_directory,experiments.keys())
+    import sys
+    print(sys.argv)
+    if len(sys.argv) == 2:
+        if sys.argv[1] == 'plot':
+            plot(directory,plot_directory,experiments.keys())
+        else:
+            exp_name = sys.argv[1]
+            run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
+    else:
+        exp_name = 'baseline-hf'
+        exp_name = 'baseline-lf-100'
+        exp_name = 'mf-100'
+        run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
 
 if __name__=='__main__':
     pass
