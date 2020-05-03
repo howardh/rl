@@ -35,7 +35,10 @@ class QNetwork(torch.nn.Module):
         return x
 
 class DQNAgent(Agent):
-    def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), q_net=None):
+    def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), q_net=None, replay_buffer_size=50000):
+        self.action_space = action_space
+        self.observation_space = observation_space
+
         self.discount_factor = discount_factor
         self.polyak_rate = polyak_rate
         self.device = device
@@ -49,7 +52,7 @@ class DQNAgent(Agent):
         # State (testing)
         self.current_obs_testing = None
 
-        self.replay_buffer = ReplayBuffer(50000)
+        self.replay_buffer = ReplayBuffer(replay_buffer_size)
         if q_net is None:
             self.q_net = QNetwork(action_space.n).to(device)
         else:

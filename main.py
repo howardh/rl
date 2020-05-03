@@ -4,7 +4,8 @@
 #from experiments.hrl.long_trial_oneroom import run
 #from experiments.hrl.long_trial_hierarchical_tworooms import run
 #from experiments.hrl.fully_differentiable_tworooms import run
-from experiments.hrl.transfer_nrooms import run
+#from experiments.hrl.transfer_nrooms import run
+from experiments.multi_fidelity.exp import run
 
 #while True:
 #    q = run()
