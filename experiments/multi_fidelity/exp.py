@@ -427,6 +427,7 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_de
 
 def plot(results_directory, plot_directory, exp_names):
     import matplotlib
+    matplotlib.use('Agg')
     from matplotlib import pyplot as plt
     for exp_name in exp_names:
         print('searching',os.path.join(results_directory,exp_name))
@@ -444,7 +445,12 @@ def plot(results_directory, plot_directory, exp_names):
     plt.xlabel('Resources Spent')
     plt.ylabel('Instantaneous Regret')
     plt.legend(loc='best')
-    plt.show()
+    #plt.show()
+    plot_path = os.path.join(plot_directory,'plot.png')
+    if not os.path.isdir(plot_directory):
+        os.makedirs(plot_directory)
+    plt.savefig(plot_path)
+    print('Saved fig to',plot_path)
 
 def run():
     utils.set_results_directory(
@@ -469,8 +475,8 @@ def run():
     }
 
     exp_name = 'mf-100'
-    #exp_name = 'baseline-hf'
-    run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
+    exp_name = 'baseline-lf-100'
+    #run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
     plot(directory,plot_directory,experiments.keys())
 
 if __name__=='__main__':
