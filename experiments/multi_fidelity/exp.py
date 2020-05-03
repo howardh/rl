@@ -388,7 +388,8 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_de
 
             # Run tests
             if steps % epoch == 0:
-                r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
+                if skip_steps == 0: # Results from an oracle call should not affect anything until after it's done
+                    r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
                 rewards.append(r)
                 if verbose:
                     tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
@@ -475,8 +476,8 @@ def run():
     }
 
     exp_name = 'mf-100'
-    exp_name = 'baseline-lf-100'
-    #run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
+    #exp_name = 'baseline-lf-100'
+    run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
     plot(directory,plot_directory,experiments.keys())
 
 if __name__=='__main__':
