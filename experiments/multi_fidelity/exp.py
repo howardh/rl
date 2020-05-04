@@ -491,7 +491,8 @@ def run():
             plot(directory,plot_directory,experiments.keys())
         else:
             exp_name = sys.argv[1]
-            run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
+            while True:
+                run_trial_mf_discrete(directory=os.path.join(directory,exp_name),verbose=True,**experiments[exp_name])
     else:
         exp_name = 'baseline-hf'
         exp_name = 'baseline-lf-100'
