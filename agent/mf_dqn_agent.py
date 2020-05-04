@@ -254,10 +254,12 @@ class MultiFidelityDiscreteAgent(Agent):
         return output
 
     def compute_state_value_ucb(self,state,fidelity):
+        max_fidelity = len(self.oracles)
+        fidelity_diff = max_fidelity-fidelity
+        zeta = self.zeta*fidelity_diff
         gp = self.estimates[fidelity]
         mu,std = gp.predict(state.reshape(1,-1),return_std=True)
         beta = self.beta
-        zeta = self.zeta
         phi = mu + (beta**(1/2))*std+zeta
         return phi.item()
 
@@ -371,17 +373,20 @@ class MultiFidelityDiscreteAgent(Agent):
                 if np.sqrt(self.beta)*std < self.gamma[i] and i < len(self.oracles)-1:
                     # If we're reasonably certain of this estimate, move on to a higher fidelity
                     continue
-                # Update gamma
-                self.update_gamma(i)
+                # Don't evaluate if it's already been evaluated
+                if tuple(obs.tolist()) in self.oracles[i]:
+                    continue
                 # Evaluate at fidelity i
                 self.oracle_data[i][tuple(obs.tolist())] = self.oracles[i](obs)
                 # Update Gaussian processes
                 x = list(self.oracle_data[i].keys())
                 y = [self.oracle_data[i][k] for k in x]
                 self.estimates[i].fit(x,y)
+                # Update gamma
+                self.update_gamma(i)
                 # Return runtime
                 return self.oracle_costs[i]
-            raise Exception('Something went wrong. No oracles could be called.')
+            return 0
         else:
             # Nothing to do, so runtime is 0
             return 0
