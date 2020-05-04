@@ -200,12 +200,13 @@ class MultiFidelityDQNAgent(DQNAgent):
         return rewards, sa_vals
 
 class MultiFidelityDiscreteAgent(Agent):
-    def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5):
+    def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5,evaluation_method=None):
         self.action_space = action_space
         self.observation_space = observation_space
         self.behaviour_policy = behaviour_policy
         self.target_policy = target_policy
         self.max_depth = max_depth
+        self.evaluation_method = evaluation_method
 
         self.state_values_explore = {}
         self.state_values_exploit = {}
@@ -309,7 +310,12 @@ class MultiFidelityDiscreteAgent(Agent):
         if testing:
             obs = self.current_obs_testing
             policy = self.target_policy
-            val_func = self.state_values_exploit
+            if self.evaluation_method == 'val':
+                val_func = self.state_values_exploit
+            elif self.evaluation_method == 'ucb':
+                val_func = self.state_values_explore
+            else:
+                raise Exception('Invalid eval method')
         else:
             obs = self.current_obs
             policy = self.behaviour_policy

@@ -339,7 +339,7 @@ def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=N
             directory=directory)
     return (args, rewards, state_action_values)
 
-def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10]):
+def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10]):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
     test_env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
@@ -372,7 +372,8 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, directory=None, max_de
             true_reward = lambda x: true_reward(torch.tensor(x).float()).item(),
             oracle_costs=oracle_costs,
             transition_function=transition_function,
-            max_depth=max_depth
+            max_depth=max_depth,
+            evaluation_method=evaluation_method
     )
 
     rewards = []
@@ -463,15 +464,23 @@ def run():
     experiments = {
             'baseline-hf': {
                 'oracle_iters': [None],
-                'oracle_costs': [10]
+                'oracle_costs': [10],
+                'evaluation_method': 'val'
             },
             'baseline-lf-100': {
                 'oracle_iters': [100],
-                'oracle_costs': [1]
+                'oracle_costs': [1],
+                'evaluation_method': 'val'
             },
             'mf-100': {
                 'oracle_iters': [100,None],
-                'oracle_costs': [1,10]
+                'oracle_costs': [1,10],
+                'evaluation_method': 'val'
+            },
+            'mf-100-ucb': {
+                'oracle_iters': [100,None],
+                'oracle_costs': [1,10],
+                'evaluation_method': 'ucb'
             },
     }
 
