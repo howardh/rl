@@ -200,13 +200,14 @@ class MultiFidelityDQNAgent(DQNAgent):
         return rewards, sa_vals
 
 class MultiFidelityDiscreteAgent(Agent):
-    def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5,evaluation_method=None):
+    def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5,evaluation_method=None,evaluation_criterion=None):
         self.action_space = action_space
         self.observation_space = observation_space
         self.behaviour_policy = behaviour_policy
         self.target_policy = target_policy
         self.max_depth = max_depth
         self.evaluation_method = evaluation_method
+        self.evaluation_criterion = evaluation_criterion
 
         self.state_values_explore = {}
         self.state_values_exploit = {}
@@ -360,13 +361,20 @@ class MultiFidelityDiscreteAgent(Agent):
                 self.gamma[i] *= 2
 
     def evaluate_obs(self):
-        # Check if obs needs evaluating
+        """ Call oracle on the current observation if needed. """
         obs = self.current_obs
-        #if self.oracle_data is None:
+        # Check if we're done warmup
         if len(self.state_values_explore) == 0:
             return 0
-        #if True:
-        if self.compute_state_value_explore(obs) >= self.state_values_explore[tuple(obs.tolist())]:
+        # Check if obs needs evaluating
+        if self.evaluation_criterion == 'kandasamy':
+            needs_evaluation = self.compute_state_value_explore(obs) >= self.state_values_explore[tuple(obs.tolist())]
+        elif self.evaluation_method == 'always':
+            needs_evaluation = True
+        else:
+            raise Exception('Invalid evaluation criterion %s' % self.evaluation_criterion)
+        # Evaluate
+        if needs_evaluation
             # evaluate and return runtime
             for i in range(len(self.oracles)):
                 _,std = self.estimates[i].predict(obs.reshape(1,-1),return_std=True)

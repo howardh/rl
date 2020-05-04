@@ -339,7 +339,7 @@ def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=N
             directory=directory)
     return (args, rewards, state_action_values)
 
-def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10]):
+def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val', evaluation_criterion='kandasamy' directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10]):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
     test_env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
@@ -373,7 +373,8 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val
             oracle_costs=oracle_costs,
             transition_function=transition_function,
             max_depth=max_depth,
-            evaluation_method=evaluation_method
+            evaluation_method=evaluation_method,
+            evaluation_criterion=evaluation_criterion
     )
 
     rewards = []
