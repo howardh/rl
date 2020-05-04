@@ -339,7 +339,7 @@ def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=N
             directory=directory)
     return (args, rewards, state_action_values)
 
-def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val', evaluation_criterion='kandasamy' directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10]):
+def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10]):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
     test_env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
@@ -463,25 +463,59 @@ def run():
     print(directory)
 
     experiments = {
-            'baseline-hf': {
+            'baseline-hf-k': {
                 'oracle_iters': [None],
                 'oracle_costs': [10],
-                'evaluation_method': 'val'
+                'evaluation_method': 'val',
+                'evaluation_criterion': 'kandasamy'
             },
-            'baseline-lf-100': {
+            'baseline-hf-ucb-k': {
+                'oracle_iters': [None],
+                'oracle_costs': [10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'kandasamy'
+            },
+            'baseline-hf-a': {
+                'oracle_iters': [None],
+                'oracle_costs': [10],
+                'evaluation_method': 'val',
+                'evaluation_criterion': 'always'
+            },
+            'baseline-hf-ucb-a': {
+                'oracle_iters': [None],
+                'oracle_costs': [10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'always'
+            },
+            'baseline-lf-100-k': {
                 'oracle_iters': [100],
                 'oracle_costs': [1],
-                'evaluation_method': 'val'
+                'evaluation_method': 'val',
+                'evaluation_criterion': 'kandasamy'
             },
-            'mf-100': {
+            'baseline-lf-100-ucb-k': {
+                'oracle_iters': [100],
+                'oracle_costs': [1],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'kandasamy'
+            },
+            'mf-100-k': {
                 'oracle_iters': [100,None],
                 'oracle_costs': [1,10],
-                'evaluation_method': 'val'
+                'evaluation_method': 'val',
+                'evaluation_criterion': 'kandasamy'
             },
-            'mf-100-ucb': {
+            'mf-100-ucb-k': {
                 'oracle_iters': [100,None],
                 'oracle_costs': [1,10],
-                'evaluation_method': 'ucb'
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'kandasamy'
+            },
+            'mf-100-ucb-a': {
+                'oracle_iters': [100,None],
+                'oracle_costs': [1,10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'always'
             },
     }
 

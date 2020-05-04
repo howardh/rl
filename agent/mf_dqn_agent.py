@@ -255,7 +255,7 @@ class MultiFidelityDiscreteAgent(Agent):
         return output
 
     def compute_state_value_ucb(self,state,fidelity):
-        max_fidelity = len(self.oracles)
+        max_fidelity = len(self.oracles)-1
         fidelity_diff = max_fidelity-fidelity
         zeta = self.zeta*fidelity_diff
         gp = self.estimates[fidelity]
@@ -374,7 +374,7 @@ class MultiFidelityDiscreteAgent(Agent):
         else:
             raise Exception('Invalid evaluation criterion %s' % self.evaluation_criterion)
         # Evaluate
-        if needs_evaluation
+        if needs_evaluation:
             # evaluate and return runtime
             for i in range(len(self.oracles)):
                 _,std = self.estimates[i].predict(obs.reshape(1,-1),return_std=True)
@@ -382,7 +382,7 @@ class MultiFidelityDiscreteAgent(Agent):
                     # If we're reasonably certain of this estimate, move on to a higher fidelity
                     continue
                 # Don't evaluate if it's already been evaluated
-                if tuple(obs.tolist()) in self.oracles[i]:
+                if tuple(obs.tolist()) in self.oracle_data[i]:
                     continue
                 # Evaluate at fidelity i
                 self.oracle_data[i][tuple(obs.tolist())] = self.oracles[i](obs)
