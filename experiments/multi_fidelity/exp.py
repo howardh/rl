@@ -349,7 +349,7 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val
         if iters is None:
             oracles.append(env.reward)
         else:
-            oracles.append(env.create_reward_estimates(100))
+            oracles.append(env.create_reward_estimates(iters))
     true_reward = env.reward
 
     if torch.cuda.is_available():

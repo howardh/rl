@@ -15,9 +15,7 @@ from .policy import get_greedy_epsilon_policy, greedy_action
 
 """
 TODO:
-- Set the beta/lambda/zeta parameters properly (As described by the paper)
-- Store values exactly instead of with a functoin approximator to make sure the algorithm works first
-- Learn a second value function that represents the true value for exploitation purposes
+- Done? Wait for experiments to run.
 """
 
 class MultiFidelityDQNAgent(DQNAgent):
@@ -308,6 +306,9 @@ class MultiFidelityDiscreteAgent(Agent):
             self.state_values_explore[tuple(s.tolist())] = self.compute_state_value_explore(s)
             self.state_values_exploit[tuple(s.tolist())] = self.compute_state_value_exploit(s)
 
+    def is_warming_up(self):
+        return len(self.state_values_explore) == 0
+
     def act(self, testing=False):
         """ Check if we need more information on current state. """
         if testing:
@@ -319,13 +320,15 @@ class MultiFidelityDiscreteAgent(Agent):
                 val_func = self.state_values_explore
             else:
                 raise Exception('Invalid eval method')
+            if self.is_warming_up():
+                return self.action_space.sample()
         else:
             obs = self.current_obs
             policy = self.behaviour_policy
             val_func = self.state_values_explore
-        if len(self.state_values_explore) == 0:
-            self.warmup_states.append(obs)
-            return self.action_space.sample()
+            if self.is_warming_up():
+                self.warmup_states.append(obs)
+                return self.action_space.sample()
         next_obs = [self.transition_function(obs,a) for a in range(self.action_space.n)]
         vals = torch.tensor([val_func[tuple(o.astype(np.int).tolist())] for o in next_obs])
         dist = policy(vals)
@@ -364,7 +367,7 @@ class MultiFidelityDiscreteAgent(Agent):
         """ Call oracle on the current observation if needed. """
         obs = self.current_obs
         # Check if we're done warmup
-        if len(self.state_values_explore) == 0:
+        if self.is_warming_up():
             return 0
         # Check if obs needs evaluating
         if self.evaluation_criterion == 'kandasamy':
