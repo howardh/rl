@@ -369,7 +369,7 @@ class MultiFidelityDiscreteAgent(Agent):
         # Check if obs needs evaluating
         if self.evaluation_criterion == 'kandasamy':
             needs_evaluation = self.compute_state_value_explore(obs) >= self.state_values_explore[tuple(obs.tolist())]
-        elif self.evaluation_method == 'always':
+        elif self.evaluation_criterion == 'always':
             needs_evaluation = True
         else:
             raise Exception('Invalid evaluation criterion %s' % self.evaluation_criterion)

@@ -444,7 +444,7 @@ def plot(results_directory, plot_directory, exp_names):
         data = np.array(data)
         x = range(0,501,10)
         y = data.mean(axis=0)
-        plt.plot(x,y,label=exp_name)
+        plt.plot(x,y,label='%s (%d)'%(exp_name,data.shape[0]))
     plt.xlabel('Resources Spent')
     plt.ylabel('Instantaneous Regret')
     plt.legend(loc='best')
@@ -505,6 +505,12 @@ def run():
                 'evaluation_method': 'val',
                 'evaluation_criterion': 'kandasamy'
             },
+            'mf-100-a': {
+                'oracle_iters': [100,None],
+                'oracle_costs': [1,10],
+                'evaluation_method': 'val',
+                'evaluation_criterion': 'always'
+            },
             'mf-100-ucb-k': {
                 'oracle_iters': [100,None],
                 'oracle_costs': [1,10],
@@ -523,7 +529,8 @@ def run():
     print(sys.argv)
     if len(sys.argv) == 2:
         if sys.argv[1] == 'plot':
-            plot(directory,plot_directory,experiments.keys())
+            #plot(directory,plot_directory,experiments.keys())
+            plot(directory,plot_directory,['baseline-lf-100-ucb-k', 'baseline-hf-ucb-k','mf-100-ucb-k'])
         else:
             exp_name = sys.argv[1]
             while True:
