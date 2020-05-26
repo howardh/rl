@@ -441,18 +441,23 @@ def delete_checkpoint():
     os.remove(checkpoint_path())
 
 def run_trial_with_checkpoint(**params):
+    print(params['directory'])
     path = checkpoint_path()
-    exp = Experiment(**params)
-    state = load_checkpoint(path)
-    if state is not None:
+    if os.path.isfile(path):
         print('Found Checkpoint. Restoring state...')
-        for k,v in params.items():
-            if k in state['args'] and state['args'][k] != v:
-                print('Overwriting %s=%s with %s' % (k,state['args'][k],v))
-                state['args'][k] = v
-        exp.load_state_dict(state)
+        exp = Experiment.from_checkpoint(path)
     else:
         print('No Checkpoint.')
+        exp = Experiment(**params)
+    #if state is not None:
+    #    print('Found Checkpoint. Restoring state...')
+    #    for k,v in params.items():
+    #        if k in state['args'] and state['args'][k] != v:
+    #            print('Overwriting %s=%s with %s' % (k,state['args'][k],v))
+    #            state['args'][k] = v
+    #    exp.load_state_dict(state)
+    #else:
+    #    print('No Checkpoint.')
     return exp.run()
 
 class Experiment:
@@ -623,11 +628,11 @@ def run_hyperparam_search_extremes(space, proc=1):
     return utils.get_all_results(directory)
 
 def run_hyperparam_search(space, proc=1):
-    directory = os.path.join(utils.get_results_directory(),__name__)
-    params = [hyperparams.utils.sample_hyperparam(space) for _ in range(proc)]
-    funcs = [lambda: run_trial(**p) for p in params]
+    directory = os.path.join(utils.get_results_directory(),__name__,'random')
+    ddict = {'directory': directory}
+    params = [{**hyperparams.utils.sample_hyperparam(space),**ddict} for _ in range(proc)]
+    funcs = [lambda: run_trial_with_checkpoint(**p) for p in params]
     utils.cc(funcs,proc=proc)
-    return utils.get_all_results(directory)
 
 def random_lin_comb(vecs):
     n_points = vecs.shape[0]
@@ -1008,10 +1013,10 @@ def aggregate_results(results_directory):
     pass
 
 def run():
-    #utils.set_results_directory(
-    #        os.path.join(utils.get_results_root_directory(),'hrl-2'))
     utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'dev'))
+            os.path.join(utils.get_results_root_directory(),'hrl-3'))
+    #utils.set_results_directory(
+    #        os.path.join(utils.get_results_root_directory(),'dev'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     for agent_name in space.keys():
@@ -1032,7 +1037,7 @@ def run():
     #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v3',n_planes=6)
 
     #run_hyperparam_search(space['ActorCritic'])
-    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
+    run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
     #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
     #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
@@ -1042,33 +1047,7 @@ def run():
     #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.05, scoring='improvement_prob', target_score=182.58163722924036)
     #param = sample_lsh(directory, 'ActorCritic', n_planes=8, perturbance=0.01)
     #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
-    param = {'agent_name': 'HDQNAgentWithDelayAC',
-        'batch_size': 256,
-        'cnet_layer_size': 0,
-        'cnet_n_layers': 0,
-        'controller_learning_rate': 0.00010000000000000009,
-        'eps_b': 0,
-        'gamma': 0.9,
-        'min_replay_buffer_size': 10,
-        'num_options': 3,
-        'polyak_rate': 0.001,
-        'q_net_learning_rate': 0.00010000000000000009,
-        'qnet_layer_size': 0,
-        'qnet_n_layers': 0,
-        'snet_layer_size': 0,
-        'snet_n_layers': 0,
-        'subpolicy_learning_rate': 0.00010000000000000009,
-        #'subpolicy_q_net_learning_rate': 0.10000000000000002,
-        'checkpoint_path': None,
-        'directory': directory,
-        'epoch': 100,
-        'keep_checkpoint': False,
-        'seed': 3,
-        'steps_per_task': 300,
-        'test_iters': 2,
-        'total_steps': 1000,
-        'verbose': True}
-    run_trial_with_checkpoint(**param)
+    #run_trial_with_checkpoint(**param)
 
     #run_bayes_opt(directory,'ActorCritic')
     #run_bayes_opt(directory,'HDQNAgentWithDelayAC_v2')
