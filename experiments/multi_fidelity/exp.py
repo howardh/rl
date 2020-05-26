@@ -565,7 +565,7 @@ def plot(results_directory, plot_directory, exp_names):
     from matplotlib import pyplot as plt
     for exp_name in exp_names:
         print('searching',os.path.join(results_directory,exp_name))
-        results = utils.get_all_results(os.path.join(results_directory,exp_name))
+        results = utils.get_all_results(os.path.join(results_directory,exp_name), ignore_errors=True)
         data = [np.array(r[1]['rewards']).flatten() for r in results]
         if len(data) == 0:
             continue
@@ -672,6 +672,24 @@ def run():
                 'evaluation_method': 'ucb',
                 'evaluation_criterion': 'kandasamy'
             },
+            'approx-mf-100-ucb-a': {
+                'model': 'approx',
+                'batch_size': 100,
+                'warmup_steps': 100,
+                'oracle_iters': [100,None],
+                'oracle_costs': [1,10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'always'
+            },
+            'approx-baseline-hf-ucb-a': {
+                'model': 'approx',
+                'batch_size': 100,
+                'warmup_steps': 100,
+                'oracle_iters': [None],
+                'oracle_costs': [10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'always'
+            },
     }
 
     import sys
@@ -680,7 +698,7 @@ def run():
         if sys.argv[1] == 'plot':
             #plot(directory,plot_directory,experiments.keys())
             #plot(directory,plot_directory,['baseline-lf-100-ucb-k', 'baseline-hf-ucb-k','mf-100-ucb-k'])
-            plot(directory,plot_directory,['approx-mf-100-ucb-k','approx-baseline-hf-ucb-k'])
+            plot(directory,plot_directory,['approx-mf-100-ucb-k','approx-baseline-hf-ucb-k','approx-mf-100-ucb-a','approx-baseline-hf-ucb-a'])
         else:
             exp_name = sys.argv[1]
             model = experiments[exp_name].pop('model','discrete')

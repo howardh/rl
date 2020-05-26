@@ -108,12 +108,18 @@ def save_results(params, results, directory=None, file_path=None,
         except KeyboardInterrupt:
             print('Writing data to disk. Ignoring keyboard interrupt.')
 
-def get_all_results(directory):
+def get_all_results(directory, ignore_errors=False):
     """ Generator for the contents of all files in the given directory. """
     for d,_,file_names in tqdm(os.walk(directory)):
         for fn in file_names:
             with open(os.path.join(d,fn), 'rb') as f:
-                yield dill.load(f)
+                try:
+                    yield dill.load(f)
+                except:
+                    if ignore_errors:
+                        pass
+                    else:
+                        raise
 
 def modify_all_results(directory):
     """ A tool to modify all results. For each result, return the file's entire content, along with a function that takes the updated value as an argument. """
