@@ -18,6 +18,17 @@ TODO:
 - Done? Wait for experiments to run.
 """
 
+class ValNetwork(torch.nn.Module):
+    def __init__(self, in_size):
+        super().__init__()
+        self.seq = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_size,out_features=in_size//2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=in_size//2,out_features=1)
+        )
+    def forward(self, obs):
+        return self.seq(obs)
+
 class MultiFidelityDQNAgent(DQNAgent):
     def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), q_net=None, replay_buffer_size=50000, transition_function=None, oracles=[], oracle_costs=[]):
         super().__init__(action_space=action_space, observation_space=observation_space, discount_factor=discount_factor, learning_rate=learning_rate, polyak_rate=1, device=device, behaviour_policy=behaviour_policy, target_policy=target_policy, q_net=q_net, replay_buffer_size=replay_buffer_size)
@@ -287,7 +298,7 @@ class MultiFidelityDiscreteAgent(Agent):
         current_val = self.estimates[-1].predict(state.reshape(1,-1)).item()
         return max(max_val,current_val)
 
-    def all_states(self):    
+    def all_states(self):
         def generate(starting_state=np.zeros(self.observation_space.low.shape),max_depth=self.max_depth):
             if max_depth > 0:
                 for a in range(self.action_space.n):
@@ -364,7 +375,7 @@ class MultiFidelityDiscreteAgent(Agent):
                 self.gamma[i] *= 2
 
     def evaluate_obs(self):
-        """ Call oracle on the current observation if needed. """
+        """ Call oracle on the current observation if needed. Update the agent's belief and return the runtime."""
         obs = self.current_obs
         # Check if we're done warmup
         if self.is_warming_up():
@@ -435,3 +446,174 @@ class MultiFidelityDiscreteAgent(Agent):
             rewards.append(r)
             sa_vals.append(sav)
         return rewards, sa_vals
+
+class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
+    #def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5,evaluation_method=None,evaluation_criterion=None):
+    def __init__(self, action_space, observation_space, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), v_net=lambda: ValNetwork(5), replay_buffer_size=50000, transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5, evaluation_method=None,evaluation_criterion=None):
+        super().__init__(action_space=action_space, observation_space=observation_space, behaviour_policy=behaviour_policy, target_policy=target_policy, transition_function=transition_function, oracles=oracles, oracle_costs=oracle_costs, true_reward=true_reward, warmup_steps=warmup_steps, max_depth=max_depth,evaluation_method=evaluation_method,evaluation_criterion=evaluation_criterion)
+
+        self.device = device
+        self.polyak_rate = polyak_rate
+
+        self.replay_buffer = ReplayBuffer(replay_buffer_size)
+        self.warmup_steps = warmup_steps
+
+        self.state_values_explore = v_net()
+        self.state_values_exploit = v_net()
+        self.state_values_explore_target = v_net()
+        self.state_values_exploit_target = v_net()
+        self.optim_explore = torch.optim.Adam(self.state_values_explore.parameters(), lr=learning_rate)
+        self.optim_exploit = torch.optim.Adam(self.state_values_exploit.parameters(), lr=learning_rate)
+
+    def observe_change(self, obs, testing=False):
+        obs = torch.tensor(obs).float()
+        if testing:
+            self.current_obs_testing = obs
+        else:
+            self.current_obs = obs
+            self.current_action = None
+            self.replay_buffer._add_to_buffer(obs)
+
+    def train(self,batch_size=2,iterations=1):
+        if self.is_warming_up():
+            return
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=batch_size, shuffle=True)
+        tau = self.polyak_rate
+        optim_explore = self.optim_explore
+        optim_exploit = self.optim_exploit
+        for i,states in zip(range(iterations),dataloader):
+            loss_explore = 0
+            loss_exploit = 0
+            for s in states:
+                s = s.float().to(self.device)
+                loss_explore += (self.state_values_explore(s)-self.compute_state_value_explore(s))**2
+                loss_exploit += (self.state_values_exploit(s)-self.compute_state_value_exploit(s))**2
+            optim_explore.zero_grad()
+            optim_exploit.zero_grad()
+            loss_explore.backward()
+            loss_exploit.backward()
+            optim_explore.step()
+            optim_exploit.step()
+
+            # Update target weights
+            for p1,p2 in zip(self.state_values_exploit_target.parameters(), self.state_values_exploit.parameters()):
+                p1.data = (1-tau)*p1+tau*p2
+            for p1,p2 in zip(self.state_values_explore_target.parameters(), self.state_values_explore.parameters()):
+                p1.data = (1-tau)*p1+tau*p2
+
+    def act(self, testing=False):
+        """ Check if we need more information on current state. """
+        if testing:
+            obs = self.current_obs_testing
+            policy = self.target_policy
+            if self.evaluation_method == 'val':
+                val_func = self.state_values_exploit
+            elif self.evaluation_method == 'ucb':
+                val_func = self.state_values_explore
+            else:
+                raise Exception('Invalid eval method')
+            if self.is_warming_up():
+                return self.action_space.sample()
+        else:
+            obs = self.current_obs
+            policy = self.behaviour_policy
+            val_func = self.state_values_explore
+            if self.is_warming_up():
+                self.warmup_states.append(obs)
+                return self.action_space.sample()
+        next_obs = torch.stack([self.transition_function(obs,a) for a in range(self.action_space.n)]).float()
+        vals = val_func(next_obs).flatten()
+        dist = policy(vals)
+        action = dist.sample().item()
+        self.current_action = action
+        self.last_vals = vals
+        return action
+
+    def compute_state_value_explore(self, state):
+        """
+        state - a single state (np.array)
+        """
+        n = self.neighbours(state)
+        if len(n) > 0:
+            n = torch.stack(self.neighbours(state)).float()
+            max_val = self.state_values_explore_target(n).max().item()
+        else:
+            max_val = -float('inf')
+        phi = [self.compute_state_value_ucb(state,fidelity) for fidelity in range(len(self.oracles))]
+        if len(phi) == 1:
+            max_phi = phi[0]
+        else:
+            max_phi = max(*phi)
+        return max(max_val,max_phi)
+
+    def compute_state_value_exploit(self, state):
+        n = self.neighbours(state)
+        if len(n) > 0:
+            n = torch.stack(self.neighbours(state)).float()
+            max_val = self.state_values_exploit_target(n).max().item()
+        else:
+            max_val = -float('inf')
+        current_val = self.estimates[-1].predict(state.reshape(1,-1)).item()
+        return max(max_val,current_val)
+
+    def is_warming_up(self):
+        return len(self.replay_buffer) < self.warmup_steps
+
+    def evaluate_obs(self):
+        """ Call oracle on the current observation if needed. Update the agent's belief and return the runtime."""
+        obs = self.current_obs
+        # Check if we're done warmup
+        if self.is_warming_up():
+            return 0
+        # Check if obs needs evaluating
+        if self.evaluation_criterion == 'kandasamy':
+            needs_evaluation = self.compute_state_value_explore(obs) >= self.state_values_explore(obs)
+        elif self.evaluation_criterion == 'always':
+            needs_evaluation = True
+        else:
+            raise Exception('Invalid evaluation criterion %s' % self.evaluation_criterion)
+        # Evaluate
+        if needs_evaluation:
+            # evaluate and return runtime
+            for i in range(len(self.oracles)):
+                _,std = self.estimates[i].predict(obs.reshape(1,-1),return_std=True)
+                if np.sqrt(self.beta)*std < self.gamma[i] and i < len(self.oracles)-1:
+                    # If we're reasonably certain of this estimate, move on to a higher fidelity
+                    continue
+                # Don't evaluate if it's already been evaluated
+                if tuple(obs.tolist()) in self.oracle_data[i]:
+                    continue
+                # Evaluate at fidelity i
+                self.oracle_data[i][tuple(obs.tolist())] = self.oracles[i](obs)
+                # Update Gaussian processes
+                x = list(self.oracle_data[i].keys())
+                y = [self.oracle_data[i][k] for k in x]
+                self.estimates[i].fit(x,y)
+                # Update gamma
+                self.update_gamma(i)
+                # Return runtime
+                return self.oracle_costs[i]
+            return 0
+        else:
+            # Nothing to do, so runtime is 0
+            return 0
+
+    def init_oracle_data(self):
+        if self.oracle_data is not None:
+            return # Don't initialize again
+        if len(self.replay_buffer) < self.warmup_steps:
+            return
+        self.oracle_data = [{} for _ in self.oracles] # Values from oracle calls
+        for i in range(len(self.oracles)):
+            for x in np.random.choice(list(range(len(self.replay_buffer))),size=5,replace=False):
+                obs = self.replay_buffer[x]
+                if obs is None: # We'll just start with one less. nbd.
+                    continue
+                val = self.oracles[i](obs)
+                self.oracle_data[i][tuple(obs.tolist())] = val
+            x = list(self.oracle_data[i].keys())
+            y = [self.oracle_data[i][k] for k in x]
+            self.estimates[i].fit(x,y)
