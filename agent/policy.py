@@ -26,6 +26,14 @@ def get_greedy_epsilon_policy(eps):
 def greedy_action(values):
     return values.argmax(1)
 
+def get_softmax_policy(temp):
+    def foo(values):
+        v = torch.exp(values/temp)
+        probs = v/v.sum()
+        dist = torch.distributions.Categorical(probs)
+        return dist
+    return foo
+
 # Continuous action
 
 # Continuous action distribution

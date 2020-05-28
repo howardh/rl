@@ -11,7 +11,7 @@ import numpy as np
 from .agent import Agent
 from agent.dqn_agent import DQNAgent
 from . import ReplayBuffer
-from .policy import get_greedy_epsilon_policy, greedy_action
+from .policy import get_greedy_epsilon_policy, greedy_action, get_softmax_policy
 
 """
 TODO:
@@ -28,185 +28,6 @@ class ValNetwork(torch.nn.Module):
         )
     def forward(self, obs):
         return self.seq(obs)
-
-class MultiFidelityDQNAgent(DQNAgent):
-    def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), q_net=None, replay_buffer_size=50000, transition_function=None, oracles=[], oracle_costs=[]):
-        super().__init__(action_space=action_space, observation_space=observation_space, discount_factor=discount_factor, learning_rate=learning_rate, polyak_rate=1, device=device, behaviour_policy=behaviour_policy, target_policy=target_policy, q_net=q_net, replay_buffer_size=replay_buffer_size)
-
-        self.oracles = oracles
-        self.transition_function = transition_function
-
-        self.zeta = 0.1 # Max difference between levels of fidelity
-        self.gamma = [0.1]*len(oracles) # Threshold for deciding between fidelity levels
-        self.beta = 1 # Threshold for standard deviation
-        self.estimates = [GaussianProcessRegressor() for _ in oracles]
-        self.oracle_data = None # Values from oracle calls
-        self.oracle_costs = oracle_costs # Runtime costs for each oracle
-
-    def observe_change(self, obs, testing=False):
-        if testing:
-            self.current_obs_testing = obs
-        else:
-            self.replay_buffer._add_to_buffer(obs)
-            self.current_obs = obs
-            self.current_action = None
-
-    def neighbours(self, state):
-        """
-        state - a single state (np.array)
-        """
-        output = [state]
-        if state.sum() >= 25: # TODO: Not sure if this is right. Check for off-by-one error.
-            return output
-        for action in range(self.action_space.n):
-            s = self.transition_function(state,action)
-            if s is not None:
-                output.append(s)
-        return output
-
-    def compute_state_value_ucb(self,state,fidelity):
-        gp = self.estimates[fidelity]
-        mu,std = gp.predict(state.reshape(1,-1),return_std=True)
-        beta = self.beta
-        zeta = self.zeta
-        phi = mu + (beta**(1/2))*std+zeta
-        return phi
-
-    def compute_state_value(self, state):
-        """
-        state - a single state (np.array)
-        """
-        max_val = -float('inf')
-        for s in self.neighbours(state):
-            min_phi = float('inf')
-            for fidelity in range(len(self.oracles)):
-                phi = self.compute_state_value_ucb(s,fidelity)
-                if phi < min_phi:
-                    min_phi = phi
-            if min_phi > max_val:
-                max_val = max_val
-        return max_val
-
-    def train(self,batch_size=2,iterations=1):
-        if len(self.replay_buffer) < batch_size:
-            return
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=batch_size, shuffle=True)
-        gamma = self.discount_factor
-        tau = self.polyak_rate
-        optimizer = self.optimizer
-        for i,s in zip(range(iterations),dataloader):
-            # Fix data types
-            s = s.to(self.device)
-            # Value estimate
-            y = torch.tensor([self.compute_state_value(x.numpy()) for x in s])
-            # Update Q network
-            optimizer.zero_grad()
-            loss = (y-self.q_net(s.float())).mean()
-            loss.backward()
-            optimizer.step()
-
-            # Update target weights
-            for p1,p2 in zip(self.q_net_target.parameters(), self.q_net.parameters()):
-                p1.data = (1-tau)*p1+tau*p2
-
-    def act(self, testing=False):
-        """ Check if we need more information on current state. """
-        #observation = torch.tensor(observation, dtype=torch.float).view(-1,4,84,84).to(self.device)
-        if testing:
-            obs = self.current_obs_testing
-            policy = self.target_policy
-        else:
-            # TODO
-            # Check if we need more info on current state
-            # If so, check which fidelity we need to evaluate at
-            # If not, transition to next best state
-            obs = self.current_obs
-            policy = self.behaviour_policy
-        next_obs = [self.transition_function(obs,a) for a in range(self.action_space.n)]
-        vals = torch.tensor([self.q_net(torch.tensor(o).unsqueeze(0).float()) for o in next_obs])
-        dist = policy(vals)
-        action = dist.sample().item()
-        self.current_action = action
-        self.last_vals = vals
-        return action
-
-    def init_oracle_data(self):
-        if self.oracle_data is not None:
-            return # Don't initialize again
-        if len(self.replay_buffer) < 100:
-            #raise Exception('Not enough data in replay buffer to initialize Gaussian processes.')
-            return
-        self.oracle_data = [{} for _ in self.oracles] # Values from oracle calls
-        for i in range(len(self.oracles)):
-            for x in np.random.choice(list(range(len(self.replay_buffer))),size=5,replace=False):
-                obs = self.replay_buffer[x]
-                if obs is None: # We'll just start with one less. nbd.
-                    continue
-                val = self.oracles[i](torch.tensor(obs).float())
-                self.oracle_data[i][tuple(obs.tolist())] = val
-            x = list(self.oracle_data[i].keys())
-            y = [self.oracle_data[i][k] for k in x]
-            self.estimates[i].fit(x,y)
-
-    def evaluate_obs(self):
-        # Check if obs needs evaluating
-        obs = self.current_obs
-        #if self.compute_state_value(obs) >= self.q_net(torch.tensor(obs).float()):
-        if self.oracle_data is not None:
-            # evaluate and return runtime
-            for i in range(len(self.oracles)):
-                _,std = self.estimates[i].predict(obs.reshape(1,-1),return_std=True)
-                if np.sqrt(self.beta)*std < self.gamma[i] and i < len(self.oracles)-1:
-                    # If we're reasonably certain of this estimate, move on to a higher fidelity
-                    continue
-                # Evaluate at fidelity i
-                self.oracle_data[i][tuple(obs.tolist())] = self.oracles[i](obs)
-                # Update Gaussian processes
-                x = list(self.oracle_data[i].keys())
-                y = [self.oracle_data[i][k] for k in x]
-                self.estimates[i].fit(x,y)
-                # Return runtime
-                return self.oracle_costs[i]
-            raise Exception('Something went wrong. No oracles could be called.')
-        else:
-            # Nothing to do, so runtime is 0
-            return 0
-
-    def test_once(self, env, max_steps=np.inf, render=False):
-        reward_sum = 0
-        sa_vals = []
-        # Sample highest-scoring path through the graph
-        obs = env.reset()
-        all_obs = [obs]
-        self.observe_change(obs, testing=True)
-        for steps in itertools.count():
-            if steps > max_steps:
-                break
-            action = self.act(testing=True)
-            sa_vals.append(self.get_state_action_value(obs,action))
-            obs, _, done, _ = env.step(action)
-            all_obs.append(obs)
-            self.observe_change(obs, testing=True)
-            if render:
-                env.render()
-            if done:
-                break
-        # Choose highest-scoring entity in the graph according to estimates
-        fidelity = len(self.oracles)-1
-        scores = [self.compute_state_value_ucb(obs,fidelity) for obs in all_obs]
-        i = np.argmax(scores)
-        reward = self.oracles[-1](all_obs[i])
-        return reward, np.mean(sa_vals)
-
-    def test(self, env, iterations, max_steps=np.inf, render=False, record=True, processors=1):
-        rewards = []
-        sa_vals = []
-        for i in range(iterations):
-            r,sav = self.test_once(env, render=render, max_steps=max_steps)
-            rewards.append(r)
-            sa_vals.append(sav)
-        return rewards, sa_vals
 
 class MultiFidelityDiscreteAgent(Agent):
     def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5,evaluation_method=None,evaluation_criterion=None):
@@ -505,7 +326,8 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
                 p1.data = (1-tau)*p1+tau*p2
 
     def act(self, testing=False):
-        """ Check if we need more information on current state. """
+        if self.is_warming_up():
+            return self.action_space.sample()
         if testing:
             obs = self.current_obs_testing
             policy = self.target_policy
@@ -515,15 +337,10 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
                 val_func = self.state_values_explore
             else:
                 raise Exception('Invalid eval method')
-            if self.is_warming_up():
-                return self.action_space.sample()
         else:
             obs = self.current_obs
             policy = self.behaviour_policy
             val_func = self.state_values_explore
-            if self.is_warming_up():
-                self.warmup_states.append(obs)
-                return self.action_space.sample()
         next_obs = torch.stack([self.transition_function(obs,a) for a in range(self.action_space.n)]).float()
         vals = val_func(next_obs).flatten()
         dist = policy(vals)

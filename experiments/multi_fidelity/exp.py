@@ -8,7 +8,7 @@ import torch
 import utils
 from agent.dqn_agent import DQNAgent
 from agent.mf_dqn_agent import MultiFidelityDQNAgent2, MultiFidelityDiscreteAgent
-from agent.policy import get_greedy_epsilon_policy
+from agent.policy import get_greedy_epsilon_policy, get_softmax_policy
 
 import warnings
 warnings.warn = lambda *x,**y: None
@@ -468,7 +468,7 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val
     return (args, rewards, state_action_values)
 
 #def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=None, batch_size=32, min_replay_buffer_size=1000, max_steps=2000, epoch=50,test_iters=1,verbose=False):
-def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10], min_replay_buffer_size=1000, learning_rate=1e-3, batch_size=10, polyak_rate=1, warmup_steps=100):
+def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10], min_replay_buffer_size=1000, learning_rate=1e-3, batch_size=10, polyak_rate=1, warmup_steps=100):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
     test_env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
@@ -493,7 +493,7 @@ def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val',
     agent = MultiFidelityDQNAgent2(
             action_space=env.action_space,
             observation_space=env.observation_space,
-            behaviour_policy=get_greedy_epsilon_policy(eps_b),
+            behaviour_policy=get_greedy_epsilon_policy(eps_b) if temp_b is None else get_softmax_policy(temp_b),
             target_policy=get_greedy_epsilon_policy(eps_t),
             oracles=[
                     lambda x: oracle(x).item() for oracle in oracles
@@ -553,9 +553,10 @@ def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val',
             tqdm.write("Diverged")
             raise e
 
+    print('Points evaluated',[len(od) for od in agent.oracle_data])
     utils.save_results(
             args,
-            {'rewards': rewards, 'state_action_values': state_action_values},
+            {'rewards': rewards, 'state_action_values': state_action_values, 'evaluated_points': agent.oracle_data},
             directory=directory)
     return (args, rewards, state_action_values)
 
@@ -689,6 +690,16 @@ def run():
                 'oracle_costs': [10],
                 'evaluation_method': 'ucb',
                 'evaluation_criterion': 'always'
+            },
+            'approx-baseline-hf-ucb-a-sm': {
+                'model': 'approx',
+                'batch_size': 100,
+                'warmup_steps': 100,
+                'oracle_iters': [None],
+                'oracle_costs': [10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'always',
+                'temp_b': 1
             },
     }
 
