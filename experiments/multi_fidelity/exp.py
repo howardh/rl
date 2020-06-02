@@ -468,7 +468,7 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val
     return (args, rewards, state_action_values)
 
 #def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=None, batch_size=32, min_replay_buffer_size=1000, max_steps=2000, epoch=50,test_iters=1,verbose=False):
-def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10], min_replay_buffer_size=1000, learning_rate=1e-3, batch_size=10, polyak_rate=1, warmup_steps=100):
+def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10], min_replay_buffer_size=1000, learning_rate=1e-3, batch_size=10, polyak_rate=1, warmup_steps=100, training_data='replaybuffer'):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
     test_env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
@@ -546,7 +546,10 @@ def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_
             skip_steps += agent.evaluate_obs() # Agent checks if it wants to evaluate, and returns runtime
 
             # Update weights
-            agent.train(batch_size=batch_size)
+            if training_data == 'replaybuffer':
+                agent.train(batch_size=batch_size)
+            elif training_data == 'all':
+                agent.train_all_states()
     except ValueError as e:
         if verbose:
             tqdm.write(str(e))
@@ -701,15 +704,53 @@ def run():
                 'evaluation_criterion': 'always',
                 'temp_b': 1
             },
+            'debug-approx-mf-100-ucb-a-same-oracles': {
+                'model': 'approx',
+                'batch_size': 100,
+                'warmup_steps': 100,
+                'oracle_iters': [None,None],
+                'oracle_costs': [1,10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'always'
+            },
+            'debug-approx-cheap-hf': {
+                'model': 'approx',
+                'batch_size': 100,
+                'warmup_steps': 100,
+                'oracle_iters': [None],
+                'oracle_costs': [1],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'always'
+            },
+            'approx-baseline-hf-ucb-k-001': { # Using training on all states instead of only replay buffer
+                'model': 'approx',
+                'batch_size': 100,
+                'warmup_steps': 100,
+                'oracle_iters': [None],
+                'oracle_costs': [10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'kandasamy',
+                'training_data': 'all'
+            },
+            'approx-mf-100-ucb-a-001': {
+                'model': 'approx',
+                'batch_size': 100,
+                'warmup_steps': 100,
+                'oracle_iters': [100,None],
+                'oracle_costs': [1,10],
+                'evaluation_method': 'ucb',
+                'evaluation_criterion': 'always',
+                'training_data': 'all'
+            },
     }
 
     import sys
     print(sys.argv)
     if len(sys.argv) == 2:
         if sys.argv[1] == 'plot':
-            #plot(directory,plot_directory,experiments.keys())
+            plot(directory,plot_directory,experiments.keys())
             #plot(directory,plot_directory,['baseline-lf-100-ucb-k', 'baseline-hf-ucb-k','mf-100-ucb-k'])
-            plot(directory,plot_directory,['approx-mf-100-ucb-k','approx-baseline-hf-ucb-k','approx-mf-100-ucb-a','approx-baseline-hf-ucb-a'])
+            #plot(directory,plot_directory,['approx-mf-100-ucb-k','approx-baseline-hf-ucb-k','approx-mf-100-ucb-a','approx-baseline-hf-ucb-a'])
         else:
             exp_name = sys.argv[1]
             model = experiments[exp_name].pop('model','discrete')

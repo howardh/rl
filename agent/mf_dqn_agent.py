@@ -325,6 +325,33 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
             for p1,p2 in zip(self.state_values_explore_target.parameters(), self.state_values_explore.parameters()):
                 p1.data = (1-tau)*p1+tau*p2
 
+    def train_all_states(self,iterations=1):
+        if self.is_warming_up():
+            return
+
+        tau = self.polyak_rate
+        optim_explore = self.optim_explore
+        optim_exploit = self.optim_exploit
+        for _ in range(iterations):
+            loss_explore = 0
+            loss_exploit = 0
+            for s in self.all_states():
+                s = torch.tensor(s).float().to(self.device)
+                loss_explore += (self.state_values_explore(s)-self.compute_state_value_explore(s))**2
+                loss_exploit += (self.state_values_exploit(s)-self.compute_state_value_exploit(s))**2
+            optim_explore.zero_grad()
+            optim_exploit.zero_grad()
+            loss_explore.backward()
+            loss_exploit.backward()
+            optim_explore.step()
+            optim_exploit.step()
+
+            # Update target weights
+            for p1,p2 in zip(self.state_values_exploit_target.parameters(), self.state_values_exploit.parameters()):
+                p1.data = (1-tau)*p1+tau*p2
+            for p1,p2 in zip(self.state_values_explore_target.parameters(), self.state_values_explore.parameters()):
+                p1.data = (1-tau)*p1+tau*p2
+
     def act(self, testing=False):
         if self.is_warming_up():
             return self.action_space.sample()
