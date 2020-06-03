@@ -19,12 +19,16 @@ TODO:
 """
 
 class ValNetwork(torch.nn.Module):
-    def __init__(self, in_size):
+    def __init__(self, architecture=[5,2,1]):
         super().__init__()
+        seq = []
+        in_size = architecture[0]
+        for out_size in architecture[1:]:
+            seq.append(torch.nn.Linear(in_features=in_size,out_features=out_size))
+            seq.append(torch.nn.ReLU())
+            in_size = out_size
         self.seq = torch.nn.Sequential(
-            torch.nn.Linear(in_features=in_size,out_features=in_size//2),
-            torch.nn.ReLU(),
-            torch.nn.Linear(in_features=in_size//2,out_features=1)
+                *seq[:-1]
         )
     def forward(self, obs):
         return self.seq(obs)
@@ -270,7 +274,7 @@ class MultiFidelityDiscreteAgent(Agent):
 
 class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
     #def __init__(self, action_space, observation_space, behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5,evaluation_method=None,evaluation_criterion=None):
-    def __init__(self, action_space, observation_space, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), v_net=lambda: ValNetwork(5), replay_buffer_size=50000, transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5, evaluation_method=None,evaluation_criterion=None):
+    def __init__(self, action_space, observation_space, learning_rate=1e-3, polyak_rate=0.001, device=torch.device('cpu'), behaviour_policy=get_greedy_epsilon_policy(0.1), target_policy=get_greedy_epsilon_policy(0), v_net_arch=[5,2,1], replay_buffer_size=50000, transition_function=None, oracles=[], oracle_costs=[], true_reward=None, warmup_steps=100, max_depth=5, evaluation_method=None,evaluation_criterion=None):
         super().__init__(action_space=action_space, observation_space=observation_space, behaviour_policy=behaviour_policy, target_policy=target_policy, transition_function=transition_function, oracles=oracles, oracle_costs=oracle_costs, true_reward=true_reward, warmup_steps=warmup_steps, max_depth=max_depth,evaluation_method=evaluation_method,evaluation_criterion=evaluation_criterion)
 
         self.device = device
@@ -279,12 +283,12 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
         self.replay_buffer = ReplayBuffer(replay_buffer_size)
         self.warmup_steps = warmup_steps
 
-        self.state_values_explore = v_net()
-        self.state_values_exploit = v_net()
-        self.state_values_explore_target = v_net()
-        self.state_values_exploit_target = v_net()
-        self.optim_explore = torch.optim.Adam(self.state_values_explore.parameters(), lr=learning_rate)
-        self.optim_exploit = torch.optim.Adam(self.state_values_exploit.parameters(), lr=learning_rate)
+        self.sv_net_explore = ValNetwork(v_net_arch)
+        self.sv_net_exploit = ValNetwork(v_net_arch)
+        self.sv_net_explore_target = ValNetwork(v_net_arch)
+        self.sv_net_exploit_target = ValNetwork(v_net_arch)
+        self.optim_explore = torch.optim.Adam(self.sv_net_explore.parameters(), lr=learning_rate)
+        self.optim_exploit = torch.optim.Adam(self.sv_net_exploit.parameters(), lr=learning_rate)
 
     def observe_change(self, obs, testing=False):
         obs = torch.tensor(obs).float()
@@ -310,8 +314,8 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
             loss_exploit = 0
             for s in states:
                 s = s.float().to(self.device)
-                loss_explore += (self.state_values_explore(s)-self.compute_state_value_explore(s))**2
-                loss_exploit += (self.state_values_exploit(s)-self.compute_state_value_exploit(s))**2
+                loss_explore += (self.sv_net_explore(s)-self.compute_state_value_explore(s))**2
+                loss_exploit += (self.sv_net_exploit(s)-self.compute_state_value_exploit(s))**2
             optim_explore.zero_grad()
             optim_exploit.zero_grad()
             loss_explore.backward()
@@ -320,9 +324,9 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
             optim_exploit.step()
 
             # Update target weights
-            for p1,p2 in zip(self.state_values_exploit_target.parameters(), self.state_values_exploit.parameters()):
+            for p1,p2 in zip(self.sv_net_exploit_target.parameters(), self.sv_net_exploit.parameters()):
                 p1.data = (1-tau)*p1+tau*p2
-            for p1,p2 in zip(self.state_values_explore_target.parameters(), self.state_values_explore.parameters()):
+            for p1,p2 in zip(self.sv_net_explore_target.parameters(), self.sv_net_explore.parameters()):
                 p1.data = (1-tau)*p1+tau*p2
 
     def train_all_states(self,iterations=1):
@@ -337,8 +341,8 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
             loss_exploit = 0
             for s in self.all_states():
                 s = torch.tensor(s).float().to(self.device)
-                loss_explore += (self.state_values_explore(s)-self.compute_state_value_explore(s))**2
-                loss_exploit += (self.state_values_exploit(s)-self.compute_state_value_exploit(s))**2
+                loss_explore += (self.sv_net_explore(s)-self.compute_state_value_explore(s))**2
+                loss_exploit += (self.sv_net_exploit(s)-self.compute_state_value_exploit(s))**2
             optim_explore.zero_grad()
             optim_exploit.zero_grad()
             loss_explore.backward()
@@ -347,9 +351,41 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
             optim_exploit.step()
 
             # Update target weights
-            for p1,p2 in zip(self.state_values_exploit_target.parameters(), self.state_values_exploit.parameters()):
+            for p1,p2 in zip(self.sv_net_exploit_target.parameters(), self.sv_net_exploit.parameters()):
                 p1.data = (1-tau)*p1+tau*p2
-            for p1,p2 in zip(self.state_values_explore_target.parameters(), self.state_values_explore.parameters()):
+            for p1,p2 in zip(self.sv_net_explore_target.parameters(), self.sv_net_explore.parameters()):
+                p1.data = (1-tau)*p1+tau*p2
+
+    def train_discrete_targets(self,iterations=1):
+        if self.is_warming_up():
+            return
+
+        breakpoint()
+
+        super().train()
+
+        tau = self.polyak_rate
+        optim_explore = self.optim_explore
+        optim_exploit = self.optim_exploit
+        for _ in range(iterations):
+            loss_explore = 0
+            loss_exploit = 0
+            for s in self.all_states():
+                s_key = tuple(s.tolist())
+                s = torch.tensor(s).float().to(self.device)
+                loss_explore += (self.sv_net_explore(s)-self.state_values_explore[s_key])**2
+                loss_exploit += (self.sv_net_exploit(s)-self.state_values_exploit[s_key])**2
+            optim_explore.zero_grad()
+            optim_exploit.zero_grad()
+            loss_explore.backward()
+            loss_exploit.backward()
+            optim_explore.step()
+            optim_exploit.step()
+
+            # Update target weights
+            for p1,p2 in zip(self.sv_net_exploit_target.parameters(), self.sv_net_exploit.parameters()):
+                p1.data = (1-tau)*p1+tau*p2
+            for p1,p2 in zip(self.sv_net_explore_target.parameters(), self.sv_net_explore.parameters()):
                 p1.data = (1-tau)*p1+tau*p2
 
     def act(self, testing=False):
@@ -359,15 +395,15 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
             obs = self.current_obs_testing
             policy = self.target_policy
             if self.evaluation_method == 'val':
-                val_func = self.state_values_exploit
+                val_func = self.sv_net_exploit
             elif self.evaluation_method == 'ucb':
-                val_func = self.state_values_explore
+                val_func = self.sv_net_explore
             else:
                 raise Exception('Invalid eval method')
         else:
             obs = self.current_obs
             policy = self.behaviour_policy
-            val_func = self.state_values_explore
+            val_func = self.sv_net_explore
         next_obs = torch.stack([self.transition_function(obs,a) for a in range(self.action_space.n)]).float()
         vals = val_func(next_obs).flatten()
         dist = policy(vals)
@@ -383,7 +419,7 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
         n = self.neighbours(state)
         if len(n) > 0:
             n = torch.stack(self.neighbours(state)).float()
-            max_val = self.state_values_explore_target(n).max().item()
+            max_val = self.sv_net_explore_target(n).max().item()
         else:
             max_val = -float('inf')
         phi = [self.compute_state_value_ucb(state,fidelity) for fidelity in range(len(self.oracles))]
@@ -397,7 +433,7 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
         n = self.neighbours(state)
         if len(n) > 0:
             n = torch.stack(self.neighbours(state)).float()
-            max_val = self.state_values_exploit_target(n).max().item()
+            max_val = self.sv_net_exploit_target(n).max().item()
         else:
             max_val = -float('inf')
         current_val = self.estimates[-1].predict(state.reshape(1,-1)).item()
@@ -414,7 +450,7 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
             return 0
         # Check if obs needs evaluating
         if self.evaluation_criterion == 'kandasamy':
-            needs_evaluation = self.compute_state_value_explore(obs) >= self.state_values_explore(obs)
+            needs_evaluation = self.compute_state_value_explore(obs) >= self.sv_net_explore(obs)
         elif self.evaluation_criterion == 'always':
             needs_evaluation = True
         else:

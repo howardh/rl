@@ -468,7 +468,7 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val
     return (args, rewards, state_action_values)
 
 #def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=None, batch_size=32, min_replay_buffer_size=1000, max_steps=2000, epoch=50,test_iters=1,verbose=False):
-def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10], min_replay_buffer_size=1000, learning_rate=1e-3, batch_size=10, polyak_rate=1, warmup_steps=100, training_data='replaybuffer'):
+def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10], min_replay_buffer_size=1000, learning_rate=1e-3, batch_size=10, polyak_rate=1, warmup_steps=100, training_data='replaybuffer', v_net_arch=[5,2,1]):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
     test_env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
@@ -487,6 +487,8 @@ def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_
         device = torch.device('cpu')
 
     def transition_function(s,a):
+        if type(s) is np.ndarray:
+            s = torch.tensor(s)
         d = torch.zeros_like(s)
         d[a] = 1
         return s+d
@@ -505,7 +507,8 @@ def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_
             evaluation_method=evaluation_method,
             evaluation_criterion=evaluation_criterion,
             learning_rate=learning_rate,
-            warmup_steps=warmup_steps
+            warmup_steps=warmup_steps,
+            v_net_arch=v_net_arch
     )
 
     rewards = []
@@ -517,21 +520,22 @@ def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_
     try:
         skip_steps = 0
         for steps in step_range:
+            tqdm.write('steps %d \t len(RB): %d' % (steps, len(agent.replay_buffer)))
             # Run tests
             if steps % epoch == 0:
                 if skip_steps == 0: # Results from an oracle call should not affect anything until after it's done
+                    #tqdm.write('steps %d \t len(RB): %d' % (steps, len(agent.replay_buffer)))
                     r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
+                    #tqdm.write('steps %d \t len(RB): %d' % (steps, len(agent.replay_buffer)))
                 rewards.append(r)
                 if verbose:
-                    tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
+                    tqdm.write('steps %d \t Reward: %f \t len(RB): %d' % (steps, np.mean(r), len(agent.replay_buffer)))
+                breakpoint()
 
             # Skip steps in accordance with time cost of different actions
             if skip_steps > 0:
                 skip_steps -= 1
                 continue
-
-            # Linearly Anneal epsilon
-            #agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/min(1000000,max_steps),1))*(1-eps_b)+eps_b)
 
             # Run step
             if done:
@@ -548,6 +552,8 @@ def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_
             # Update weights
             if training_data == 'replaybuffer':
                 agent.train(batch_size=batch_size)
+            elif training_data == 'discrete':
+                agent.train_discrete_targets()
             elif training_data == 'all':
                 agent.train_all_states()
     except ValueError as e:
@@ -580,6 +586,7 @@ def plot(results_directory, plot_directory, exp_names):
         x = range(0,501,10)
         y = data.mean(axis=0)
         plt.plot(x,y,label='%s (%d)'%(exp_name,data.shape[0]))
+    plt.grid(which='both')
     plt.xlabel('Resources Spent')
     plt.ylabel('Instantaneous Regret')
     plt.legend(loc='best')
@@ -744,11 +751,29 @@ def run():
             },
     }
 
+    # Train on the values learned in the discrete algorithm
+    experiments['approx-baseline-hf-ucb-k-002'] = experiments['approx-baseline-hf-ucb-k-001'].copy()
+    experiments['approx-baseline-hf-ucb-k-002']['training_data'] = 'discrete'
+    experiments['approx-mf-100-ucb-a-002'] = experiments['approx-mf-100-ucb-a-001'].copy()
+    experiments['approx-mf-100-ucb-a-002']['training_data'] = 'discrete'
+
+    # Might not be working because network capacity is too low
+    # Increase network capacity
+    experiments['approx-baseline-hf-ucb-k-003'] = experiments['approx-baseline-hf-ucb-k-002'].copy()
+    experiments['approx-baseline-hf-ucb-k-003']['v_net_arch'] = [5,5,1]
+    experiments['approx-mf-100-ucb-a-003'] = experiments['approx-mf-100-ucb-a-002'].copy()
+    experiments['approx-mf-100-ucb-a-003']['v_net_arch'] = [5,5,1]
+
     import sys
     print(sys.argv)
-    if len(sys.argv) == 2:
+    if len(sys.argv) >= 2:
         if sys.argv[1] == 'plot':
-            plot(directory,plot_directory,experiments.keys())
+            if len(sys.argv) == 2:
+                plot(directory,plot_directory,experiments.keys())
+            else:
+                # Every argument following 'plot' is the name of an experiment to plot
+                exp_names = sys.argv[2:]
+                plot(directory,plot_directory,exp_names)
             #plot(directory,plot_directory,['baseline-lf-100-ucb-k', 'baseline-hf-ucb-k','mf-100-ucb-k'])
             #plot(directory,plot_directory,['approx-mf-100-ucb-k','approx-baseline-hf-ucb-k','approx-mf-100-ucb-a','approx-baseline-hf-ucb-a'])
         else:
