@@ -214,170 +214,6 @@ class AugmentedMultiFidelityEnv(MultiFidelityEnv):
             total += loss
         return total/n
 
-def run_trial_lf(discount=1, learning_rate=1e-3, eps_b=0.1, eps_t=0, directory=None, batch_size=32, min_replay_buffer_size=1000, max_steps=5000, epoch=50,test_iters=1,verbose=False):
-    args = locals()
-    env = LowFidelityEnv()
-    env.train_lf_rewards(100)
-    test_env = LowFidelityEnv()
-    test_env.reward = env.reward
-    test_env.reward_lf = env.reward_lf
-    #env = HighFidelityEnv()
-    #test_env = HighFidelityEnv()
-    #test_env.reward = env.reward
-
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-    else:
-        device = torch.device('cpu')
-
-    agent = DQNAgent(
-            action_space=env.action_space,
-            observation_space=env.observation_space,
-            learning_rate=learning_rate,
-            discount_factor=discount,
-            device=device,
-            behaviour_policy=get_greedy_epsilon_policy(eps_b),
-            target_policy=get_greedy_epsilon_policy(eps_t),
-            q_net=QNetwork(env.observation_space.shape[0],env.action_space.n)
-    )
-
-    rewards = []
-    state_action_values = []
-    done = True
-    step_range = range(0,max_steps+1)
-    if verbose:
-        step_range = tqdm(step_range)
-    try:
-        skip_steps = 0
-        for steps in step_range:
-            # Run tests
-            if steps % epoch == 0:
-                r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
-                rewards.append(r)
-                state_action_values.append(sa_vals)
-                if verbose:
-                    tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
-
-            # Skip steps in accordance with time cost of different actions
-            if skip_steps > 0:
-                skip_steps -= 1
-                continue
-
-            # Linearly Anneal epsilon
-            agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/min(1000000,max_steps),1))*(1-eps_b)+eps_b)
-
-            # Run step
-            if done:
-                obs = env.reset()
-                agent.observe_change(obs)
-            action = agent.act()
-            obs, reward, done, info = env.step(action)
-            skip_steps += info['runtime']
-            agent.observe_change(obs, reward, done)
-
-            # Update weights
-            if steps >= min_replay_buffer_size:
-                agent.train(batch_size=batch_size,iterations=1)
-    except ValueError as e:
-        if verbose:
-            tqdm.write(str(e))
-            tqdm.write("Diverged")
-            raise e
-
-    utils.save_results(
-            args,
-            {'rewards': rewards, 'state_action_values': state_action_values},
-            directory=directory)
-    return (args, rewards, state_action_values)
-
-def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=None, batch_size=32, min_replay_buffer_size=1000, max_steps=2000, epoch=50,test_iters=1,verbose=False):
-    args = locals()
-    env = MultiFidelityEnv()
-    test_env = MultiFidelityEnv()
-    test_env.reward = env.reward
-    oracles = [
-            env.create_reward_estimates(100),
-            env.reward
-    ]
-    oracle_costs = [1,10]
-
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-    else:
-        device = torch.device('cpu')
-
-    def transition_function(s,a):
-        s = s.copy()
-        s[a] += 1
-        return s
-    agent = MultiFidelityDQNAgent(
-            action_space=env.action_space,
-            observation_space=env.observation_space,
-            learning_rate=learning_rate,
-            discount_factor=discount,
-            device=device,
-            behaviour_policy=get_greedy_epsilon_policy(eps_b),
-            target_policy=get_greedy_epsilon_policy(eps_t),
-            q_net=QNetwork(env.observation_space.shape[0],1),
-            oracles=[
-                    lambda x: oracle(torch.tensor(x).float()).item() for oracle in oracles
-            ],
-            oracle_costs=oracle_costs,
-            transition_function=transition_function
-    )
-
-    rewards = []
-    state_action_values = []
-    done = True
-    step_range = range(0,max_steps+1)
-    if verbose:
-        step_range = tqdm(step_range)
-    try:
-        skip_steps = 0
-        for steps in step_range:
-            agent.init_oracle_data() # Does nothing if already initialized
-
-            # Run tests
-            if steps % epoch == 0:
-                r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
-                rewards.append(r)
-                state_action_values.append(sa_vals)
-                if verbose:
-                    tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
-
-            # Skip steps in accordance with time cost of different actions
-            if skip_steps > 0:
-                skip_steps -= 1
-                continue
-
-            # Linearly Anneal epsilon
-            agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/min(1000000,max_steps),1))*(1-eps_b)+eps_b)
-
-            # Run step
-            if done:
-                obs = env.reset()
-                agent.observe_change(obs)
-            action = agent.act()
-            obs, reward, done, info = env.step(action)
-            #skip_steps += info['runtime']
-            agent.observe_change(obs)
-            skip_steps += agent.evaluate_obs() # Agent checks if it wants to evaluate, and returns runtime
-
-            # Update weights
-            if steps >= min_replay_buffer_size:
-                agent.train(batch_size=batch_size,iterations=1)
-    except ValueError as e:
-        if verbose:
-            tqdm.write(str(e))
-            tqdm.write("Diverged")
-            raise e
-
-    utils.save_results(
-            args,
-            {'rewards': rewards, 'state_action_values': state_action_values},
-            directory=directory)
-    return (args, rewards, state_action_values)
-
 def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10]):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
@@ -423,35 +259,32 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val
     if verbose:
         step_range = tqdm(step_range)
     try:
-        skip_steps = 0
         for steps in step_range:
             agent.init_oracle_data() # Does nothing if already initialized
 
             # Run tests
             if steps % epoch == 0:
-                if skip_steps == 0: # Results from an oracle call should not affect anything until after it's done
-                    r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
+                r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
                 rewards.append(r)
                 if verbose:
-                    tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
+                    tqdm.write('steps %d \t Reward: %f \t len(WS): %d' % (steps, np.mean(r), len(agent.warmup_states)))
 
-            # Skip steps in accordance with time cost of different actions
-            if skip_steps > 0:
-                skip_steps -= 1
+            # Skip step if we're busy evaluating an observation
+            if agent.is_evaluating_obs(steps):
                 continue
-
-            # Linearly Anneal epsilon
-            #agent.behaviour_policy = get_greedy_epsilon_policy((1-min(steps/min(1000000,max_steps),1))*(1-eps_b)+eps_b)
+            agent.evaluate_obs(steps) # Call oracle on current state if needed
 
             # Run step
             if done:
                 obs = env.reset()
-                agent.observe_change(obs)
-            action = agent.act()
-            obs, reward, done, info = env.step(action)
-            #skip_steps += info['runtime']
+                done = False
+            else:
+                action = agent.act()
+                obs, reward, done, info = env.step(action)
             agent.observe_change(obs)
-            skip_steps += agent.evaluate_obs() # Agent checks if it wants to evaluate, and returns runtime
+
+            # Check if we need to evaluate the new state
+            agent.check_needs_evaluation(steps)
 
             # Update weights
             agent.train()
@@ -467,7 +300,6 @@ def run_trial_mf_discrete(discount=1, eps_b=0.5, eps_t=0, evaluation_method='val
             directory=directory)
     return (args, rewards, state_action_values)
 
-#def run_trial_mf(discount=1, learning_rate=1e-3, eps_b=0.5, eps_t=0, directory=None, batch_size=32, min_replay_buffer_size=1000, max_steps=2000, epoch=50,test_iters=1,verbose=False):
 def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_method='val', evaluation_criterion='kandasamy', directory=None, max_depth=5, max_steps=500, epoch=10, test_iters=1, verbose=False, oracle_iters=[100,None], oracle_costs=[1,10], min_replay_buffer_size=1000, learning_rate=1e-3, batch_size=10, polyak_rate=1, warmup_steps=100, training_data='replaybuffer', v_net_arch=[5,2,1]):
     args = locals()
     env = MultiFidelityEnv(num_actions=5, time_limit=max_depth)
@@ -518,36 +350,32 @@ def run_trial_mf_approx(discount=1, eps_b=0.5, eps_t=0, temp_b=None, evaluation_
     if verbose:
         step_range = tqdm(step_range)
     try:
-        skip_steps = 0
         for steps in step_range:
-            tqdm.write('steps %d \t len(RB): %d' % (steps, len(agent.replay_buffer)))
+            agent.init_oracle_data() # Does nothing if already initialized
+
             # Run tests
             if steps % epoch == 0:
-                if skip_steps == 0: # Results from an oracle call should not affect anything until after it's done
-                    #tqdm.write('steps %d \t len(RB): %d' % (steps, len(agent.replay_buffer)))
-                    r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
-                    #tqdm.write('steps %d \t len(RB): %d' % (steps, len(agent.replay_buffer)))
+                r,sa_vals = agent.test(test_env, test_iters, render=False, processors=1)
                 rewards.append(r)
                 if verbose:
-                    tqdm.write('steps %d \t Reward: %f \t len(RB): %d' % (steps, np.mean(r), len(agent.replay_buffer)))
-                breakpoint()
+                    tqdm.write('steps %d \t Reward: %f' % (steps, np.mean(r)))
 
-            # Skip steps in accordance with time cost of different actions
-            if skip_steps > 0:
-                skip_steps -= 1
+            # Skip step if we're busy evaluating an observation
+            if agent.is_evaluating_obs(steps):
                 continue
+            agent.evaluate_obs(steps) # Call oracle on current state if needed
 
             # Run step
             if done:
                 obs = env.reset()
-                agent.observe_change(obs)
-            action = agent.act()
-            obs, reward, done, info = env.step(action)
-            #skip_steps += info['runtime']
+                done = False
+            else:
+                action = agent.act()
+                obs, reward, done, info = env.step(action)
             agent.observe_change(obs)
 
-            agent.init_oracle_data() # Does nothing if already initialized
-            skip_steps += agent.evaluate_obs() # Agent checks if it wants to evaluate, and returns runtime
+            # Check if we need to evaluate the new state
+            agent.check_needs_evaluation(steps)
 
             # Update weights
             if training_data == 'replaybuffer':
@@ -583,8 +411,8 @@ def plot(results_directory, plot_directory, exp_names):
             max_len = max(*[len(d) for d in data])
             data = [d for d in data if len(d) == max_len]
         data = np.array(data)
-        x = range(0,501,10)
         y = data.mean(axis=0)
+        x = range(0,len(y)*10,10)
         plt.plot(x,y,label='%s (%d)'%(exp_name,data.shape[0]))
     plt.grid(which='both')
     plt.xlabel('Resources Spent')
@@ -763,6 +591,13 @@ def run():
     experiments['approx-baseline-hf-ucb-k-003']['v_net_arch'] = [5,5,1]
     experiments['approx-mf-100-ucb-a-003'] = experiments['approx-mf-100-ucb-a-002'].copy()
     experiments['approx-mf-100-ucb-a-003']['v_net_arch'] = [5,5,1]
+
+    # The HF alg is still doing better than MF, but it looks like MF catches up after ~450 steps.
+    # Let's look at what happens if we let it run for 1k steps.
+    experiments['approx-baseline-hf-ucb-k-004'] = experiments['approx-baseline-hf-ucb-k-003'].copy()
+    experiments['approx-baseline-hf-ucb-k-004']['max_steps'] = 1000
+    experiments['approx-mf-100-ucb-a-004'] = experiments['approx-mf-100-ucb-a-003'].copy()
+    experiments['approx-mf-100-ucb-a-004']['max_steps'] = 1000
 
     import sys
     print(sys.argv)

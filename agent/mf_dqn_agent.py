@@ -68,12 +68,17 @@ class MultiFidelityDiscreteAgent(Agent):
         #print('max val ',max_val)
         self.max_val = max_val
 
+        # Stores the next state to evaluate, steps until evaluation, and which oracle to evaluate on
+        self.eval_queue = None
+
     def observe_change(self, obs, testing=False):
         if testing:
             self.current_obs_testing = obs
         else:
             self.current_obs = obs
             self.current_action = None
+            if self.is_warming_up():
+                self.warmup_states.append(obs)
 
     def neighbours(self, state):
         """
@@ -137,7 +142,6 @@ class MultiFidelityDiscreteAgent(Agent):
         if self.oracle_data is None:
             return # Don't train until we're done with warmup
 
-        #for s in tqdm(list(all_states()),desc='training'):
         for s in self.all_states():
             self.state_values_explore[tuple(s.tolist())] = self.compute_state_value_explore(s)
             self.state_values_exploit[tuple(s.tolist())] = self.compute_state_value_exploit(s)
@@ -156,15 +160,12 @@ class MultiFidelityDiscreteAgent(Agent):
                 val_func = self.state_values_explore
             else:
                 raise Exception('Invalid eval method')
-            if self.is_warming_up():
-                return self.action_space.sample()
         else:
             obs = self.current_obs
             policy = self.behaviour_policy
             val_func = self.state_values_explore
-            if self.is_warming_up():
-                self.warmup_states.append(obs)
-                return self.action_space.sample()
+        if self.is_warming_up():
+            return self.action_space.sample()
         next_obs = [self.transition_function(obs,a) for a in range(self.action_space.n)]
         vals = torch.tensor([val_func[tuple(o.astype(np.int).tolist())] for o in next_obs])
         dist = policy(vals)
@@ -199,13 +200,15 @@ class MultiFidelityDiscreteAgent(Agent):
             if self.last_query[i] >= self.oracle_costs[i+1]/self.oracle_costs[i]:
                 self.gamma[i] *= 2
 
-    def evaluate_obs(self):
-        """ Call oracle on the current observation if needed. Update the agent's belief and return the runtime."""
-        obs = self.current_obs
+    def check_needs_evaluation(self, current_step):
+        """
+        Check if the current observation needs to be evaluated by an oracle. If so, add it to a queue to be evaluated.
+        """
         # Check if we're done warmup
         if self.is_warming_up():
-            return 0
+            return
         # Check if obs needs evaluating
+        obs = self.current_obs
         if self.evaluation_criterion == 'kandasamy':
             needs_evaluation = self.compute_state_value_explore(obs) >= self.state_values_explore[tuple(obs.tolist())]
         elif self.evaluation_criterion == 'always':
@@ -223,20 +226,39 @@ class MultiFidelityDiscreteAgent(Agent):
                 # Don't evaluate if it's already been evaluated
                 if tuple(obs.tolist()) in self.oracle_data[i]:
                     continue
-                # Evaluate at fidelity i
-                self.oracle_data[i][tuple(obs.tolist())] = self.oracles[i](obs)
+                # Add to queue
+                self.eval_queue = (obs,current_step+self.oracle_costs[i],i)
+                break
+
+    def evaluate_obs(self, current_step):
+        """ 
+        Evaluate the observation in the evaluation queue when enough time has elapsed.
+        """
+        # Check if we're done warmup
+        if self.is_warming_up():
+            return
+        # Check if we have a state queued up for evaluation
+        if self.eval_queue is not None:
+            obs,time,fid = self.eval_queue
+            if time > current_step:
+                return
+            else:
+                # Evaluate at chosen fidelity
+                self.oracle_data[fid][tuple(obs.tolist())] = self.oracles[fid](obs)
                 # Update Gaussian processes
-                x = list(self.oracle_data[i].keys())
-                y = [self.oracle_data[i][k] for k in x]
-                self.estimates[i].fit(x,y)
+                x = list(self.oracle_data[fid].keys())
+                y = [self.oracle_data[fid][k] for k in x]
+                self.estimates[fid].fit(x,y)
                 # Update gamma
-                self.update_gamma(i)
-                # Return runtime
-                return self.oracle_costs[i]
-            return 0
-        else:
-            # Nothing to do, so runtime is 0
-            return 0
+                self.update_gamma(fid)
+                # Remove from queue
+                self.eval_queue = None
+
+    def is_evaluating_obs(self, current_step):
+        if self.eval_queue is None:
+            return False
+        _,time,_ = self.eval_queue
+        return time > current_step
 
     def test_once(self, env, max_steps=np.inf, render=False):
         reward_sum = 0
@@ -359,10 +381,9 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
     def train_discrete_targets(self,iterations=1):
         if self.is_warming_up():
             return
-
-        breakpoint()
-
         super().train()
+        if len(self.state_values_explore) == 0:
+            return
 
         tau = self.polyak_rate
         optim_explore = self.optim_explore
@@ -442,13 +463,15 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
     def is_warming_up(self):
         return len(self.replay_buffer) < self.warmup_steps
 
-    def evaluate_obs(self):
+    def check_needs_evaluation(self, current_step):
         """ Call oracle on the current observation if needed. Update the agent's belief and return the runtime."""
-        obs = self.current_obs
         # Check if we're done warmup
         if self.is_warming_up():
-            return 0
+            return
+        if self.oracle_data is None:
+            return
         # Check if obs needs evaluating
+        obs = self.current_obs
         if self.evaluation_criterion == 'kandasamy':
             needs_evaluation = self.compute_state_value_explore(obs) >= self.sv_net_explore(obs)
         elif self.evaluation_criterion == 'always':
@@ -466,20 +489,9 @@ class MultiFidelityDQNAgent2(MultiFidelityDiscreteAgent):
                 # Don't evaluate if it's already been evaluated
                 if tuple(obs.tolist()) in self.oracle_data[i]:
                     continue
-                # Evaluate at fidelity i
-                self.oracle_data[i][tuple(obs.tolist())] = self.oracles[i](obs)
-                # Update Gaussian processes
-                x = list(self.oracle_data[i].keys())
-                y = [self.oracle_data[i][k] for k in x]
-                self.estimates[i].fit(x,y)
-                # Update gamma
-                self.update_gamma(i)
-                # Return runtime
-                return self.oracle_costs[i]
-            return 0
-        else:
-            # Nothing to do, so runtime is 0
-            return 0
+                # Add to queue
+                self.eval_queue = (obs,current_step+self.oracle_costs[i],i)
+                break
 
     def init_oracle_data(self):
         if self.oracle_data is not None:
