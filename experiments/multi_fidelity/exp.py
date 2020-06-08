@@ -592,12 +592,17 @@ def run():
     experiments['approx-mf-100-ucb-a-003'] = experiments['approx-mf-100-ucb-a-002'].copy()
     experiments['approx-mf-100-ucb-a-003']['v_net_arch'] = [5,5,1]
 
-    # The HF alg is still doing better than MF, but it looks like MF catches up after ~450 steps.
-    # Let's look at what happens if we let it run for 1k steps.
+    # The HF alg is still doing better than MF, but it looks like MF catches up after ~450 steps.  Let's look at what happens if we let it run for 1k steps.
     experiments['approx-baseline-hf-ucb-k-004'] = experiments['approx-baseline-hf-ucb-k-003'].copy()
     experiments['approx-baseline-hf-ucb-k-004']['max_steps'] = 1000
     experiments['approx-mf-100-ucb-a-004'] = experiments['approx-mf-100-ucb-a-003'].copy()
     experiments['approx-mf-100-ucb-a-004']['max_steps'] = 1000
+
+    # MF is doing better than HF only. Try this with a bootstrapped approximation now.
+    experiments['approx-baseline-hf-ucb-k-005'] = experiments['approx-baseline-hf-ucb-k-004'].copy()
+    experiments['approx-baseline-hf-ucb-k-005']['training_data'] = 'all'
+    experiments['approx-mf-100-ucb-a-005'] = experiments['approx-mf-100-ucb-a-004'].copy()
+    experiments['approx-mf-100-ucb-a-005']['training_data'] = 'all'
 
     import sys
     print(sys.argv)
