@@ -4,6 +4,7 @@ import numpy as np
 import itertools
 from tqdm import tqdm
 import torch
+from pprint import pprint
 
 import utils
 from agent.dqn_agent import DQNAgent
@@ -604,6 +605,12 @@ def run():
     experiments['approx-mf-100-ucb-a-005'] = experiments['approx-mf-100-ucb-a-004'].copy()
     experiments['approx-mf-100-ucb-a-005']['training_data'] = 'all'
 
+    # MF seems to do better after 500 steps. Now try with training on the replay buffer data.
+    experiments['approx-baseline-hf-ucb-k-006'] = experiments['approx-baseline-hf-ucb-k-005'].copy()
+    experiments['approx-baseline-hf-ucb-k-006']['training_data'] = 'replaybuffer'
+    experiments['approx-mf-100-ucb-a-006'] = experiments['approx-mf-100-ucb-a-005'].copy()
+    experiments['approx-mf-100-ucb-a-006']['training_data'] = 'replaybuffer'
+
     import sys
     print(sys.argv)
     if len(sys.argv) >= 2:
@@ -620,6 +627,7 @@ def run():
             exp_name = sys.argv[1]
             model = experiments[exp_name].pop('model','discrete')
             while True:
+                pprint(experiments[exp_name])
                 if model == 'discrete':
                     run_trial_mf_discrete(
                             directory=os.path.join(directory,exp_name),
