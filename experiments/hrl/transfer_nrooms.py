@@ -20,6 +20,10 @@ import hyperparams
 import hyperparams.utils
 from hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
 
+##################################################
+# Environment
+##################################################
+
 def get_search_space():
     actor_critic_hyperparam_space = {
             'agent_name': 'ActorCritic',
@@ -103,6 +107,10 @@ def get_search_space():
 
 space = get_search_space()
 
+##################################################
+# Environment
+##################################################
+
 class TimeLimit(gym.Wrapper):
     """ Copied from gym.wrappers.TimeLimit with small modifications."""
     def __init__(self, env, max_episode_steps=None):
@@ -120,6 +128,10 @@ class TimeLimit(gym.Wrapper):
     def reset(self, **kwargs):
         self._elapsed_steps = 0
         return self.env.reset(**kwargs)
+
+##################################################
+# Agent
+##################################################
 
 def create_agent(agent_name, env, device, seed, **agent_params):
     before_step = lambda s: None
@@ -328,6 +340,10 @@ def create_agent(agent_name, env, device, seed, **agent_params):
 
     return agent, before_step, after_step
 
+##################################################
+# Experiment
+##################################################
+
 def run_trial(directory=None, steps_per_task=100, total_steps=1000,
         epoch=50, test_iters=1, verbose=False,
         agent_name='HDQNAgentWithDelayAC', **agent_params):
@@ -399,6 +415,7 @@ def run_trial(directory=None, steps_per_task=100, total_steps=1000,
     #return (args, rewards, state_action_values)
 
 def checkpoint_directory():
+    """ Return the path where all checkpoints are saved. """
     directory = os.path.join(utils.get_results_directory(),__name__)
     checkpoint_directory = os.path.join(utils.get_results_directory(),'checkpoints')
     if not os.path.isdir(checkpoint_directory):
@@ -406,6 +423,7 @@ def checkpoint_directory():
     return checkpoint_directory
 
 def checkpoint_path():
+    """ Return the path of checkpoint associated with the current job ID and array task ID. """
     directory = checkpoint_directory()
 
     try:
@@ -419,23 +437,12 @@ def checkpoint_path():
     return file_path
 
 def list_checkpoints():
+    """ Generate the path to all available checkpoints """
     directory = checkpoint_directory()
     for f in os.listdir(directory):
         path = os.path.join(directory, f)
         if os.path.isfile(path):
             yield path
-
-def load_checkpoint(file_name=None):
-    if file_name is None:
-        file_name = checkpoint_path()
-    if os.path.isfile(file_name):
-        try:
-            with open(file_name,'rb') as f:
-                data = dill.load(f)
-            return data
-        except:
-            pass
-    return None
 
 def delete_checkpoint():
     os.remove(checkpoint_path())
@@ -503,11 +510,8 @@ class Experiment:
 
         self.agent, self.before_step, self.after_step = create_agent(
                 agent_name, self.env, device, seed, **agent_params)
-        # Create file to save results
-        self.results_file_path = utils.save_results(self.args,
-                {'rewards': [], 'state_action_values': []},
-                directory=directory,
-                file_name_prefix=agent_name)
+
+        self.results_file_path = None
         self.rewards = []
         self.state_action_values = []
         self.steps_to_reward = []
@@ -541,12 +545,7 @@ class Experiment:
             if self.verbose:
                 tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (
                     self.steps, self.rewards[-1], self.steps_to_reward[-1]))
-            utils.save_results(self.args,
-                    {'rewards': self.rewards,
-                    'state_action_values': self.state_action_values,
-                    'steps_to_reward': self.steps_to_reward,
-                    'from_checkpoint': self.checkpoint is not None},
-                    file_path=self.results_file_path)
+            self.save_results()
 
         self.before_step(self.steps)
         # Run step
@@ -568,6 +567,27 @@ class Experiment:
             pass
 
         return self.steps_to_reward
+
+    def save_results(self, additional_data={}):
+        results = {
+            **self.state_dict(),
+            'from_checkpoint': self.checkpoint is not None, # For debugging purposes
+        }
+        # Add additional data
+        for k,v in additional_data.items():
+            if k in results:
+                print('WARNING: OVERWRITING KEY %s' % k)
+            results[k] = v
+        # Save results
+        if self.results_file_path is None:
+            self.results_file_path = utils.save_results(self.args,
+                    results,
+                    directory=self.directory,
+                    file_name_prefix=self.agent_name)
+        else:
+            utils.save_results(self.args,
+                    results,
+                    file_path=self.results_file_path)
 
     def state_dict(self):
         return {
@@ -606,11 +626,14 @@ class Experiment:
         self.done = state['done']
 
     @staticmethod
-    def from_checkpoint(file_name):
-        state = load_checkpoint(file_name)
-
-        if state is None:
-            raise Exception('Invalid Checkpoint')
+    def from_checkpoint(file_name=None):
+        if file_name is None:
+            file_name = checkpoint_path()
+        if os.path.isfile(file_name):
+            with open(file_name,'rb') as f:
+                state = dill.load(f)
+        else:
+            raise Exception('Checkpoint does not exist: %s' % file_name)
 
         agent_params = state['args']['agent_params']
         del state['args']['agent_params']
@@ -618,6 +641,10 @@ class Experiment:
         exp.load_state_dict(state)
         exp.checkpoint = state
         return exp
+
+##################################################
+# Hyperparameter Search
+##################################################
 
 def run_hyperparam_search_extremes(space, proc=1):
     directory = os.path.join(utils.get_results_directory(),__name__)
@@ -744,6 +771,10 @@ def run_bayes_opt(results_directory, agent_name='ActorCritic'):
     val = res.fun
     print('Optimal parameters (score: %f):' % val)
     pprint.pprint(hyperparams.utils.vec_to_param(vec,space[agent_name]))
+
+##################################################
+# Plotting
+##################################################
 
 def plot(results_directory,plot_directory):
     import matplotlib
@@ -874,6 +905,10 @@ def plot_tsne_smooth(results_directory, plot_directory, agent_name, n_planes=4):
     plt.savefig(plot_path,dpi=200)
     plt.close()
     print('Saved plot %s' % plot_path)
+
+##################################################
+# Results Parsing
+##################################################
 
 def flatten_params(params):
     p = params
@@ -1012,68 +1047,267 @@ def fit_gaussian_process(directory, agent_name):
 def aggregate_results(results_directory):
     pass
 
+def compute_subpolicy_boundaries(agent, shape=[10,10]):
+    def neighbours(p):
+        yield p + torch.tensor([[0,1,0,0]]).float()
+        yield p + torch.tensor([[0,-1,0,0]]).float()
+        yield p + torch.tensor([[1,0,0,0]]).float()
+        yield p + torch.tensor([[-1,0,0,0]]).float()
+    augmented = isinstance(agent.controller_net, PolicyFunctionAugmentatedState)
+    output = torch.zeros(shape)
+    for p in itertools.product(range(shape[0]),range(shape[1]),range(shape[0]),range(shape[1])):
+        if not augmented:
+            p = torch.tensor(p).view(1,-1).float()
+            a1 = torch.argmax(agent.controller_net(p))
+            for n in neighbours(p):
+                a2 = torch.argmax(agent.controller_net(n))
+                if a1 != a2:
+                    output[int(p[0][0]),int(p[0][1])] += 1
+        else:
+            for a in range(4):
+                a = torch.tensor([[a]])
+                p = torch.tensor(p).view(1,-1).float()
+                a1 = torch.argmax(agent.controller_net(p,a))
+                for n in neighbours(p):
+                    a2 = torch.argmax(agent.controller_net(n,a))
+                    if a1 != a2:
+                        output[int(p[0][0]),int(p[0][1])] += 1
+    return output
+
+##################################################
+# Execution
+##################################################
+
+def get_experiment_params(directory):
+    params = {}
+    params['ac-001'] = {
+        'agent_name': 'ActorCritic',
+        'gamma': 0.9,
+        'controller_learning_rate': 0.001,
+        'subpolicy_learning_rate': 0.001,
+        'q_net_learning_rate': 0.001,
+        'eps_b': 0.05,
+        'polyak_rate': 0.001,
+        'batch_size': 256,
+        'min_replay_buffer_size': 1000,
+        'steps_per_task': 10000,
+        'total_steps': 100000,
+        'epoch': 1000,
+        'test_iters': 5,
+        'verbose': True,
+        'cnet_n_layers': 2,
+        'cnet_layer_size': 3,
+        'snet_n_layers': 2,
+        'snet_layer_size': 3,
+        'qnet_n_layers': 2,
+        'qnet_layer_size': 20,
+        'num_options': 5,
+        'directory': directory
+    }
+    params['hrl_memoryless-001'] = {
+            **params['ac-001'],
+            'agent_name': 'HDQNAgentWithDelayAC_v2',
+            'subpolicy_q_net_learning_rate': 1e-3
+    }
+    params['hrl_augmented-001'] = {
+            **params['hrl_memoryless-001'],
+            'agent_name': 'HDQNAgentWithDelayAC_v3',
+            'subpolicy_q_net_learning_rate': 1e-3
+    }
+    return params
+
 def run():
     utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'hrl-3'))
+            os.path.join(utils.get_results_root_directory(),'hrl-4'))
     #utils.set_results_directory(
     #        os.path.join(utils.get_results_root_directory(),'dev'))
+    #utils.set_results_directory(
+    #        os.path.join(utils.get_results_root_directory(),'hrl'))
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     for agent_name in space.keys():
         space[agent_name]['directory'] = directory
+    experiment_params = get_experiment_params(directory)
 
-    #series = compute_series_lsh(directory,iterations=100,n_planes=8)
-    #data = defaultdict(lambda: {})
-    #for an,s in series.items():
-    #    #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
-    #    data[an]['x'] = range(0,100000,1000)
-    #    data[an]['y'] = s['series']
-    #    print(an,np.mean(s['series'][50:]),np.mean(s['bin_size']))
-    #plot(data,plot_directory)
+    import sys
+    print(sys.argv)
+    if len(sys.argv) >= 2:
+        if sys.argv[1] == 'plot':
+            """
+            Plot the time series of the best runs found by the LSH algorithm
+            """
+            series = compute_series_lsh(directory,iterations=100,n_planes=8)
+            data = defaultdict(lambda: {})
+            for an,s in series.items():
+                #data['all']['x'] = range(0,p['total_steps'],p['epoch'])
+                data[an]['x'] = range(0,100000,1000)
+                data[an]['y'] = s['series']
+                print(an,np.mean(s['series'][50:]),np.mean(s['bin_size']))
+            plot(data,plot_directory)
+        elif sys.argv[1] == 'plot2':
+            # Old plotting function. Used to generate plot from 2020-01-07
+            def map_func(params):
+                p = params
+                ap = p.pop('agent_params',{})
+                if 'directory' in p:
+                    del p['directory']
+                for k,v in ap.items():
+                    p[k] = v
+                return frozenset(p.items())
+            def compute_series(directory,params={}):
+                def reduce(r,acc):
+                    acc.append(r['steps_to_reward'])
+                    return acc
+                series = utils.get_all_results_map_reduce(
+                        directory, map_func, reduce, lambda: [])
+                for k,v in series.items():
+                    max_len = max([len(x) for x in v])
+                    series[k] = np.nanmean(np.array(list(itertools.zip_longest(*v,fillvalue=np.nan))),axis=1)
+                return series
+            def compute_score(directory,params={},sortby='mean',
+                    keys=['mean','ucb1','count']):
+                def reduce(r,acc):
+                    if len(r['steps_to_reward']) == 100:
+                        acc.append(np.mean(r['steps_to_reward'][50:]))
+                    return acc
+                scores = utils.get_all_results_map_reduce(
+                        directory, map_func, reduce, lambda: [])
+                n = defaultdict(lambda: 0)
+                for k,v in scores.items():
+                    an = dict(k)['agent_name']
+                    n[an] += len([x for x in v if x==x])
+                for k,v in scores.items():
+                    if len(v) == 0:
+                        scores[k] = {
+                                #'data': [],
+                                'mean': np.nan,
+                                'ucb1': -np.inf,
+                                'count': len(v)
+                        }
+                    else:
+                        m = np.nanmean(v)
+                        d = [x for x in v if x==x]
+                        c = len(d)
+                        t = n[dict(k)['agent_name']]
+                        scores[k] = {
+                                #'data': d,
+                                'mean': m,
+                                'ucb1': m-500*np.sqrt(2*np.log(t)/c),
+                                'count': c
+                        }
+                sorted_scores = sorted(scores.items(),key=lambda x: x[1][sortby])
+                return sorted_scores
+            series = compute_series(directory)
+            scores = compute_score(directory)
+            scores_by_agent = defaultdict(lambda: [])
+            for p,s in scores:
+                p = dict(p)
+                scores_by_agent[p['agent_name']].append((p,s))
+            agent_names = scores_by_agent.keys()
+            data = defaultdict(lambda: {'x': None, 'y': None})
+            for an in agent_names:
+                p = scores_by_agent[an][0][0]
+                y = series[map_func(p)]
+                s = scores_by_agent[an][0][1]
+                print(s, an)
+                print(p)
+                label = '%s (%d)' % (an,scores_by_agent[an][0][1]['count'])
+                data[label]['x'] = range(0,p['total_steps'],p['epoch'])
+                data[label]['y'] = y
+            plot(data,plot_directory)
 
-    #plot_tsne(directory, plot_directory, 'ActorCritic')
-    #plot_tsne_smooth(directory, plot_directory, 'ActorCritic',n_planes=6)
-    #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2',n_planes=6)
-    #plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v3',n_planes=6)
+        elif sys.argv[1] == 'tsne':
+            """
+            Visualize distribution of performances with t-sne
+            """
+            plot_tsne(directory, plot_directory, 'ActorCritic')
+            plot_tsne_smooth(directory, plot_directory, 'ActorCritic',n_planes=6)
+            plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2',n_planes=6)
+            plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v3',n_planes=6)
 
-    #run_hyperparam_search(space['ActorCritic'])
-    run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
-    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
-    #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
-    #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+        elif sys.argv[1] == 'checkpoints':
+            """
+            Start a run from a checkpoint
+            """
+            if len(sys.argv) > 2:
+                fns = sys.argv[2:]
+            else:
+                fns = list_checkpoints()
+            for fn in fns:
+                print('Running from checkpoint',fn)
+                exp = Experiment.from_checkpoint(fn)
+                exp.run()
 
-    #param = sample_convex_hull(directory)
-    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.0)
-    #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.05, scoring='improvement_prob', target_score=182.58163722924036)
-    #param = sample_lsh(directory, 'ActorCritic', n_planes=8, perturbance=0.01)
-    #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
-    #run_trial_with_checkpoint(**param)
+        elif sys.argv[1] == 'random':
+            """
+            Run a trial with random parameters
+            """
+            run_hyperparam_search(space[sys.argv[2]])
 
-    #run_bayes_opt(directory,'ActorCritic')
-    #run_bayes_opt(directory,'HDQNAgentWithDelayAC_v2')
+        elif sys.argv[1] == 'run':
+            exp_name = sys.argv[2]
+            if exp_name not in experiment_params:
+                print('Invalid experiment name: %s' % exp_name)
+                print('Choose from the following:')
+                for k in experiment_params.keys():
+                    print('\t%s' % k)
+            else:
+                params = experiment_params[exp_name]
+                params['directory'] = os.path.join(directory,exp_name)
+                run_trial_with_checkpoint(**params)
 
-    #s = smoothen_scores_lsh(directory, 'HDQNAgentWithDelayAC_v2')
-    #pprint.pprint(sorted(s.values()))
+        else:
+            print('Invalid command')
+    else:
+        utils.set_results_directory(
+                os.path.join(utils.get_results_root_directory(),'dev'))
+        for agent_name in space.keys():
+            space[agent_name]['directory'] = directory
 
-    #count = 0
-    #for v,save in utils.modify_all_results(directory):
-    #    if v is None or 'steps_to_reward' not in v[1] or len(v[1]['steps_to_reward']) < 100:
-    #        #save(None)
-    #        count += 1
-    #print(count)
+        #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
 
-    #for fn in list_checkpoints():
-    #    print('Running from checkpoint',fn)
-    #    exp = Experiment.from_checkpoint(fn)
-    #    exp.run()
-    #    break
+        env_name='gym_fourrooms:fourrooms-v0'
+        env = gym.make(env_name)
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+        agent_params = {
+                'cnet_n_layers': 1,
+                'cnet_layer_size': 10,
+                'snet_n_layers': 1,
+                'snet_layer_size': 1,
+                'qnet_n_layers': 1,
+                'qnet_layer_size': 1,
+                'num_options': 3
+        }
+        agent, before_step, after_step = create_agent(
+                'ActorCritic', env, device, None, **agent_params)
+        boundaries = compute_subpolicy_boundaries(agent, [10,10])
+        print(boundaries)
 
-    #fns = [
-    #    '/network/tmp1/huanghow/hrl-2/checkpoints/382536_238.checkpoint.pkl',
-    #    '/network/tmp1/huanghow/hrl-2/checkpoints/382536_607.checkpoint.pkl',
-    #    '/network/tmp1/huanghow/hrl-2/checkpoints/382536_895.checkpoint.pkl',
-    #    '/network/tmp1/huanghow/hrl-2/checkpoints/382536_979.checkpoint.pkl',
-    #]
-    #for fn in fns:
-    #    exp = Experiment.from_checkpoint(fn)
-    #    exp.run()
+        #run_hyperparam_search(space['ActorCritic'])
+        #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
+        #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+        #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
+        #run_hyperparam_search_extremes(space['HDQNAgentWithDelayAC_v2'])
+
+        #param = sample_convex_hull(directory)
+        #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.0)
+        #param = sample_lsh(directory, 'HDQNAgentWithDelayAC_v2', n_planes=8, perturbance=0.05, scoring='improvement_prob', target_score=182.58163722924036)
+        #param = sample_lsh(directory, 'ActorCritic', n_planes=8, perturbance=0.01)
+        #param = hyperparams.utils.sample_hyperparam(space['HDQNAgentWithDelayAC_v2'])
+        #run_trial_with_checkpoint(**param)
+
+        #run_bayes_opt(directory,'ActorCritic')
+        #run_bayes_opt(directory,'HDQNAgentWithDelayAC_v2')
+
+        #s = smoothen_scores_lsh(directory, 'HDQNAgentWithDelayAC_v2')
+        #pprint.pprint(sorted(s.values()))
+
+        #count = 0
+        #for v,save in utils.modify_all_results(directory):
+        #    if v is None or 'steps_to_reward' not in v[1] or len(v[1]['steps_to_reward']) < 100:
+        #        #save(None)
+        #        count += 1
+        #print(count)
