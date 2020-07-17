@@ -407,24 +407,7 @@ class HDQNAgentWithDelayAC(Agent):
             action_probs = self.policy_net(*obs).squeeze().detach().numpy()
             #dist = torch.distributions.Categorical(action_probs)
             #action = dist.sample().item()
-            try:
-                action = self.rand.choice(len(action_probs),p=action_probs)
-            except:
-                # Debugging code.
-                print('Mask',obs[2])
-                print('Controller',self.controller_net(obs[0]))
-                for net in self.subpolicy_nets:
-                    print('Subpolicy',net(obs[1]))
-                print('Controller Weights')
-                print(self.controller_net.seq[0].weight)
-                print(self.controller_net.seq[2].weight)
-                print(self.controller_net.seq[4].weight)
-                for net in self.subpolicy_nets:
-                    print('Subpolicy Weights')
-                    print(net.seq[0].weight)
-                    print(net.seq[2].weight)
-                    print(net.seq[4].weight)
-                raise
+            action = self.rand.choice(len(action_probs),p=action_probs)
         self.current_action = action
 
         return action
@@ -574,9 +557,6 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
             critic_loss.backward()
             critic_optimizer.step()
 
-            #if torch.isnan(utils.compute_grad_mean(critic_optimizer)):
-            #    breakpoint()
-
             # Update subpolicy Q functions
             subpolicy_critic_optimizer.zero_grad()
             subpolicy_loss_total = 0
@@ -609,9 +589,6 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
             actor_optimizer.zero_grad()
             actor_loss.backward()
             actor_optimizer.step()
-
-            #if torch.isnan(utils.compute_grad_mean(actor_optimizer)):
-            #    breakpoint()
 
             # Update target weights
             params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]

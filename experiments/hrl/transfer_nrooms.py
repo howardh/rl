@@ -1045,12 +1045,37 @@ def get_experiment_params(directory):
     return params
 
 def run():
-    utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'hrl-4'))
-    utils.set_results_directory(
-            os.path.join(utils.get_results_root_directory(),'dev'))
-    #utils.set_results_directory(
-    #        os.path.join(utils.get_results_root_directory(),'hrl'))
+    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-4')
+
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--results-root', type=str, default=DEFAULT_DIRECTORY)
+    subparsers = parser.add_subparsers(help='')
+    
+    parsers = {}
+    commands = [
+            ['plot',''],
+            ['plot2',''],
+            ['tsne',''],
+            ['checkpoint',''],
+            ['random',''],
+            ['run',''],
+            ['decision-boundary',''],
+    ]
+    for c,h in commands:
+        parsers[c] = subparsers.add_parser(c, help=h)
+        parsers[c].set_defaults(command=c)
+
+    parsers['run'].add_argument('exp_name', type=str, choices=list(get_experiment_params(None).keys()))
+    parsers['checkpoint'].add_argument('checkpoint_files', type=str, nargs='*')
+    parsers['plot2'].add_argument('directory', type=str, default=None)
+    parsers['random'].add_argument('exp_name', type=str, choices=list(space.keys()))
+    parsers['decision-boundary'].add_argument('directory', type=str, choices=list(space.keys()))
+
+    args = parser.parse_args()
+
+    # Set up environment with parsed args
+    utils.set_results_directory(args.results_root)
     directory = os.path.join(utils.get_results_directory(),__name__)
     plot_directory = os.path.join(utils.get_results_directory(),'plots',__name__)
     for agent_name in space.keys():
@@ -1060,7 +1085,7 @@ def run():
     import sys
     print(sys.argv)
     if len(sys.argv) >= 2:
-        if sys.argv[1] == 'plot':
+        if args.command == 'plot':
             """
             Plot the time series of the best runs found by the LSH algorithm
             """
@@ -1072,7 +1097,8 @@ def run():
                 data[an]['y'] = s['series']
                 print(an,np.mean(s['series'][50:]),np.mean(s['bin_size']))
             plot(data,plot_directory)
-        elif sys.argv[1] == 'plot2':
+        elif args.command == 'plot2':
+            results_dir = directory
             # Old plotting function. Used to generate plot from 2020-01-07
             def map_func(params):
                 p = params
@@ -1125,8 +1151,8 @@ def run():
                         }
                 sorted_scores = sorted(scores.items(),key=lambda x: x[1][sortby])
                 return sorted_scores
-            series = compute_series(directory)
-            scores = compute_score(directory)
+            series = compute_series(results_dir)
+            scores = compute_score(results_dir)
             scores_by_agent = defaultdict(lambda: [])
             for p,s in scores:
                 p = dict(p)
@@ -1143,8 +1169,11 @@ def run():
                 data[label]['x'] = range(0,p['total_steps'],p['epoch'])
                 data[label]['y'] = y
             plot(data,plot_directory)
+        elif args.command == 'plot3':
 
-        elif sys.argv[1] == 'tsne':
+            pass
+
+        elif args.command == 'tsne':
             """
             Visualize distribution of performances with t-sne
             """
@@ -1153,12 +1182,12 @@ def run():
             plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2',n_planes=6)
             plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v3',n_planes=6)
 
-        elif sys.argv[1] == 'checkpoints' or sys.argv[1] == 'checkpoint':
+        elif args.command == 'checkpoints' or args.command == 'checkpoint':
             """
             Start a run from a checkpoint
             """
-            if len(sys.argv) > 2:
-                fns = sys.argv[2:]
+            if len(args.checkpoint_files) > 0:
+                fns = args.checkpoint_files
             else:
                 fns = list_checkpoints()
             for fn in fns:
@@ -1166,30 +1195,26 @@ def run():
                 exp = Experiment.from_checkpoint(fn)
                 exp.run()
 
-        elif sys.argv[1] == 'random':
+        elif args.command == 'random':
             """
             Run a trial with random parameters
             """
-            run_hyperparam_search(space[sys.argv[2]])
+            run_hyperparam_search(space[args.exp_name])
 
-        elif sys.argv[1] == 'run':
-            exp_name = sys.argv[2]
-            if exp_name not in experiment_params:
-                print('Invalid experiment name: %s' % exp_name)
-                print('Choose from the following:')
-                for k in experiment_params.keys():
-                    print('\t%s' % k)
-            else:
-                params = experiment_params[exp_name]
-                params['directory'] = os.path.join(directory,exp_name)
-                run_trial_with_checkpoint(**params)
+        elif args.command == 'run':
+            exp_name = args.exp_name
+            directory = args.directory
 
-        elif sys.argv[1] == 'decision-boundary':
+            params = experiment_params[exp_name]
+            params['directory'] = os.path.join(directory,exp_name)
+            run_trial_with_checkpoint(**params)
+
+        elif args.command == 'decision-boundary':
             import matplotlib
             matplotlib.use('Agg')
             from matplotlib import pyplot as plt
 
-            results_dir = sys.argv[2]
+            results_dir = args.directory
             all_boundaries = []
             for checkpoint_path in utils.get_all_result_paths(results_dir):
                 print(checkpoint_path)
@@ -1208,6 +1233,7 @@ def run():
                 os.makedirs(plot_directory)
 
             plt.imshow(mean_boundaries)
+            plt.title(os.path.split(os.path.normpath(results_dir))[-1])
             plot_path = os.path.join(plot_directory,'decision-boundaries.png')
             plt.savefig(plot_path)
             plt.close()
@@ -1227,8 +1253,6 @@ def run():
 
         boundaries = compute_subpolicy_boundaries(exp.agent, [13,13])
         print(boundaries)
-
-        breakpoint()
 
         #run_hyperparam_search(space['ActorCritic'])
         #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])
