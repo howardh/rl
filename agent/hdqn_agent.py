@@ -12,6 +12,8 @@ from agent.agent import Agent
 from .replay_buffer import ReplayBufferStackedObs,ReplayBufferStackedObsAction
 from .policy import get_greedy_epsilon_policy, greedy_action
 
+import utils
+
 class HierarchicalQNetwork(torch.nn.Module):
     def __init__(self, controller, subpolicies):
         super().__init__()
@@ -405,7 +407,24 @@ class HDQNAgentWithDelayAC(Agent):
             action_probs = self.policy_net(*obs).squeeze().detach().numpy()
             #dist = torch.distributions.Categorical(action_probs)
             #action = dist.sample().item()
-            action = self.rand.choice(len(action_probs),p=action_probs)
+            try:
+                action = self.rand.choice(len(action_probs),p=action_probs)
+            except:
+                # Debugging code.
+                print('Mask',obs[2])
+                print('Controller',self.controller_net(obs[0]))
+                for net in self.subpolicy_nets:
+                    print('Subpolicy',net(obs[1]))
+                print('Controller Weights')
+                print(self.controller_net.seq[0].weight)
+                print(self.controller_net.seq[2].weight)
+                print(self.controller_net.seq[4].weight)
+                for net in self.subpolicy_nets:
+                    print('Subpolicy Weights')
+                    print(net.seq[0].weight)
+                    print(net.seq[2].weight)
+                    print(net.seq[4].weight)
+                raise
         self.current_action = action
 
         return action
@@ -555,19 +574,22 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
             critic_loss.backward()
             critic_optimizer.step()
 
-            ## Update subpolicy Q functions
-            #subpolicy_critic_optimizer.zero_grad()
-            #subpolicy_loss_total = 0
-            #q_s2 = self.q_net_target(s2)
-            #for q_net,p_net in zip(self.subpolicy_q_nets,self.subpolicy_nets):
-            #    action_probs = p_net(s1)
-            #    next_state_vals = (action_probs * q_s2).sum(1)
-            #    val_target = r2+gamma*next_state_vals*(1-t)
-            #    val_pred = q_net(s1)[range(batch_size),a1.squeeze()]
-            #    loss = ((val_target-val_pred)**2).mean()
-            #    subpolicy_loss_total += loss
-            #subpolicy_loss_total.backward()
-            #subpolicy_critic_optimizer.step()
+            #if torch.isnan(utils.compute_grad_mean(critic_optimizer)):
+            #    breakpoint()
+
+            # Update subpolicy Q functions
+            subpolicy_critic_optimizer.zero_grad()
+            subpolicy_loss_total = 0
+            q_s2 = self.q_net_target(s2)
+            for q_net,p_net in zip(self.subpolicy_q_nets,self.subpolicy_nets):
+                action_probs = p_net(s1)
+                next_state_vals = (action_probs * q_s2).sum(1)
+                val_target = r2+gamma*next_state_vals*(1-t)
+                val_pred = q_net(s1)[range(batch_size),a1.squeeze()]
+                loss = ((val_target-val_pred)**2).mean()
+                subpolicy_loss_total += loss
+            subpolicy_loss_total.backward()
+            subpolicy_critic_optimizer.step()
 
             # Update policy function
             num_subpolicies = len(self.subpolicy_nets)
@@ -587,6 +609,9 @@ class HDQNAgentWithDelayAC_v2(HDQNAgentWithDelayAC):
             actor_optimizer.zero_grad()
             actor_loss.backward()
             actor_optimizer.step()
+
+            #if torch.isnan(utils.compute_grad_mean(actor_optimizer)):
+            #    breakpoint()
 
             # Update target weights
             params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]

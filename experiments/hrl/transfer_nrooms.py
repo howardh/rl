@@ -21,7 +21,7 @@ import hyperparams.utils
 from hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
 
 ##################################################
-# Environment
+# Search Space
 ##################################################
 
 def get_search_space():
@@ -344,76 +344,6 @@ def create_agent(agent_name, env, device, seed, **agent_params):
 # Experiment
 ##################################################
 
-def run_trial(directory=None, steps_per_task=100, total_steps=1000,
-        epoch=50, test_iters=1, verbose=False,
-        agent_name='HDQNAgentWithDelayAC', **agent_params):
-    args = locals()
-    env_name='gym_fourrooms:fourrooms-v0'
-    pprint.pprint(args)
-
-    env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
-    env = TimeLimit(env,36)
-    test_env = gym.make(env_name,goal_duration_steps=float('inf')).unwrapped
-    test_env = TimeLimit(test_env,500)
-
-    print(env, test_env)
-
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-    else:
-        device = torch.device('cpu')
-
-    agent, before_step, after_step = create_agent(
-            agent_name, env, device, None, **agent_params)
-
-    # Create file to save results
-    results_file_path = utils.save_results(args,
-            {'rewards': [], 'state_action_values': []},
-            directory=directory,
-            file_name_prefix=agent_name)
-
-    step_range = range(total_steps)
-    if verbose:
-        step_range = tqdm(step_range)
-
-    rewards = []
-    state_action_values = []
-    steps_to_reward = []
-    done = True
-    for steps in step_range:
-        # Run tests
-        if steps % epoch == 0:
-            test_env.reset_goal(env.goal)
-            test_results = agent.test(
-                    test_env, test_iters, render=False, processors=1)
-            rewards.append(np.mean(
-                [r['total_rewards'] for r in test_results]))
-            state_action_values.append(np.mean(
-                [r['state_action_values'] for r in test_results]))
-            steps_to_reward.append(np.mean(
-                [r['steps'] for r in test_results]))
-            if verbose:
-                tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (
-                    steps, rewards[-1], steps_to_reward[-1]))
-            utils.save_results(args,
-                    {'rewards': rewards,
-                    'state_action_values': state_action_values,
-                    'steps_to_reward': steps_to_reward},
-                    file_path=results_file_path)
-
-        before_step(steps)
-        # Run step
-        if done:
-            obs = env.reset()
-            agent.observe_change(obs, None)
-        obs, reward, done, _ = env.step(agent.act())
-        agent.observe_change(obs, reward, terminal=done)
-        # Update weights
-        after_step(steps)
-
-    return np.mean(steps_to_reward[50:])
-    #return (args, rewards, state_action_values)
-
 def checkpoint_directory():
     """ Return the path where all checkpoints are saved. """
     directory = os.path.join(utils.get_results_directory(),__name__)
@@ -483,7 +413,6 @@ class Experiment:
         self.seed = seed
         self.keep_checkpoint = keep_checkpoint
         self.checkpoint_path = checkpoint_path
-        self.checkpoint = None
         self.agent_name = agent_name
         self.agent_params = agent_params
         self.steps = 0
@@ -515,11 +444,9 @@ class Experiment:
         self.rewards = []
         self.state_action_values = []
         self.steps_to_reward = []
-        self.step_range = range(total_steps)
+        self.eval_steps = []
+        self.step_range = range(self.total_steps)
         self.done = True
-
-        if verbose:
-            self.step_range = tqdm(self.step_range, total=total_steps, initial=self.step_range.start)
 
     def run_step(self):
         # Checkpoint
@@ -542,10 +469,10 @@ class Experiment:
                 [r['state_action_values'] for r in test_results]))
             self.steps_to_reward.append(np.mean(
                 [r['steps'] for r in test_results]))
+            self.eval_steps.append(self.steps)
             if self.verbose:
                 tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (
                     self.steps, self.rewards[-1], self.steps_to_reward[-1]))
-            self.save_results()
 
         self.before_step(self.steps)
         # Run step
@@ -558,9 +485,12 @@ class Experiment:
         self.after_step(self.steps)
 
     def run(self):
+        if self.verbose:
+            step_range = tqdm(range(self.total_steps), total=self.total_steps, initial=self.step_range.start)
         try:
-            for self.steps in self.step_range:
+            for self.steps in step_range:
                 self.run_step()
+            self.save_results()
             if not self.keep_checkpoint:
                 delete_checkpoint()
         except KeyboardInterrupt:
@@ -569,10 +499,8 @@ class Experiment:
         return self.steps_to_reward
 
     def save_results(self, additional_data={}):
-        results = {
-            **self.state_dict(),
-            'from_checkpoint': self.checkpoint is not None, # For debugging purposes
-        }
+        results = self.state_dict()
+
         # Add additional data
         for k,v in additional_data.items():
             if k in results:
@@ -580,12 +508,12 @@ class Experiment:
             results[k] = v
         # Save results
         if self.results_file_path is None:
-            self.results_file_path = utils.save_results(self.args,
+            self.results_file_path = utils.save_results(
                     results,
                     directory=self.directory,
                     file_name_prefix=self.agent_name)
         else:
-            utils.save_results(self.args,
+            utils.save_results(
                     results,
                     file_path=self.results_file_path)
 
@@ -597,6 +525,7 @@ class Experiment:
             'rewards': self.rewards,
             'state_action_values': self.state_action_values,
             'steps_to_reward': self.steps_to_reward,
+            'eval_steps': self.eval_steps,
             'steps': self.steps,
             'env': self.env.state_dict(),
             'test_env': self.test_env.state_dict(),
@@ -620,9 +549,9 @@ class Experiment:
         self.rewards = state['rewards']
         self.state_action_values = state['state_action_values']
         self.steps_to_reward = state['steps_to_reward']
-        self.step_range = range(state['steps'],state['args']['total_steps'])
-        if state['args']['verbose']:
-            self.step_range = tqdm(self.step_range, total=state['args']['total_steps'], initial=self.step_range.start)
+        self.eval_steps = state['eval_steps']
+        self.steps = state['steps']
+        self.step_range = range(self.steps,self.total_steps)
         self.done = state['done']
 
     @staticmethod
@@ -635,8 +564,7 @@ class Experiment:
         else:
             raise Exception('Checkpoint does not exist: %s' % file_name)
 
-        agent_params = state['args']['agent_params']
-        del state['args']['agent_params']
+        agent_params = state['args'].pop('agent_params')
         exp = Experiment(**state['args'],**agent_params)
         exp.load_state_dict(state)
         exp.checkpoint = state
@@ -1055,7 +983,7 @@ def compute_subpolicy_boundaries(agent, shape=[10,10]):
         yield p + torch.tensor([[-1,0,0,0]]).float()
     augmented = isinstance(agent.controller_net, PolicyFunctionAugmentatedState)
     output = torch.zeros(shape)
-    for p in itertools.product(range(shape[0]),range(shape[1]),range(shape[0]),range(shape[1])):
+    for p in tqdm(list(itertools.product(range(shape[0]),range(shape[1]),range(shape[0]),range(shape[1])))):
         if not augmented:
             p = torch.tensor(p).view(1,-1).float()
             a1 = torch.argmax(agent.controller_net(p))
@@ -1091,7 +1019,7 @@ def get_experiment_params(directory):
         'batch_size': 256,
         'min_replay_buffer_size': 1000,
         'steps_per_task': 10000,
-        'total_steps': 100000,
+        'total_steps': 100000+1,
         'epoch': 1000,
         'test_iters': 5,
         'verbose': True,
@@ -1119,8 +1047,8 @@ def get_experiment_params(directory):
 def run():
     utils.set_results_directory(
             os.path.join(utils.get_results_root_directory(),'hrl-4'))
-    #utils.set_results_directory(
-    #        os.path.join(utils.get_results_root_directory(),'dev'))
+    utils.set_results_directory(
+            os.path.join(utils.get_results_root_directory(),'dev'))
     #utils.set_results_directory(
     #        os.path.join(utils.get_results_root_directory(),'hrl'))
     directory = os.path.join(utils.get_results_directory(),__name__)
@@ -1225,7 +1153,7 @@ def run():
             plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v2',n_planes=6)
             plot_tsne_smooth(directory, plot_directory, 'HDQNAgentWithDelayAC_v3',n_planes=6)
 
-        elif sys.argv[1] == 'checkpoints':
+        elif sys.argv[1] == 'checkpoints' or sys.argv[1] == 'checkpoint':
             """
             Start a run from a checkpoint
             """
@@ -1256,35 +1184,51 @@ def run():
                 params['directory'] = os.path.join(directory,exp_name)
                 run_trial_with_checkpoint(**params)
 
+        elif sys.argv[1] == 'decision-boundary':
+            import matplotlib
+            matplotlib.use('Agg')
+            from matplotlib import pyplot as plt
+
+            results_dir = sys.argv[2]
+            all_boundaries = []
+            for checkpoint_path in utils.get_all_result_paths(results_dir):
+                print(checkpoint_path)
+                try:
+                    exp = Experiment.from_checkpoint(checkpoint_path)
+                    boundary = compute_subpolicy_boundaries(exp.agent, [13,13])
+                    total = boundary.sum()
+                    if total > 0:
+                        all_boundaries.append(boundary/total)
+                        print(boundary/total)
+                except:
+                    pass
+            mean_boundaries = torch.stack(all_boundaries).mean(dim=0).numpy()
+
+            if not os.path.isdir(plot_directory):
+                os.makedirs(plot_directory)
+
+            plt.imshow(mean_boundaries)
+            plot_path = os.path.join(plot_directory,'decision-boundaries.png')
+            plt.savefig(plot_path)
+            plt.close()
+
+            print(mean_boundaries)
+            print('Figure saved to %s' % plot_path)
+
         else:
             print('Invalid command')
     else:
         utils.set_results_directory(
                 os.path.join(utils.get_results_root_directory(),'dev'))
-        for agent_name in space.keys():
-            space[agent_name]['directory'] = directory
 
-        #run_hyperparam_search(space['HDQNAgentWithDelayAC_v3'])
+        checkpoint_path = '/network/tmp1/huanghow/hrl-4/checkpoints/524717.checkpoint.pkl'
+        checkpoint_path = '/network/tmp1/huanghow/hrl-4/experiments.hrl.transfer_nrooms/ac-001/ActorCritic-0.pkl'
+        exp = Experiment.from_checkpoint(checkpoint_path)
 
-        env_name='gym_fourrooms:fourrooms-v0'
-        env = gym.make(env_name)
-        if torch.cuda.is_available():
-            device = torch.device('cuda')
-        else:
-            device = torch.device('cpu')
-        agent_params = {
-                'cnet_n_layers': 1,
-                'cnet_layer_size': 10,
-                'snet_n_layers': 1,
-                'snet_layer_size': 1,
-                'qnet_n_layers': 1,
-                'qnet_layer_size': 1,
-                'num_options': 3
-        }
-        agent, before_step, after_step = create_agent(
-                'ActorCritic', env, device, None, **agent_params)
-        boundaries = compute_subpolicy_boundaries(agent, [10,10])
+        boundaries = compute_subpolicy_boundaries(exp.agent, [13,13])
         print(boundaries)
+
+        breakpoint()
 
         #run_hyperparam_search(space['ActorCritic'])
         #run_hyperparam_search(space['HDQNAgentWithDelayAC_v2'])

@@ -59,7 +59,7 @@ class ReplayBufferStackedObs(ReplayBuffer):
         num_missing = self.obs_stack.maxlen-num_obs
         obs_mask = torch.tensor([False]*num_missing + [True]*num_obs).float()
         if len(self.obs_stack) != self.obs_stack.maxlen:
-            obs_stack = [torch.empty_like(obs0)]*num_missing + list(self.obs_stack)
+            obs_stack = [torch.zeros_like(obs0)]*num_missing + list(self.obs_stack)
         else:
             obs_stack = list(self.obs_stack)
 

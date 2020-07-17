@@ -93,27 +93,31 @@ def skip_new_files(skip=None):
 
 # Data Storage
 
-def save_results(params, results, directory=None, file_path=None,
+def save_results(results, directory=None, file_path=None,
         file_name_prefix='results'):
     while True:
         try:
-            data = (params, results)
             if file_path is None:
                 if directory is None:
                     raise Exception('No directory or file path provided. One of the other is needed.')
                 file_path, file_num = find_next_free_file(file_name_prefix, "pkl", directory)
             with open(file_path, "wb") as f:
-                dill.dump(data, f)
+                dill.dump(results, f)
             return file_path
         except KeyboardInterrupt:
             print('Writing data to disk. Ignoring keyboard interrupt.')
 
-def get_all_results(directory):
+def get_all_result_paths(directory):
     """ Generator for the contents of all files in the given directory. """
     for d,_,file_names in tqdm(os.walk(directory)):
         for fn in file_names:
-            with open(os.path.join(d,fn), 'rb') as f:
-                yield dill.load(f)
+            yield os.path.join(d,fn)
+
+def get_all_results(directory):
+    """ Generator for the contents of all files in the given directory. """
+    for fn in get_all_result_paths(directory):
+        with open(fn, 'rb') as f:
+            yield dill.load(f)
 
 def modify_all_results(directory):
     """ A tool to modify all results. For each result, return the file's entire content, along with a function that takes the updated value as an argument. """
@@ -670,3 +674,13 @@ def gridsearch(parameters, func, repetitions=1, shuffle=False):
         random.shuffle(params)
     params = [dict(p) for p in params]
     return [lambda p=p: func(**p) for p in params]
+
+# Debugging
+
+def compute_grad_mean(optim):
+    #critic_optimizer.param_groups[0]['params'][0].grad
+    total = 0
+    for pg in optim.param_groups:
+        for p in pg['params']:
+            total += p.grad.mean()
+    return total
