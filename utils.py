@@ -31,7 +31,7 @@ lock = threading.Lock()
 def get_results_root_directory():
     host_name = os.uname()[1]
     # Mila
-    mila_hostnames = ['rtx', 'leto', 'eos', 'bart', 'mila', 'kepler', 'power']
+    mila_hostnames = ['rtx', 'leto', 'eos', 'bart', 'mila', 'kepler', 'power', 'apollor', 'apollov']
     if host_name.endswith('server.mila.quebec') or any((host_name.startswith(n) for n in mila_hostnames)):
         return "/network/tmp1/huanghow"
     # RL Lab

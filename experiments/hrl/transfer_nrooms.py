@@ -1070,7 +1070,7 @@ def run():
     parsers['checkpoint'].add_argument('checkpoint_files', type=str, nargs='*')
     parsers['plot2'].add_argument('directory', type=str, default=None)
     parsers['random'].add_argument('exp_name', type=str, choices=list(space.keys()))
-    parsers['decision-boundary'].add_argument('directory', type=str, choices=list(space.keys()))
+    parsers['decision-boundary'].add_argument('directory', type=str)
 
     args = parser.parse_args()
 
@@ -1203,7 +1203,6 @@ def run():
 
         elif args.command == 'run':
             exp_name = args.exp_name
-            directory = args.directory
 
             params = experiment_params[exp_name]
             params['directory'] = os.path.join(directory,exp_name)
@@ -1232,9 +1231,11 @@ def run():
             if not os.path.isdir(plot_directory):
                 os.makedirs(plot_directory)
 
+            exp_name = os.path.split(os.path.normpath(results_dir))[-1]
+
             plt.imshow(mean_boundaries)
-            plt.title(os.path.split(os.path.normpath(results_dir))[-1])
-            plot_path = os.path.join(plot_directory,'decision-boundaries.png')
+            plt.title(exp_name)
+            plot_path = os.path.join(plot_directory,'decision-boundaries-%s.png'%exp_name)
             plt.savefig(plot_path)
             plt.close()
 
