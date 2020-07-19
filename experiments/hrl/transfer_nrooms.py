@@ -1055,6 +1055,7 @@ def run():
     parsers = {}
     commands = [
             ['plot',''],
+            ['plot-lsh',''],
             ['plot2',''],
             ['tsne',''],
             ['checkpoint',''],
@@ -1068,6 +1069,7 @@ def run():
 
     parsers['run'].add_argument('exp_name', type=str, choices=list(get_experiment_params(None).keys()))
     parsers['checkpoint'].add_argument('checkpoint_files', type=str, nargs='*')
+    parsers['plot'].add_argument('directories', type=str, nargs='+')
     parsers['plot2'].add_argument('directory', type=str, default=None)
     parsers['random'].add_argument('exp_name', type=str, choices=list(space.keys()))
     parsers['decision-boundary'].add_argument('directory', type=str)
@@ -1086,6 +1088,29 @@ def run():
     print(sys.argv)
     if len(sys.argv) >= 2:
         if args.command == 'plot':
+            import matplotlib
+            matplotlib.use('Agg')
+            from matplotlib import pyplot as plt
+
+            print(args.directories)
+            for directory in args.directories:
+                exp_name = os.path.split(os.path.normpath(directory))[-1]
+                x = None
+                y = []
+                count = 0
+                for r in utils.get_all_results(directory):
+                    if len(r['steps_to_reward']) == 101:
+                        x = r['eval_steps']
+                        y.append(r['steps_to_reward'])
+                        count += 1
+                y = np.array(y).mean(axis=0)
+                plt.plot(x,y,label='%s (%d)'%(exp_name,count))
+            plt.legend(loc='best')
+            plt.grid(which='both')
+            plot_path = os.path.join(plot_directory, 'plot.png')
+            plt.savefig(plot_path)
+            print('plot saved at', plot_path)
+        elif args.command == 'plot-lsh':
             """
             Plot the time series of the best runs found by the LSH algorithm
             """
