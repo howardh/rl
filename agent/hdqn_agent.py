@@ -310,6 +310,8 @@ class HDQNAgentWithDelayAC(Agent):
 
         self.to(device)
 
+        self.controller_dropout = None
+
     def to(self,device):
         self.device = device
         self.q_net.to(device)
@@ -333,14 +335,20 @@ class HDQNAgentWithDelayAC(Agent):
         if testing:
             if reward is None:
                 self.obs_stack_testing.clear()
-            self.obs_stack_testing.append(obs)
+            if self.controller_dropout is not None and self.rand.random() < self.controller_dropout and len(self.obs_stack_testing) == self.obs_stack_testing.maxlen:
+                self.obs_stack_testing.append(self.obs_stack_testing[-1])
+            else:
+                self.obs_stack_testing.append(obs)
             self.current_obs_testing = obs
         else:
             if reward is None: # Reward is None if this is the first step of the episode
                 self.obs_stack.clear()
             else:
                 self.observe_step(self.current_obs, self.current_action, reward, obs, terminal)
-            self.obs_stack.append(obs)
+            if self.controller_dropout is not None and self.rand.random() < self.controller_dropout and len(self.obs_stack) == self.obs_stack.maxlen:
+                self.obs_stack.append(self.obs_stack[-1])
+            else:
+                self.obs_stack.append(obs)
             self.current_obs = obs
             self.current_action = None
 
@@ -452,7 +460,7 @@ class HDQNAgentWithDelayAC(Agent):
             action = self.act(testing=True)
             sa_vals.append(self.get_state_action_value(self.current_obs_testing,action))
             obs, reward, done, _ = env.step(action)
-            self.observe_change(obs,testing=True)
+            self.observe_change(obs,reward,testing=True)
             reward_sum += reward
             if render:
                 env.render()
@@ -758,9 +766,15 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
         self.current_action = action
 
         if testing:
-            self.obs_stack_testing.append((obs1,action))
+            if self.controller_dropout is not None and self.rand.random() < self.controller_dropout and len(self.obs_stack_testing) == self.obs_stack_testing.maxlen:
+                self.obs_stack_testing.append(self.obs_stack_testing[-1])
+            else:
+                self.obs_stack_testing.append((obs1,action))
         else:
-            self.obs_stack.append((obs1,action))
+            if self.controller_dropout is not None and self.rand.random() < self.controller_dropout and len(self.obs_stack) == self.obs_stack.maxlen:
+                self.obs_stack.append(self.obs_stack[-1])
+            else:
+                self.obs_stack.append((obs1,action))
         return action
 
     def get_current_obs(self,testing=False):

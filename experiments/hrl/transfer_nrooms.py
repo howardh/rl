@@ -570,6 +570,135 @@ class Experiment:
         exp.checkpoint = state
         return exp
 
+class ExperimentRandomControllerDropout:
+    def __init__(self, directory=None, max_steps=500, test_iters=1, dropout_probability=0.5,
+            verbose=False, seed=None, initial_checkpoint=None):
+        self.args = locals()
+        del self.args['self']
+
+        self.directory = directory
+        self.max_steps = max_steps
+        self.test_iters = test_iters
+        self.verbose = verbose
+        self.seed = seed
+        checkpoint = Experiment.from_checkpoint(initial_checkpoint)
+        self.agent = checkpoint.agent
+        self.agent.controller_dropout = dropout_probability
+
+        env_name='gym_fourrooms:fourrooms-v0'
+        if seed is not None:
+            torch.manual_seed(seed) # Required for consistent random initialization of neural net weights
+
+        rand = np.random.RandomState(seed)
+
+        self.env = gym.make(env_name,goal_duration_episodes=1).unwrapped
+        self.env = TimeLimit(self.env,max_steps)
+        if seed is not None:
+            self.env.seed(seed)
+
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+
+        self.results_file_path = None
+        self.steps_to_reward = []
+        self.done = True
+
+    def run_step(self):
+        # Run episode with random controller dropout, and measure performance in number of steps to reach the goal
+        test_results = self.agent.test(
+                self.env, self.test_iters, render=False, processors=1)
+
+    def run(self):
+        step_range = range(self.test_iters)
+        if self.verbose:
+            step_range = tqdm(step_range)
+        try:
+            results = []
+            for self.steps in step_range:
+                test_results = self.agent.test(
+                        self.env, 1, render=False, processors=1)
+                results.append(test_results[0]['steps'])
+                print(test_results[0]['steps'])
+            print(np.mean(results))
+        except KeyboardInterrupt:
+            pass
+
+        return self.steps_to_reward
+
+    def save_results(self, additional_data={}):
+        results = self.state_dict()
+
+        # Add additional data
+        for k,v in additional_data.items():
+            if k in results:
+                print('WARNING: OVERWRITING KEY %s' % k)
+            results[k] = v
+        # Save results
+        if self.results_file_path is None:
+            self.results_file_path = utils.save_results(
+                    results,
+                    directory=self.directory,
+                    file_name_prefix=self.agent_name)
+        else:
+            utils.save_results(
+                    results,
+                    file_path=self.results_file_path)
+
+    def state_dict(self):
+        return {
+            'args': self.args,
+            'agent_state': self.agent.state_dict(),
+            'results_file_path': self.results_file_path,
+            'rewards': self.rewards,
+            'state_action_values': self.state_action_values,
+            'steps_to_reward': self.steps_to_reward,
+            'eval_steps': self.eval_steps,
+            'steps': self.steps,
+            'env': self.env.state_dict(),
+            'test_env': self.test_env.state_dict(),
+            'env_steps': self.env._elapsed_steps,
+            'done': self.done
+        }
+
+    def load_state_dict(self, state):
+        # Env
+        self.env.load_state_dict(state['env'])
+        self.test_env.load_state_dict(state['test_env'])
+        self.env._elapsed_steps = state['env_steps']
+        
+        # Agent
+        if self.agent_name != state['args']['agent_name']:
+            raise Exception('Agent type mismatch. Expected %s, received %s.' % (self.agent_name, state['agent_name']))
+        self.agent.load_state_dict(state['agent_state'])
+
+        # Experiment progress
+        self.results_file_path = state['results_file_path']
+        self.rewards = state['rewards']
+        self.state_action_values = state['state_action_values']
+        self.steps_to_reward = state['steps_to_reward']
+        self.eval_steps = state['eval_steps']
+        self.steps = state['steps']
+        self.step_range = range(self.steps,self.total_steps)
+        self.done = state['done']
+
+    @staticmethod
+    def from_checkpoint(file_name=None):
+        if file_name is None:
+            file_name = checkpoint_path()
+        if os.path.isfile(file_name):
+            with open(file_name,'rb') as f:
+                state = dill.load(f)
+        else:
+            raise Exception('Checkpoint does not exist: %s' % file_name)
+
+        agent_params = state['args'].pop('agent_params')
+        exp = Experiment(**state['args'],**agent_params)
+        exp.load_state_dict(state)
+        exp.checkpoint = state
+        return exp
+
 ##################################################
 # Hyperparameter Search
 ##################################################
@@ -1042,10 +1171,20 @@ def get_experiment_params(directory):
             'agent_name': 'HDQNAgentWithDelayAC_v3',
             'subpolicy_q_net_learning_rate': 1e-3
     }
+    params['debug'] = {
+            **params['hrl_augmented-001'],
+            'seed': 1,
+            'epoch': 5,
+            'test_iters': 5,
+            'min_replay_buffer_size': 10,
+            'batch_size': 5,
+            'total_steps': 100
+    }
     return params
 
 def run():
-    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-4')
+    #DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-4')
+    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'dev')
 
     import argparse
     parser = argparse.ArgumentParser()
@@ -1061,6 +1200,7 @@ def run():
             ['checkpoint',''],
             ['random',''],
             ['run',''],
+            ['controller-dropout',''],
             ['decision-boundary',''],
     ]
     for c,h in commands:
@@ -1068,6 +1208,7 @@ def run():
         parsers[c].set_defaults(command=c)
 
     parsers['run'].add_argument('exp_name', type=str, choices=list(get_experiment_params(None).keys()))
+    parsers['controller-dropout'].add_argument('initial_checkpoint', type=str)
     parsers['checkpoint'].add_argument('checkpoint_files', type=str, nargs='*')
     parsers['plot'].add_argument('directories', type=str, nargs='+')
     parsers['plot2'].add_argument('directory', type=str, default=None)
@@ -1232,6 +1373,20 @@ def run():
             params = experiment_params[exp_name]
             params['directory'] = os.path.join(directory,exp_name)
             run_trial_with_checkpoint(**params)
+
+        elif args.command == 'controller-dropout':
+            initial_checkpoint = args.initial_checkpoint
+            params = {
+                    'max_steps': 500,
+                    'test_iters': 10,
+                    'dropout_probability': 0,
+                    'seed': 1,
+                    'initial_checkpoint': initial_checkpoint,
+                    'directory': directory
+            }
+
+            exp = ExperimentRandomControllerDropout(**params)
+            exp.run()
 
         elif args.command == 'decision-boundary':
             import matplotlib
