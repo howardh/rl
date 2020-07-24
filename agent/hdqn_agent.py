@@ -240,7 +240,7 @@ class HDQNAgentWithDelay(Agent):
             action = self.act(testing=True)
             sa_vals.append(self.get_state_action_value(self.prev_obs_testing,self.current_obs_testing,action))
             obs, reward, done, _ = env.step(action)
-            self.observe_change(obs,testing=True)
+            self.observe_change(obs,reward,testing=True)
             reward_sum += reward
             if render:
                 env.render()
