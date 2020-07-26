@@ -1175,6 +1175,18 @@ def get_experiment_params(directory):
             'agent_name': 'HDQNAgentWithDelayAC_v3',
             'subpolicy_q_net_learning_rate': 1e-3
     }
+
+    """
+    Looked at the decision-boundary plots fo AC, and it looks like it just uses a single subpolicy for everything.
+    This means individual subpolicies have too much representational power, so we'll reduce it.
+    """
+    for alg in ['ac', 'hrl_memoryless', 'hrl_augmented']:
+        params['%s-002'%alg] = {
+                **params['%s-001'%alg],
+                'snet_layer_size': 2,
+        }
+
+    # Params for debugging purposes
     params['debug'] = {
             **params['hrl_augmented-001'],
             'seed': 1,
@@ -1184,6 +1196,7 @@ def get_experiment_params(directory):
             'batch_size': 5,
             'total_steps': 100
     }
+
     return params
 
 def run():
@@ -1477,8 +1490,6 @@ def run():
             plot_path = os.path.join(plot_directory,'decision-boundaries-g-%s.png'%exp_name)
             plt.savefig(plot_path)
             plt.close()
-
-            print(mean_boundaries)
             print('Figure saved to %s' % plot_path)
 
         else:
