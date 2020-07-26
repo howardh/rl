@@ -413,8 +413,6 @@ class HDQNAgentWithDelayAC(Agent):
             action = self.rand.randint(self.action_space.n)
         else:
             action_probs = self.policy_net(*obs).squeeze().detach().numpy()
-            #dist = torch.distributions.Categorical(action_probs)
-            #action = dist.sample().item()
             action = self.rand.choice(len(action_probs),p=action_probs)
         self.current_action = action
 

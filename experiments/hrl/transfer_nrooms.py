@@ -1104,22 +1104,26 @@ def fit_gaussian_process(directory, agent_name):
 def aggregate_results(results_directory):
     pass
 
-def compute_subpolicy_boundaries(agent, shape=[10,10]):
+def compute_subpolicy_boundaries(agent, shape=[10,10], goal=None):
     def neighbours(p):
         yield p + torch.tensor([[0,1,0,0]]).float()
         yield p + torch.tensor([[0,-1,0,0]]).float()
         yield p + torch.tensor([[1,0,0,0]]).float()
         yield p + torch.tensor([[-1,0,0,0]]).float()
     augmented = isinstance(agent.controller_net, PolicyFunctionAugmentatedState)
-    output = torch.zeros(shape)
-    for p in tqdm(list(itertools.product(range(shape[0]),range(shape[1]),range(shape[0]),range(shape[1])))):
+    output = torch.zeros(shape*2)
+    if goal is None:
+        states = list(itertools.product(range(shape[0]),range(shape[1]),range(shape[0]),range(shape[1])))
+    else:
+        states = list(itertools.product(range(shape[0]),range(shape[1]),[goal[0]],[goal[1]]))
+    for p in tqdm(states):
         if not augmented:
             p = torch.tensor(p).view(1,-1).float()
             a1 = torch.argmax(agent.controller_net(p))
             for n in neighbours(p):
                 a2 = torch.argmax(agent.controller_net(n))
                 if a1 != a2:
-                    output[int(p[0][0]),int(p[0][1])] += 1
+                    output[tuple(*p.long())] += 1
         else:
             for a in range(4):
                 a = torch.tensor([[a]])
@@ -1128,7 +1132,7 @@ def compute_subpolicy_boundaries(agent, shape=[10,10]):
                 for n in neighbours(p):
                     a2 = torch.argmax(agent.controller_net(n,a))
                     if a1 != a2:
-                        output[int(p[0][0]),int(p[0][1])] += 1
+                        output[tuple(*p.long())] += 1
     return output
 
 ##################################################
@@ -1183,8 +1187,8 @@ def get_experiment_params(directory):
     return params
 
 def run():
-    #DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-4')
-    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'dev')
+    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-4')
+    #DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'dev')
 
     import argparse
     parser = argparse.ArgumentParser()
@@ -1214,6 +1218,8 @@ def run():
     parsers['plot2'].add_argument('directory', type=str, default=None)
     parsers['random'].add_argument('exp_name', type=str, choices=list(space.keys()))
     parsers['decision-boundary'].add_argument('directory', type=str)
+    parsers['decision-boundary'].add_argument('--clear-cache', dest='clear_cache', action='store_true')
+    parsers['decision-boundary'].add_argument('--no-cache', dest='no_cache', action='store_true')
 
     args = parser.parse_args()
 
@@ -1248,6 +1254,8 @@ def run():
                 plt.plot(x,y,label='%s (%d)'%(exp_name,count))
             plt.legend(loc='best')
             plt.grid(which='both')
+            if not os.path.isdir(plot_directory):
+                os.makedirs(plot_directory)
             plot_path = os.path.join(plot_directory, 'plot.png')
             plt.savefig(plot_path)
             print('plot saved at', plot_path)
@@ -1392,30 +1400,81 @@ def run():
             import matplotlib
             matplotlib.use('Agg')
             from matplotlib import pyplot as plt
+            import shelve
+            import uuid
 
-            results_dir = args.directory
-            all_boundaries = []
-            for checkpoint_path in utils.get_all_result_paths(results_dir):
-                print(checkpoint_path)
-                try:
-                    exp = Experiment.from_checkpoint(checkpoint_path)
-                    boundary = compute_subpolicy_boundaries(exp.agent, [13,13])
-                    total = boundary.sum()
-                    if total > 0:
-                        all_boundaries.append(boundary/total)
-                        print(boundary/total)
-                except:
-                    pass
-            mean_boundaries = torch.stack(all_boundaries).mean(dim=0).numpy()
+            cache = not args.no_cache
+            clear_cache = args.clear_cache
+            map_shape = [13,13]
 
+            # Directories/Paths
+            results_dir = os.path.normpath(args.directory) # Directory whose checkpoints are to be processed
+            output_dir = os.path.join(args.results_root, args.command)
+            processed_results_mapping = os.path.join(output_dir, 'mapping.pkl')
+
+            # Ensure all directories exist
             if not os.path.isdir(plot_directory):
                 os.makedirs(plot_directory)
+            if not os.path.isdir(output_dir):
+                os.makedirs(output_dir)
+
+            # Get path of the decision boundary data for the provided result directory
+            with shelve.open(processed_results_mapping) as mapping:
+                if results_dir in mapping:
+                    results_path = mapping[results_dir]
+                else:
+                    results_path = '%s.pkl' % uuid.uuid1()
+                    mapping[results_dir] = results_path
+
+            # Load precomputed decision boundary data
+            def update_boundaries(output, results_dir):
+                for checkpoint_path in tqdm(list(utils.get_all_result_paths(results_dir))):
+                    if checkpoint_path in output:
+                        continue
+                    try:
+                        tqdm.write(checkpoint_path)
+                        exp = Experiment.from_checkpoint(checkpoint_path)
+                        output[checkpoint_path] = compute_subpolicy_boundaries(exp.agent, map_shape)
+                    except KeyboardInterrupt:
+                        break
+                    except:
+                        pass
+                return output
+            boundaries_by_goal = {}
+            if cache:
+                with shelve.open(results_path) as db_results:
+                    if clear_cache:
+                        db_results.clear()
+                    update_boundaries(db_results, results_dir)
+                    mean_boundaries = torch.stack(
+                            [x.sum(dim=3).sum(dim=2)/x.sum() for x in db_results.values() if x.sum() > 0]
+                    ).mean(dim=0).numpy()
+                    for x,y in itertools.product(range(map_shape[0]), range(map_shape[1])):
+                        boundaries_by_goal[(x,y)] = torch.stack(
+                                [v[:,:,x,y]/v[:,:,x,y].sum() for v in db_results.values() if v[:,:,x,y].sum() > 0]
+                        ).mean(dim=0).numpy()
+            else:
+                db_results = update_boundaries({}, results_dir)
+                mean_boundaries = torch.stack([x for x in db_results.values() if x is not None]).mean(dim=0).numpy()
+                for x,y in itertools.product(range(map_shape[0]), range(map_shape[1])):
+                    boundaries_by_goal[(x,y)] = torch.stack(
+                            [v[:,:,x,y]/v[:,:,x,y].sum() for v in db_results.values() if v[:,:,x,y].sum() > 0]
+                    ).mean(dim=0).numpy()
 
             exp_name = os.path.split(os.path.normpath(results_dir))[-1]
 
             plt.imshow(mean_boundaries)
+            plt.colorbar()
             plt.title(exp_name)
             plot_path = os.path.join(plot_directory,'decision-boundaries-%s.png'%exp_name)
+            plt.savefig(plot_path)
+            plt.close()
+            print('Figure saved to %s' % plot_path)
+
+            fig, axes = plt.subplots(*map_shape)
+            for x,y in itertools.product(range(map_shape[0]), range(map_shape[1])):
+                axes[y,x].imshow(boundaries_by_goal[(x,y)])
+            plot_path = os.path.join(plot_directory,'decision-boundaries-g-%s.png'%exp_name)
             plt.savefig(plot_path)
             plt.close()
 
