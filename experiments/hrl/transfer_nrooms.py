@@ -1228,6 +1228,7 @@ def run():
     parsers['controller-dropout'].add_argument('initial_checkpoint', type=str)
     parsers['checkpoint'].add_argument('checkpoint_files', type=str, nargs='*')
     parsers['plot'].add_argument('directories', type=str, nargs='+')
+    parsers['plot'].add_argument('--key', type=str, default='steps_to_reward')
     parsers['plot2'].add_argument('directory', type=str, default=None)
     parsers['random'].add_argument('exp_name', type=str, choices=list(space.keys()))
     parsers['decision-boundary'].add_argument('directory', type=str)
@@ -1252,6 +1253,8 @@ def run():
             matplotlib.use('Agg')
             from matplotlib import pyplot as plt
 
+            key = args.key
+
             print(args.directories)
             for directory in args.directories:
                 exp_name = os.path.split(os.path.normpath(directory))[-1]
@@ -1259,14 +1262,16 @@ def run():
                 y = []
                 count = 0
                 for r in utils.get_all_results(directory):
-                    if len(r['steps_to_reward']) == 101:
+                    if len(r[key]) == 101:
                         x = r['eval_steps']
-                        y.append(r['steps_to_reward'])
+                        y.append(r[key])
                         count += 1
                 y = np.array(y).mean(axis=0)
                 plt.plot(x,y,label='%s (%d)'%(exp_name,count))
             plt.legend(loc='best')
             plt.grid(which='both')
+            plt.ylabel(key)
+            plt.xlabel('steps')
             if not os.path.isdir(plot_directory):
                 os.makedirs(plot_directory)
             plot_path = os.path.join(plot_directory, 'plot.png')
