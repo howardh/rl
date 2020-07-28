@@ -24,7 +24,7 @@ class PolicyFunction(torch.nn.Module):
             layers.append(torch.nn.LeakyReLU())
             in_f = out_f
         layers.append(torch.nn.Linear(in_features=in_f,out_features=output_size))
-        layers.append(torch.nn.Softmax())
+        layers.append(torch.nn.Softmax(dim=1))
         self.seq = torch.nn.Sequential(*layers)
     def forward(self, x):
         return self.seq(x)
@@ -40,7 +40,7 @@ class PolicyFunctionAugmentatedState(torch.nn.Module):
             layers.append(torch.nn.LeakyReLU())
             in_f = out_f
         layers.append(torch.nn.Linear(in_features=in_f,out_features=output_size))
-        layers.append(torch.nn.Softmax())
+        layers.append(torch.nn.Softmax(dim=1))
         self.seq = torch.nn.Sequential(*layers)
     def forward(self, state, action):
         batch_size = state.shape[0]

@@ -19,7 +19,7 @@ class HierarchicalQNetwork(torch.nn.Module):
         super().__init__()
         self.controller = controller
         self.subpolicies = subpolicies
-        self.softmax = torch.nn.Softmax()
+        self.softmax = torch.nn.Softmax(dim=1)
 
     def forward(self, obs0, obs1, obs_mask, temperature):
         # Values of each subpolicy
@@ -44,7 +44,7 @@ class HierarchicalPolicyNetwork(torch.nn.Module):
         super().__init__()
         self.controller = controller
         self.subpolicies = subpolicies
-        self.softmax = torch.nn.Softmax()
+        self.softmax = torch.nn.Softmax(dim=1)
 
     def forward(self, obs0, obs1, obs_mask):
         # Values of each subpolicy
@@ -69,7 +69,7 @@ class HierarchicalPolicyNetworkAugmentedState(torch.nn.Module):
         super().__init__()
         self.controller = controller
         self.subpolicies = subpolicies
-        self.softmax = torch.nn.Softmax()
+        self.softmax = torch.nn.Softmax(dim=1)
 
     def forward(self, obs0, action0, obs1, obs_mask):
         # Values of each subpolicy

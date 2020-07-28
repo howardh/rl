@@ -8,6 +8,7 @@ import itertools
 from collections import defaultdict
 import pprint
 from skopt import gp_minimize
+import shelve
 
 from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3
 from agent.policy import get_greedy_epsilon_policy
@@ -571,25 +572,23 @@ class Experiment:
         return exp
 
 class ExperimentRandomControllerDropout:
-    def __init__(self, directory=None, max_steps=500, test_iters=1, dropout_probability=0.5,
+    def __init__(self, output_directory=None, max_steps=500, test_iters=1, dropout_probability=0.5,
             verbose=False, seed=None, initial_checkpoint=None):
         self.args = locals()
         del self.args['self']
 
-        self.directory = directory
+        self.output_directory = output_directory
+        if not os.path.isdir(output_directory):
+            os.makedirs(output_directory)
         self.max_steps = max_steps
         self.test_iters = test_iters
         self.verbose = verbose
         self.seed = seed
-        checkpoint = Experiment.from_checkpoint(initial_checkpoint)
-        self.agent = checkpoint.agent
-        self.agent.controller_dropout = dropout_probability
+        self.initial_checkpoint = initial_checkpoint
 
         env_name='gym_fourrooms:fourrooms-v0'
         if seed is not None:
             torch.manual_seed(seed) # Required for consistent random initialization of neural net weights
-
-        rand = np.random.RandomState(seed)
 
         self.env = gym.make(env_name,goal_duration_episodes=1).unwrapped
         self.env = TimeLimit(self.env,max_steps)
@@ -601,9 +600,13 @@ class ExperimentRandomControllerDropout:
         else:
             device = torch.device('cpu')
 
-        self.results_file_path = None
         self.steps_to_reward = []
         self.done = True
+
+    def init_agent(self):
+        checkpoint = Experiment.from_checkpoint(self.initial_checkpoint)
+        self.agent = checkpoint.agent
+        self.agent.controller_dropout = dropout_probability
 
     def run_step(self):
         # Run episode with random controller dropout, and measure performance in number of steps to reach the goal
@@ -611,21 +614,51 @@ class ExperimentRandomControllerDropout:
                 self.env, self.test_iters, render=False, processors=1)
 
     def run(self):
+        dp = self.args['dropout_probability']
+
+        # Check existing results
+        results_path = self.get_results_path()
+        if results_path is not None:
+            with open(results_path,'rb') as f:
+                results = dill.load(f)
+                if dp in results:
+                    self.steps_to_reward = results[dp]
+                    return
+
+        # Initialize
+        self.init_agent()
+
+        # Run experiment
         step_range = range(self.test_iters)
         if self.verbose:
             step_range = tqdm(step_range)
         try:
-            results = []
-            for self.steps in step_range:
+            for _ in step_range:
                 test_results = self.agent.test(
                         self.env, 1, render=False, processors=1)
-                results.append(test_results[0]['steps'])
-                print(test_results[0]['steps'])
-            print(np.mean(results))
+                self.steps_to_reward.append(test_results[0]['steps'])
         except KeyboardInterrupt:
             pass
 
-        return self.steps_to_reward
+        # Save results
+        results_path = self.get_results_path()
+        with open(results_path, 'rb') as f: # FIXME: Why is r+b not working?
+            results = dill.load(f)
+        results[self.args['dropout_probability']] = self.steps_to_reward
+        with open(results_path, 'wb') as f:
+            dill.dump(results,f)
+
+    def get_results_path(self):
+        mapping_path = os.path.join(self.output_directory, 'mapping.dat')
+        with shelve.open(mapping_path) as mapping:
+            if self.initial_checkpoint in mapping:
+                return mapping[self.initial_checkpoint]
+            else:
+                mapping[self.initial_checkpoint] = utils.save_results(
+                        {},
+                        directory=self.output_directory,
+                        file_name_prefix=type(self).__name__)
+                return mapping[self.initial_checkpoint]
 
     def save_results(self, additional_data={}):
         results = self.state_dict()
@@ -635,38 +668,31 @@ class ExperimentRandomControllerDropout:
             if k in results:
                 print('WARNING: OVERWRITING KEY %s' % k)
             results[k] = v
-        # Save results
-        if self.results_file_path is None:
-            self.results_file_path = utils.save_results(
-                    results,
-                    directory=self.directory,
-                    file_name_prefix=self.agent_name)
-        else:
-            utils.save_results(
-                    results,
-                    file_path=self.results_file_path)
+        # Save results to appropriate file
+        mapping_path = os.path.join(self.output_directory, 'mapping.pkl')
+        with shelve.open(mapping_path) as mapping:
+            if self.initial_checkpoint in mapping:
+                utils.save_results(
+                        results,
+                        file_path=mapping[self.initial_checkpoint])
+            else:
+                mapping[self.initial_checkpoint] = utils.save_results(
+                        results,
+                        directory=self.output_directory,
+                        file_name_prefix=self.__class__.__name__)
+            print('Checkpoint saved', mapping[self.initial_checkpoint])
 
     def state_dict(self):
         return {
             'args': self.args,
-            'agent_state': self.agent.state_dict(),
-            'results_file_path': self.results_file_path,
-            'rewards': self.rewards,
-            'state_action_values': self.state_action_values,
+            'agent_state': self.agent.state_dict(), # Need the agent's rand state
             'steps_to_reward': self.steps_to_reward,
-            'eval_steps': self.eval_steps,
-            'steps': self.steps,
             'env': self.env.state_dict(),
-            'test_env': self.test_env.state_dict(),
-            'env_steps': self.env._elapsed_steps,
-            'done': self.done
         }
 
     def load_state_dict(self, state):
         # Env
         self.env.load_state_dict(state['env'])
-        self.test_env.load_state_dict(state['test_env'])
-        self.env._elapsed_steps = state['env_steps']
         
         # Agent
         if self.agent_name != state['args']['agent_name']:
@@ -674,14 +700,7 @@ class ExperimentRandomControllerDropout:
         self.agent.load_state_dict(state['agent_state'])
 
         # Experiment progress
-        self.results_file_path = state['results_file_path']
-        self.rewards = state['rewards']
-        self.state_action_values = state['state_action_values']
         self.steps_to_reward = state['steps_to_reward']
-        self.eval_steps = state['eval_steps']
-        self.steps = state['steps']
-        self.step_range = range(self.steps,self.total_steps)
-        self.done = state['done']
 
     @staticmethod
     def from_checkpoint(file_name=None):
@@ -693,10 +712,8 @@ class ExperimentRandomControllerDropout:
         else:
             raise Exception('Checkpoint does not exist: %s' % file_name)
 
-        agent_params = state['args'].pop('agent_params')
-        exp = Experiment(**state['args'],**agent_params)
+        exp = ExperimentRandomControllerDropout(**state['args'])
         exp.load_state_dict(state)
-        exp.checkpoint = state
         return exp
 
 ##################################################
@@ -1186,6 +1203,17 @@ def get_experiment_params(directory):
                 'snet_layer_size': 2,
         }
 
+    """
+    Based on the decision boundaries of the memoryless experiments, it looks like how I would split the state space
+    up as if the subpolicies were a single primitive action. So maybe the controller policy is also too powerful?
+    I'm going to try reducing that too.
+    """
+    for alg in ['ac', 'hrl_memoryless', 'hrl_augmented']:
+        params['%s-003'%alg] = {
+                **params['%s-002'%alg],
+                'cnet_layer_size': 2,
+        }
+
     # Params for debugging purposes
     params['debug'] = {
             **params['hrl_augmented-001'],
@@ -1200,8 +1228,8 @@ def get_experiment_params(directory):
     return params
 
 def run():
-    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-4')
-    #DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'dev')
+    #DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-4')
+    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'dev')
 
     import argparse
     parser = argparse.ArgumentParser()
@@ -1225,7 +1253,7 @@ def run():
         parsers[c].set_defaults(command=c)
 
     parsers['run'].add_argument('exp_name', type=str, choices=list(get_experiment_params(None).keys()))
-    parsers['controller-dropout'].add_argument('initial_checkpoint', type=str)
+    parsers['controller-dropout'].add_argument('initial_checkpoint', type=str, default=None)
     parsers['checkpoint'].add_argument('checkpoint_files', type=str, nargs='*')
     parsers['plot'].add_argument('directories', type=str, nargs='+')
     parsers['plot'].add_argument('--key', type=str, default='steps_to_reward')
@@ -1401,18 +1429,63 @@ def run():
             run_trial_with_checkpoint(**params)
 
         elif args.command == 'controller-dropout':
-            initial_checkpoint = args.initial_checkpoint
-            params = {
-                    'max_steps': 500,
-                    'test_iters': 10,
-                    'dropout_probability': 0,
-                    'seed': 1,
-                    'initial_checkpoint': initial_checkpoint,
-                    'directory': directory
-            }
+            #initial_checkpoint = args.initial_checkpoint
+            checkpoint_dirs = [
+                    '/network/tmp1/huanghow/hrl-4/experiments.hrl.transfer_nrooms/ac-002/',
+                    '/network/tmp1/huanghow/hrl-4/experiments.hrl.transfer_nrooms/hrl_memoryless-002/',
+                    '/network/tmp1/huanghow/hrl-4/experiments.hrl.transfer_nrooms/hrl_augmented-002/'
+            ]
 
-            exp = ExperimentRandomControllerDropout(**params)
-            exp.run()
+            results = {}
+            for cdir in checkpoint_dirs:
+                print(cdir)
+                exp_name = os.path.split(os.path.normpath(cdir))[-1]
+                results[exp_name] = {}
+                params = list(itertools.product(
+                        utils.get_all_result_paths(cdir),
+                        [0,.2,.4,.6,.8,1]
+                ))
+                results[exp_name] = defaultdict(lambda: [])
+                for initial_checkpoint,dropout_prob in tqdm(params, desc=exp_name):
+                    params = {
+                            'max_steps': 500,
+                            'test_iters': 10,
+                            'dropout_probability': dropout_prob,
+                            'seed': 1,
+                            'initial_checkpoint': initial_checkpoint,
+                            'output_directory': os.path.join(directory,'controller-dropout')
+                    }
+
+                    exp = ExperimentRandomControllerDropout(**params)
+                    exp.run()
+
+                    #r = exp.state_dict()
+                    results[exp_name][dropout_prob] += exp.steps_to_reward
+
+            import matplotlib
+            matplotlib.use('Agg')
+            from matplotlib import pyplot as plt
+
+            if not os.path.isdir(plot_directory):
+                os.makedirs(plot_directory)
+
+            labels = []
+            x = []
+            colours = []
+            for exp_name,colour in zip(results.keys(),itertools.cycle(['white', 'lightgrey'])):
+                for dropout_prob in results[exp_name].keys():
+                    labels.append('%s (%.1f)' % (exp_name, dropout_prob))
+                    x.append(results[exp_name][dropout_prob])
+                    colours.append(colour)
+            ax = plt.subplot(111)
+            bplot = ax.boxplot(x,labels=labels,vert=False,patch_artist=True)
+            for patch,c in zip(bplot['boxes'],colours):
+                patch.set_facecolor(c)
+            plt.subplots_adjust(left=0.4)
+            ax.set_xlabel('Steps to reward')
+            plot_path = os.path.join(plot_directory, 'boxplot.png')
+            plt.savefig(plot_path)
+            print('Figure saved',plot_path)
 
         elif args.command == 'decision-boundary':
             import matplotlib

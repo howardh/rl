@@ -109,7 +109,7 @@ def save_results(results, directory=None, file_path=None,
 
 def get_all_result_paths(directory):
     """ Generator for the contents of all files in the given directory. """
-    for d,_,file_names in tqdm(os.walk(directory)):
+    for d,_,file_names in os.walk(directory):
         for fn in file_names:
             yield os.path.join(d,fn)
 
