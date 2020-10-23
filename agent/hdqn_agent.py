@@ -9,7 +9,7 @@ import itertools
 import numpy as np
 
 from agent.agent import Agent
-from .replay_buffer import ReplayBufferStackedObs,ReplayBufferStackedObsAction
+from .replay_buffer import ReplayBuffer,ReplayBufferStackedObs,ReplayBufferStackedObsAction
 from .policy import get_greedy_epsilon_policy, greedy_action
 
 import utils
@@ -335,6 +335,8 @@ class HDQNAgentWithDelayAC(Agent):
         if testing:
             if reward is None:
                 self.obs_stack_testing.clear()
+                for _ in range(self.obs_stack_testing.maxlen):
+                    self.obs_stack_testing.append(None)
             if self.controller_dropout is not None and self.rand.random() < self.controller_dropout and len(self.obs_stack_testing) == self.obs_stack_testing.maxlen:
                 self.obs_stack_testing.append(self.obs_stack_testing[-1])
             else:
@@ -343,6 +345,8 @@ class HDQNAgentWithDelayAC(Agent):
         else:
             if reward is None: # Reward is None if this is the first step of the episode
                 self.obs_stack.clear()
+                for _ in range(self.obs_stack.maxlen):
+                    self.obs_stack.append(None)
             else:
                 self.observe_step(self.current_obs, self.current_action, reward, obs, terminal)
             if self.controller_dropout is not None and self.rand.random() < self.controller_dropout and len(self.obs_stack) == self.obs_stack.maxlen:
@@ -456,7 +460,7 @@ class HDQNAgentWithDelayAC(Agent):
         self.observe_change(obs,testing=True)
         for steps in itertools.count():
             action = self.act(testing=True)
-            sa_vals.append(self.get_state_action_value(self.current_obs_testing,action))
+            #sa_vals.append(self.get_state_action_value(self.current_obs_testing,action))
             obs, reward, done, _ = env.step(action)
             self.observe_change(obs,reward,testing=True)
             reward_sum += reward
@@ -645,11 +649,12 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
 
     def reset_obs_stack(self, testing=False):
         if testing:
-            self.obs_stack_testing.clear()
-            self.obs_stack_testing.append((None,None))
+            stack = self.obs_stack_testing
         else:
-            self.obs_stack.clear()
-            self.obs_stack.append((None,None))
+            stack = self.obs_stack
+        stack.clear()
+        for _ in range(stack.maxlen):
+            stack.append((None,None))
 
     def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
@@ -745,7 +750,7 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
                 self.reset_obs_stack(testing=testing)
             else:
                 if self.obs_stack[0][0] is not None:
-                    self.observe_step(*self.obs_stack[0], *self.obs_stack[1],
+                    self.observe_step(*self.obs_stack[0], *self.obs_stack[-1],
                             reward, obs, terminal)
             self.current_obs = obs
             self.current_action = None
@@ -795,3 +800,336 @@ class HDQNAgentWithDelayAC_v3(HDQNAgentWithDelayAC_v2):
         mask = mask.to(self.device)
 
         return obs0,action0,obs1,mask
+
+def create_augmented_obs_transform_one_hot_action(action_space_size):
+    """ Return a function that flattens the observation, encodes the actions in a one-hot vector, and concatenates everything. """
+    def to_one_hot(action):
+        a = np.zeros([action_space_size])
+        a[action] = 1
+        return a
+    def transform(state, actions):
+        flat_state = state.flatten()
+        if len(actions) == 0:
+            return flat_state
+        else:
+            one_hot_actions = np.concatenate([to_one_hot(a) for a in actions])
+            return np.concatenate([flat_state, one_hot_actions])
+    return transform
+
+def default_augmented_obs_transform(state,actions):
+    """ Return a function that flattens the observation, and concatenates the action as is. """
+    flat_state = state.flatten()
+    if len(actions) == 0:
+        return flat_state
+    else:
+        actions = np.concatenate([np.array([a]) for a in actions])
+        return np.concatenate([flat_state, actions])
+
+class AugmentedObservationStack():
+    """ An object which keeps track of the most recent state-action pairs in order to produce a observations consisting of an old state plus a sequence of actions taken starting from that state.
+    Elements are stored in order from newest to oldest (i.e. index 0 is the most recent observation).
+
+    The AugmentedObservationStack can be in one of two states:
+    1. Observations and actions are in sync (i.e. we've seen the same number of observations as actions)
+    2. Observations and actions are out of sync (i.e. we've seen the observation for the current step, but not the action)
+
+    In both cases, the most recently added observation is treated as the current time step.
+    >>> aos = AugmentedObservationStack(5)
+    >>> aos.append_obs(np.array([0]))
+    >>> aos.get(0,0)
+    np.array([0])
+    >>> aos.append_action(10)
+    >>> aos.get(0,0)
+    np.array([0])
+    >>> aos.append_obs(np.array([1]))
+    >>> aos.get(0,0)
+    np.array([1])
+    >>> aos.get(0,1)
+    np.array([0,10])
+    >>> aos.append_action(11)
+    >>> aos.get(0,1)
+    np.array([1,11])
+
+    Visual examples below. The grid is a representation of the observations and actions in our trajectory, with the most recent observations and actions at the right.
+    `.` = State whose representation is to be returned (Omitted if it overlaps with `x`)
+    `x` = Values that are returned
+
+    `aos.get(0,0)`
+        +-+-+-+-+    +-+-+-+-+
+    obs | | | |x|    | | | |x|
+        +-+-+-+-+ or +-+-+-+-+
+    act | | | | |    | | | | 
+        +-+-+-+-+    +-+-+-+
+
+    `aos.get(0,1)`
+        +-+-+-+-+    +-+-+-+-+
+    obs | | |x|.|    | | |x|.|
+        +-+-+-+-+ or +-+-+-+-+
+    act | | |x| |    | | |x| 
+        +-+-+-+-+    +-+-+-+
+
+    `aos.get(1,0)`
+        +-+-+-+-+    +-+-+-+-+
+    obs | | |x| |    | | |x| |
+        +-+-+-+-+ or +-+-+-+-+
+    act | | | | |    | | | | 
+        +-+-+-+-+    +-+-+-+
+
+    `aos.get(1,1)`
+        +-+-+-+-+    +-+-+-+-+
+    obs | |x|.| |    | |x|.| |
+        +-+-+-+-+ or +-+-+-+-+
+    act | |x| | |    | |x| | 
+        +-+-+-+-+    +-+-+-+
+
+    `aos.get(1,2)`
+        +-+-+-+-+    +-+-+-+-+
+    obs |x| |.| |    |x| |.| |
+        +-+-+-+-+ or +-+-+-+-+
+    act |x|x| | |    |x|x| | 
+        +-+-+-+-+    +-+-+-+
+    """
+    def __init__(self, stack_len=1, action_len=0, transform=None):
+        """
+        Args:
+            stack_len: Number of observation-action pairs to keep track of.
+            action_len: Number of actions with which to augment the state.
+        """
+        self.observations = deque(maxlen=stack_len)
+        self.actions = deque(maxlen=stack_len)
+        self.action_len = action_len
+
+        # Keep track of how many observations and actions were added.
+        # This is used to make sure that we return matching obs-action pairs.
+        self.num_observations = 0
+        self.num_actions = 0
+
+        if transform is None:
+            self.transform = default_augmented_obs_transform
+        else:
+            self.transform = transform
+
+    def append_obs(self, obs):
+        self.observations.append(obs)
+        self.num_observations += 1
+
+    def append_action(self, action):
+        self.actions.append(action)
+        self.num_actions += 1
+
+    def clear(self):
+        self.observations.clear()
+        self.actions.clear()
+        self.num_observations = 0
+        self.num_actions = 0
+
+    def get(self, delay, action_len):
+        if action_len == 0:
+            index = len(self.observations)-delay-1
+            return self.transform(self.observations[index],[])
+        else:
+            tdiff = self.num_observations-self.num_actions if len(self.actions) == self.actions.maxlen else 0
+            index = len(self.observations)-delay-action_len-1
+            if index < 0:
+                return None
+            obs = self.observations[index]
+
+            if len(self.actions) < action_len:
+                return None
+            else:
+                # self.actions is a deque, so can't use slices. Need itertools for this.
+                actions = list(itertools.islice(self.actions, index+tdiff, index+action_len+tdiff))
+            return self.transform(obs,actions)
+
+    def get_action(self, delay):
+        """ Get the raw action that was taken at time `t-delay` where `t` is the current time step. """
+        tdiff = self.num_observations - self.num_actions
+        index = len(self.actions)-1-delay+tdiff
+        if index >= len(self.actions) or index < 0:
+            return None
+        return self.actions[index]
+
+    def __getitem__(self, index):
+        return self.get(index, self.action_len)
+
+class HRLAgent_v4(HDQNAgentWithDelayAC):
+    def __init__(self, action_mem=0, ac_variant='advantage', **kwargs):
+        """
+        Args:
+            subpolicy_q_net_learning_rate: Learning rate for the subpolicy Q network.
+                If `None`, then no separate Q network is used for the subpolicies.
+            action_mem: The number of actions to use when augmenting outdated states.
+                Cannot exceed the delay.
+        """
+        super().__init__(**kwargs)
+
+        assert action_mem <= kwargs['delay_steps']
+        self.action_mem = action_mem
+        self.ac_variant = ac_variant
+        self.delay = kwargs['delay_steps']
+
+        self.replay_buffer = ReplayBuffer(kwargs['replay_buffer_size'])
+
+        obs_stack_transform = create_augmented_obs_transform_one_hot_action(4)
+        self.obs_stack = AugmentedObservationStack(transform=obs_stack_transform)
+        self.obs_stack_testing = AugmentedObservationStack(transform=obs_stack_transform)
+
+    def train(self,batch_size=2,iterations=1):
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = self.get_dataloader(batch_size)
+        gamma = self.discount_factor
+        tau = self.polyak_rate
+        actor_optimizer = self.actor_optimizer
+        critic_optimizer = self.critic_optimizer
+        for i,((s0a,s0,m0),a0,r1,(s1a,s1,m1),t) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0a = s0a.float().to(self.device)   # State at which the subpolicy was chosen (augmented)
+            s0 = s0.float().to(self.device)     # State at which the subpolicy was chosen (not augmented)
+            m0 = m0.float().to(self.device)     # 1 if s0a exists, and 0 otherwise
+            a0 = a0.to(self.device)             # Action drawn from chosen subpolicy
+            r1 = r1.float().to(self.device)     # Reward obtained for taking action a1 at state s1
+            s1a = s1a.float().to(self.device)   # State on which the subpolicy was applied (augmented)
+            s1 = s1.float().to(self.device)     # State on which the subpolicy was applied (not augmented)
+            m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
+            t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
+            
+            # Update Q function
+            a1_probs = self.policy_net_target(s1a,s1,m1) # Action probs at s1
+            v1_pred = (a1_probs * self.q_net_target(s1)).sum(1) # Expected value of s1 under current policy
+            v0_target = r1+gamma*v1_pred*(1-t) # Value of (s0,a0) from sampled reward and bootstrapping
+
+            a0_probs = self.policy_net_target(s0a,s0,m0) # Action probs at s0
+            v0_pred = (a0_probs * self.q_net_target(s0)).sum(1) # Expected value of s0 under current policy
+            q0_pred = self.q_net(s0) # Predicted state-action values at s0
+            v0_pred_sample = q0_pred[range(batch_size),a0.squeeze()] # Sampled predicted value of s0 under current policy (can also be interpreted as state-action value of (s0,a0))
+
+            critic_optimizer.zero_grad()
+            critic_loss = ((v0_target-v0_pred_sample)**2).mean()
+            critic_loss.backward()
+            critic_optimizer.step()
+
+            # Update policy
+            delta = None
+            if self.ac_variant == 'advantage':
+                advantage = v0_pred_sample-v0_pred
+                advantage = advantage.detach()
+                advantage.requires_gradient = False
+                delta = advantage
+            elif self.ac_variant == 'q':
+                delta = v0_pred_sample.detach()
+            actor_loss = a0_probs[range(batch_size),a0.squeeze()]*delta
+            actor_loss = actor_loss.mean()
+
+            actor_optimizer.zero_grad()
+            actor_loss.backward()
+            actor_optimizer.step()
+
+            # Update target weights
+            params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]
+            params += [zip(self.controller_net_target.parameters(), self.controller_net.parameters())]
+            for p1,p2 in itertools.chain.from_iterable(params):
+                p1.data = (1-tau)*p1+tau*p2
+
+    def state_dict(self):
+        d = super().state_dict()
+        d['action_mem'] = self.action_mem
+        d['ac_variant'] = self.ac_variant
+        d['delay'] = self.delay
+        return d
+
+    def load_state_dict(self, state):
+        super().load_state_dict(state)
+        self.action_mem = state['action_mem']
+        self.ac_variant = state['ac_variant']
+        self.delay = state['delay']
+
+    def get_obs_sizes(self):
+        """ Return an array with the size of the inputs for policies of each level of the hierarchy (highest to lowest). """
+        if len(self.observation_space.high.shape) > 1:
+            raise NotImplementedError('Cannot handle multidimensional observations')
+        return [
+            self.observation_space.high.shape[0]+self.action_space.n*self.action_mem,
+            self.observation_space.high.shape[0]
+        ]
+
+    def observe_change(self, obs, reward=None, terminal=False, testing=False):
+        if testing:
+            obs_stack = self.obs_stack_testing
+        else:
+            obs_stack = self.obs_stack
+            
+        if reward is None: # reward is None if it is the first observation of the episode
+            obs_stack.clear()
+        obs_stack.append_obs(obs)
+
+        if not testing and reward is not None:
+            # Add to the replay buffer if we have a long enough trajectory to add
+            s0_aug = obs_stack.get(1+self.delay-self.action_mem,self.action_mem)
+            s0 = obs_stack.get(1,0)
+            a0 = obs_stack.get_action(1)
+            s1_aug = obs_stack.get(0+self.delay-self.action_mem,self.action_mem)
+            s1 = obs_stack.get(0,0)
+            s0_mask = torch.tensor([s0_aug is not None, s0 is not None]).float().to(self.device)
+            s1_mask = torch.tensor([s1_aug is not None, s1 is not None]).float().to(self.device)
+
+            obs_sizes = self.get_obs_sizes()
+            if s0_aug is None:
+                s0_aug = np.zeros([obs_sizes[0]])
+            if s1_aug is None:
+                s1_aug = np.zeros([obs_sizes[0]])
+
+            s0 = torch.tensor(s0).squeeze()
+            s0_aug = torch.tensor(s0_aug).squeeze()
+            s1 = torch.tensor(s1).squeeze()
+            s1_aug = torch.tensor(s1_aug).squeeze()
+
+            self.replay_buffer.add_transition((s0_aug,s0,s0_mask),a0,reward,(s1_aug,s1,s1_mask),terminal)
+
+    def act(self, testing=False):
+        """
+        Return a random action according to the current behaviour policy
+
+        Args:
+            testing: True if this action was taken during testing. False otherwise.
+        """
+
+        obs0,obs1,mask = self.get_current_obs(testing)
+
+        # Sample an action
+        if not testing and self.rand.rand() < self.behaviour_epsilon:
+            action = self.rand.randint(self.action_space.n)
+        else:
+            action_probs = self.policy_net(obs0,obs1,mask).squeeze().detach().numpy()
+            action = self.rand.choice(len(action_probs),p=action_probs)
+        self.current_action = action
+
+        # Save action
+        if testing:
+            self.obs_stack_testing.append_action(action)
+        else:
+            self.obs_stack.append_action(action)
+
+        return action
+
+    def get_current_obs(self,testing=False):
+        """ Return the observation the agent needs to act on. This can be fed
+        directly to the policy network.  """
+        if testing:
+            obs_stack = self.obs_stack_testing
+            current_obs = self.current_obs_testing
+        else:
+            obs_stack = self.obs_stack
+            current_obs = self.current_obs
+
+        obs0 = obs_stack.get(self.delay-self.action_mem,self.action_mem)
+        obs1 = obs_stack.get(0,0)
+        mask = torch.tensor([[obs0 is not None, obs1 is not None]]).float().to(self.device)
+
+        def to_tensor(x):
+            if x is None:
+                size = self.get_obs_sizes()[0] # Only obs0 can be None
+                return torch.zeros([1,size]).float().to(self.device)
+            return torch.tensor(x).float().squeeze().unsqueeze(0).to(self.device)
+
+        return to_tensor(obs0),to_tensor(obs1),mask

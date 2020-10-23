@@ -10,7 +10,7 @@ import pprint
 from skopt import gp_minimize
 import shelve
 
-from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3
+from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3, HRLAgent_v4
 from agent.policy import get_greedy_epsilon_policy
 
 from .model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
@@ -335,6 +335,43 @@ def create_agent(agent_name, env, device, seed, **agent_params):
                 agent.train(batch_size=batch_size,iterations=1)
     elif agent_name == 'OptionCritic':
         raise NotImplementedError('Option Critic not implemented yet.')
+    elif agent_name == 'HRLAgent_v4':
+        cnet_structure = agent_params.pop(
+                'cnet_structure',None)
+        snet_structure = agent_params.pop(
+                'snet_structure',None)
+        qnet_structure = agent_params.pop(
+                'qnet_structure',None)
+        action_mem = agent_params.pop('action_mem',0)
+        agent = HRLAgent_v4(
+                action_space=env.action_space,
+                observation_space=env.observation_space,
+                controller_learning_rate=controller_learning_rate,
+                q_net_learning_rate=q_net_learning_rate,
+                discount_factor=gamma,
+                polyak_rate=polyak_rate,
+                device=device,
+                behaviour_epsilon=eps_b,
+                replay_buffer_size=replay_buffer_size,
+                delay_steps=delay,
+                action_mem=action_mem,
+                ac_variant=agent_params.pop('ac_variant','advantage'),
+                controller_net=PolicyFunction(
+                    layer_sizes=cnet_structure,
+                    input_size=4+4*action_mem,output_size=num_options),
+                subpolicy_nets=[PolicyFunction(
+                    layer_sizes=snet_structure,input_size=4)
+                    for _ in range(num_options)],
+                q_net=QFunction(layer_sizes=qnet_structure,
+                    input_size=4,output_size=4),
+                seed=seed,
+        )
+        def before_step(steps):
+            #agent.behaviour_epsilon = (1-min(steps/1000000,1))*(1-eps_b)+eps_b
+            pass
+        def after_step(steps):
+            if steps >= min_replay_buffer_size:
+                agent.train(batch_size=batch_size,iterations=1)
 
     if len(agent_params) > 0:
         raise Exception('Unused agent parameters: %s' % agent_params.keys())
@@ -1206,23 +1243,53 @@ def get_experiment_params(directory):
     """
     Based on the decision boundaries of the memoryless experiments, it looks like how I would split the state space
     up as if the subpolicies were a single primitive action. So maybe the controller policy is also too powerful?
-    I'm going to try reducing that too.
+    But in the AC setting, it also looks like a single subpolicy is solving everything. So maybe the solution is to increase the delay for the controller.
     """
     for alg in ['ac', 'hrl_memoryless', 'hrl_augmented']:
         params['%s-003'%alg] = {
                 **params['%s-002'%alg],
-                'cnet_layer_size': 2,
+                'delay': 2,
         }
+
+    params['hrl_v4-001'] = {
+            'agent_name': 'HRLAgent_v4',
+
+            'gamma': 0.9,
+            'controller_learning_rate': 0.001,
+            'subpolicy_learning_rate': 0.001,
+            'q_net_learning_rate': 0.001,
+            'eps_b': 0.05,
+            'polyak_rate': 0.001,
+            'batch_size': 256,
+            'min_replay_buffer_size': 1000,
+            'steps_per_task': 10000,
+            'total_steps': 100000+1,
+            'epoch': 1000,
+            'test_iters': 5,
+            'verbose': True,
+
+            'delay': 1,
+            'action_mem': 1,
+            'cnet_structure': [],
+            'snet_structure': [],
+            'qnet_structure': [],
+            'num_options': 5,
+            'directory': directory
+    }
 
     # Params for debugging purposes
     params['debug'] = {
-            **params['hrl_augmented-001'],
+            **params['hrl_v4-001'],
             'seed': 1,
             'epoch': 5,
-            'test_iters': 5,
+            'test_iters': 3,
+            'steps_per_task': 10,
             'min_replay_buffer_size': 10,
             'batch_size': 5,
-            'total_steps': 100
+            'total_steps': 100,
+            'ac_variant': 'q',
+            'delay': 3,
+            'action_mem': 1
     }
 
     return params
