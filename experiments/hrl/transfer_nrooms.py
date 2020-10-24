@@ -424,15 +424,6 @@ def run_trial_with_checkpoint(**params):
     else:
         print('No Checkpoint.')
         exp = Experiment(**params)
-    #if state is not None:
-    #    print('Found Checkpoint. Restoring state...')
-    #    for k,v in params.items():
-    #        if k in state['args'] and state['args'][k] != v:
-    #            print('Overwriting %s=%s with %s' % (k,state['args'][k],v))
-    #            state['args'][k] = v
-    #    exp.load_state_dict(state)
-    #else:
-    #    print('No Checkpoint.')
     return exp.run()
 
 class Experiment:
@@ -640,7 +631,7 @@ class ExperimentRandomControllerDropout:
         self.steps_to_reward = []
         self.done = True
 
-    def init_agent(self):
+    def init_agent(self, dropout_probability):
         checkpoint = Experiment.from_checkpoint(self.initial_checkpoint)
         self.agent = checkpoint.agent
         self.agent.controller_dropout = dropout_probability
@@ -663,7 +654,7 @@ class ExperimentRandomControllerDropout:
                     return
 
         # Initialize
-        self.init_agent()
+        self.init_agent(dp)
 
         # Run experiment
         step_range = range(self.test_iters)
@@ -1017,6 +1008,18 @@ def plot_tsne_smooth(results_directory, plot_directory, agent_name, n_planes=4):
     plt.close()
     print('Saved plot %s' % plot_path)
 
+def smooth_lines(x,y,sigma=2):
+    from scipy.ndimage.filters import gaussian_filter1d
+    ysmoothed = gaussian_filter1d(y, sigma=sigma)
+    return x,ysmoothed
+
+def smooth_lines_spline(x,y):
+    from scipy.interpolate import make_interp_spline
+    xnew = np.linspace(x.min(), x.max(), 300) 
+    spl = make_interp_spline(x, y, k=3)
+    ysmoothed = spl(snew)
+    return x,ysmoothed
+
 ##################################################
 # Results Parsing
 ##################################################
@@ -1268,14 +1271,22 @@ def get_experiment_params(directory):
             'test_iters': 5,
             'verbose': True,
 
-            'delay': 1,
-            'action_mem': 1,
+            'delay': 0,
+            'action_mem': 0,
             'cnet_structure': [],
             'snet_structure': [],
             'qnet_structure': [],
             'num_options': 5,
             'directory': directory
     }
+
+    for delay in range(5):
+        for mem in range(delay+1):
+            params['hrl_v4-001-d%dm%d' % (delay,mem)] = {
+                    **params['hrl_v4-001'],
+                    'delay': delay,
+                    'action_mem': mem
+            }
 
     # Params for debugging purposes
     params['debug'] = {
@@ -1295,8 +1306,8 @@ def get_experiment_params(directory):
     return params
 
 def run():
-    #DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-4')
-    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'dev')
+    #DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(),'hrl-5')
+    DEFAULT_DIRECTORY = os.path.join(utils.get_results_root_directory(temp=True),'dev')
 
     import argparse
     parser = argparse.ArgumentParser()
@@ -1351,7 +1362,7 @@ def run():
             key = args.key
 
             print(args.directories)
-            for directory in args.directories:
+            for directory in tqdm(args.directories):
                 exp_name = os.path.split(os.path.normpath(directory))[-1]
                 x = None
                 y = []
@@ -1362,6 +1373,7 @@ def run():
                         y.append(r[key])
                         count += 1
                 y = np.array(y).mean(axis=0)
+                x,y = smooth_lines(x,y,1)
                 plt.plot(x,y,label='%s (%d)'%(exp_name,count))
             plt.legend(loc='best')
             plt.grid(which='both')
@@ -1498,9 +1510,10 @@ def run():
         elif args.command == 'controller-dropout':
             #initial_checkpoint = args.initial_checkpoint
             checkpoint_dirs = [
-                    '/network/tmp1/huanghow/hrl-4/experiments.hrl.transfer_nrooms/ac-002/',
-                    '/network/tmp1/huanghow/hrl-4/experiments.hrl.transfer_nrooms/hrl_memoryless-002/',
-                    '/network/tmp1/huanghow/hrl-4/experiments.hrl.transfer_nrooms/hrl_augmented-002/'
+                    '/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d0m0',
+                    '/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d1m0',
+                    '/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d2m0',
+                    '/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d3m0',
             ]
 
             results = {}
@@ -1641,7 +1654,7 @@ def run():
             print('Invalid command')
     else:
         utils.set_results_directory(
-                os.path.join(utils.get_results_root_directory(),'dev'))
+                os.path.join(utils.get_results_root_directory(temp=True),'dev'))
 
         checkpoint_path = '/network/tmp1/huanghow/hrl-4/checkpoints/524717.checkpoint.pkl'
         checkpoint_path = '/network/tmp1/huanghow/hrl-4/experiments.hrl.transfer_nrooms/ac-001/ActorCritic-0.pkl'

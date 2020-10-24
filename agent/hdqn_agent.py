@@ -926,6 +926,8 @@ class AugmentedObservationStack():
     def get(self, delay, action_len):
         if action_len == 0:
             index = len(self.observations)-delay-1
+            if index < 0:
+                return None
             return self.transform(self.observations[index],[])
         else:
             tdiff = self.num_observations-self.num_actions if len(self.actions) == self.actions.maxlen else 0
@@ -1074,6 +1076,10 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             s1_mask = torch.tensor([s1_aug is not None, s1 is not None]).float().to(self.device)
 
             obs_sizes = self.get_obs_sizes()
+            if s0 is None:
+                s0 = np.zeros([obs_sizes[1]])
+            if s1 is None:
+                s1 = np.zeros([obs_sizes[1]])
             if s0_aug is None:
                 s0_aug = np.zeros([obs_sizes[0]])
             if s1_aug is None:
