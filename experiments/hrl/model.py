@@ -24,10 +24,15 @@ class PolicyFunction(torch.nn.Module):
             layers.append(torch.nn.LeakyReLU())
             in_f = out_f
         layers.append(torch.nn.Linear(in_features=in_f,out_features=output_size))
-        layers.append(torch.nn.Softmax(dim=1))
         self.seq = torch.nn.Sequential(*layers)
-    def forward(self, x):
-        return self.seq(x)
+        self.softmax = torch.nn.Softmax(dim=1)
+    def forward(self, x, temperature=1, log=False):
+        x = self.seq(x)
+        x = x/temperature
+        if log:
+            return x
+        else:
+            return self.softmax(x)
 
 class PolicyFunctionAugmentatedState(torch.nn.Module):
     def __init__(self, layer_sizes=[2,3,4], state_size=1, num_actions=4, output_size=4):

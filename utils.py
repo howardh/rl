@@ -36,8 +36,7 @@ def get_results_root_directory(temp=False):
         if temp:
             return "/miniscratch/huanghow"
         else:
-            return "/network/tmp1/huanghow"
-            # return "/network/projects/h/huanghow"
+             return "/network/projects/h/huanghow"
     # RL Lab
     if host_name == "agent-server-1" or host_name == "agent-server-2":
         return "/home/ml/hhuang63/results"

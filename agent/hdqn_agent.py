@@ -46,7 +46,7 @@ class HierarchicalPolicyNetwork(torch.nn.Module):
         self.subpolicies = subpolicies
         self.softmax = torch.nn.Softmax(dim=1)
 
-    def forward(self, obs0, obs1, obs_mask):
+    def forward(self, obs0, obs1, obs_mask, controller_temperature=1, subpolicy_temperature=1, extras=False):
         # Values of each subpolicy
         controller_output = self.controller(obs0)
         # If there's no observation available, assign the same value to all
@@ -57,11 +57,19 @@ class HierarchicalPolicyNetwork(torch.nn.Module):
         
         # Compute overall probability of primitive action as a weighted sum, weighted by
         # probability of taking each subpolicy
-        subpolicy_probabilities = self.softmax(controller_output).unsqueeze(1)
-        primitive_action_probabilities = torch.stack([sp(obs1) for sp in self.subpolicies], dim=1)
+        subpolicy_probabilities = self.softmax(controller_output/controller_temperature).unsqueeze(1)
+        primitive_action_probabilities = torch.stack([sp(obs1,subpolicy_temperature) for sp in self.subpolicies], dim=1)
         action_probs = subpolicy_probabilities @ primitive_action_probabilities
         action_probs = action_probs.squeeze(1)
 
+        action_probs = primitive_action_probabilities[:,0,:] # DEBUG
+
+        if extras:
+            return action_probs, {
+                    'controller_output': controller_output,
+                    'subpolicy_probabilities': subpolicy_probabilities,
+                    'primitive_action_probabilities': primitive_action_probabilities
+            }
         return action_probs
 
 class HierarchicalPolicyNetworkAugmentedState(torch.nn.Module):
@@ -470,7 +478,7 @@ class HDQNAgentWithDelayAC(Agent):
                 break
         return {
             'total_rewards': reward_sum,
-            'state_action_values': np.mean(sa_vals),
+            #'state_action_values': np.mean(sa_vals),
             'steps': steps
         }
 
@@ -955,7 +963,7 @@ class AugmentedObservationStack():
         return self.get(index, self.action_len)
 
 class HRLAgent_v4(HDQNAgentWithDelayAC):
-    def __init__(self, action_mem=0, ac_variant='advantage', **kwargs):
+    def __init__(self, behaviour_temp=1, target_temp=1, action_mem=0, ac_variant='advantage', **kwargs):
         """
         Args:
             subpolicy_q_net_learning_rate: Learning rate for the subpolicy Q network.
@@ -965,6 +973,9 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
         """
         super().__init__(**kwargs)
 
+        self.behaviour_temp = behaviour_temp
+        self.target_temp = target_temp
+
         assert action_mem <= kwargs['delay_steps']
         self.action_mem = action_mem
         self.ac_variant = ac_variant
@@ -973,8 +984,18 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
         self.replay_buffer = ReplayBuffer(kwargs['replay_buffer_size'])
 
         obs_stack_transform = create_augmented_obs_transform_one_hot_action(4)
-        self.obs_stack = AugmentedObservationStack(transform=obs_stack_transform)
-        self.obs_stack_testing = AugmentedObservationStack(transform=obs_stack_transform)
+        # Stack size: Consider delay=0. stack_len=0 can't store anything. stack_len=1 only stores the current observation. stack_len=2 can hold current obs and previous obs, which is needed to create the replay buffer.
+        self.obs_stack = AugmentedObservationStack(transform=obs_stack_transform,
+                stack_len=self.delay+2, action_len=self.action_mem)
+        self.obs_stack_testing = AugmentedObservationStack(transform=obs_stack_transform,
+                stack_len=self.delay+2, action_len=self.action_mem)
+
+        self.controller_dropout = None
+        self.controller_obs = [None,None] # Dropout obs. Index 0 = training, index 1 = testing
+
+        self.action_counts = [[0]*4,[0]*4]
+        self.option_counts = [[0]*5,[0]*5]
+        self.total_grad = [[] for _ in range(5)] # gradient of each subpolicy
 
     def train(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
@@ -995,13 +1016,14 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             s1 = s1.float().to(self.device)     # State on which the subpolicy was applied (not augmented)
             m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
             t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
+            temp = self.target_temp # Temperature
             
             # Update Q function
-            a1_probs = self.policy_net_target(s1a,s1,m1) # Action probs at s1
+            a1_probs = self.policy_net_target(s1a,s1,m1,temp,temp) # Action probs at s1
             v1_pred = (a1_probs * self.q_net_target(s1)).sum(1) # Expected value of s1 under current policy
             v0_target = r1+gamma*v1_pred*(1-t) # Value of (s0,a0) from sampled reward and bootstrapping
 
-            a0_probs = self.policy_net_target(s0a,s0,m0) # Action probs at s0
+            a0_probs = self.policy_net_target(s0a,s0,m0,temp,temp) # Action probs at s0
             v0_pred = (a0_probs * self.q_net_target(s0)).sum(1) # Expected value of s0 under current policy
             q0_pred = self.q_net(s0) # Predicted state-action values at s0
             v0_pred_sample = q0_pred[range(batch_size),a0.squeeze()] # Sampled predicted value of s0 under current policy (can also be interpreted as state-action value of (s0,a0))
@@ -1012,19 +1034,42 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             critic_optimizer.step()
 
             # Update policy
+            actor_optimizer.zero_grad()
+
+            a0_probs, extras = self.policy_net(s0a,s0,m0,temp,temp,extras=True) # Action probs at s0
+            q0 = self.q_net_target(s0) # batch size * # actions
+            primitive_probs = [sp(s1,temp) for sp in self.subpolicy_nets]
+            # Train subpolicies to maximize expected return, weighted by the probability of the controller choosing that subpolicy
+            subpolicy_log_probs = [sp(s0,temp,log=True) for sp in self.subpolicy_nets] # Log action prob for each subpolicy
+            for log_prob in subpolicy_log_probs:
+                # log_prob.shape = batch size * # actions
+                action_probs = torch.nn.functional.softmax(log_prob, dim=1).detach() # batch size * # actions
+                delta = None # batch size * # actions
+                if self.ac_variant == 'advantage':
+                    delta = (q0-action_probs*q0).detach()
+                elif self.ac_variant == 'q':
+                    delta = (action_probs*q0).detach()
+                actor_loss = action_probs*log_prob*delta
+                actor_loss = actor_loss.sum(1)
+                actor_loss = actor_loss.mean()
+                actor_loss.backward() # Accumulate gradients
+            # Train controller to favour subpolicies with higher expected return at this state
+            q0_subpolicies = [torch.nn.functional.softmax(splp, dim=1)*q0_pred for splp in subpolicy_log_probs] # Expected Q value of each subpolicy
+            controller_log_probs = extras['controller_output'] # batch size * # options
+            option_q0 = torch.stack([(torch.nn.functional.softmax(log_prob, dim=1)*q0).sum(1) for log_prob in subpolicy_log_probs],dim=1) # batch size * # options
+            option_probs = torch.nn.functional.softmax(controller_log_probs, dim=1).detach()
             delta = None
             if self.ac_variant == 'advantage':
-                advantage = v0_pred_sample-v0_pred
-                advantage = advantage.detach()
-                advantage.requires_gradient = False
-                delta = advantage
+                delta = (option_q0-option_probs*option_q0).detach()
             elif self.ac_variant == 'q':
-                delta = v0_pred_sample.detach()
-            actor_loss = a0_probs[range(batch_size),a0.squeeze()]*delta
+                delta = (option_probs*option_q0).detach()
+            actor_loss = option_probs*controller_log_probs*delta
+            actor_loss = actor_loss.sum(1)
             actor_loss = actor_loss.mean()
+            actor_loss.backward() # Accumulate gradients
 
-            actor_optimizer.zero_grad()
-            actor_loss.backward()
+            #actor_optimizer.zero_grad()
+            #actor_loss.backward()
             actor_optimizer.step()
 
             # Update target weights
@@ -1085,12 +1130,23 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             if s1_aug is None:
                 s1_aug = np.zeros([obs_sizes[0]])
 
-            s0 = torch.tensor(s0).squeeze()
-            s0_aug = torch.tensor(s0_aug).squeeze()
-            s1 = torch.tensor(s1).squeeze()
-            s1_aug = torch.tensor(s1_aug).squeeze()
+            s0 = torch.tensor(s0).squeeze().float()
+            s0_aug = torch.tensor(s0_aug).squeeze().float()
+            s1 = torch.tensor(s1).squeeze().float()
+            s1_aug = torch.tensor(s1_aug).squeeze().float()
 
             self.replay_buffer.add_transition((s0_aug,s0,s0_mask),a0,reward,(s1_aug,s1,s1_mask),terminal)
+
+        # Dropout
+        if self.controller_dropout is not None and \
+                self.rand.random() < self.controller_dropout and \
+                self.controller_obs[testing] is None:
+            s0_aug = obs_stack.get(1+self.delay-self.action_mem,self.action_mem)
+            if s0_aug is not None:
+                s0_aug = torch.tensor(s0_aug).squeeze()
+            self.controller_obs[testing] = s0_aug # If s0_aug is None, it'll just be ignored.
+        else:
+            self.controller_obs[testing] = None
 
     def act(self, testing=False):
         """
@@ -1102,13 +1158,29 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
 
         obs0,obs1,mask = self.get_current_obs(testing)
 
+        # Dropout
+        if self.controller_obs[testing] is not None:
+            #print('drop',obs0-self.controller_obs[testing].float().squeeze().unsqueeze(0))
+            obs0 = self.controller_obs[testing]
+            obs0 = obs0.float().squeeze().unsqueeze(0).to(self.device)
+
         # Sample an action
-        if not testing and self.rand.rand() < self.behaviour_epsilon:
-            action = self.rand.randint(self.action_space.n)
-        else:
-            action_probs = self.policy_net(obs0,obs1,mask).squeeze().detach().numpy()
-            action = self.rand.choice(len(action_probs),p=action_probs)
+        temp = self.target_temp if testing else self.behaviour_temp
+        action_probs,policy_net_output = self.policy_net(obs0,obs1,mask,temp,temp,extras=True)
+        #action_probs = action_probs.squeeze().detach().numpy()
+        subpolicy_probs = policy_net_output['subpolicy_probabilities'].squeeze().detach().numpy()
+        subpolicy_choice = self.rand.choice(len(subpolicy_probs),p=subpolicy_probs)
+        action_probs = policy_net_output['primitive_action_probabilities'][0,subpolicy_choice,:].detach().numpy() # policy_net_output['primitive_action_probabilities'] has shape [1 * # options * # primitive actions]
+        #if self.controller_obs[testing] is not None:
+        #    o0 = self.controller_obs[testing].float().squeeze().unsqueeze(0)
+        #    action_probs2 = self.policy_net(o0,obs1,mask,temp,temp).squeeze().detach().numpy()
+        #    print('drop',action_probs-action_probs2)
+        #    #print('drop',action_probs,action_probs2)
+        action = self.rand.choice(len(action_probs),p=action_probs)
         self.current_action = action
+
+        self.action_counts[testing][action] += 1
+        self.option_counts[testing][subpolicy_choice] += 1
 
         # Save action
         if testing:
@@ -1131,6 +1203,11 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
         obs0 = obs_stack.get(self.delay-self.action_mem,self.action_mem)
         obs1 = obs_stack.get(0,0)
         mask = torch.tensor([[obs0 is not None, obs1 is not None]]).float().to(self.device)
+
+        #o0 = obs0
+        #o1 = obs_stack.get(1+self.delay-self.action_mem,self.action_mem)
+        #if o0 is not None and o1 is not None:
+        #    print(o0-o1)
 
         def to_tensor(x):
             if x is None:

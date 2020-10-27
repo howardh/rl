@@ -351,7 +351,9 @@ def create_agent(agent_name, env, device, seed, **agent_params):
                 discount_factor=gamma,
                 polyak_rate=polyak_rate,
                 device=device,
-                behaviour_epsilon=eps_b,
+                behaviour_epsilon=None,
+                behaviour_temp=agent_params.pop('temp_b',0.01),
+                target_temp=agent_params.pop('temp_t',0.01),
                 replay_buffer_size=replay_buffer_size,
                 delay_steps=delay,
                 action_mem=action_mem,
@@ -494,8 +496,8 @@ class Experiment:
                     self.test_env, self.test_iters, render=False, processors=1)
             self.rewards.append(np.mean(
                 [r['total_rewards'] for r in test_results]))
-            self.state_action_values.append(np.mean(
-                [r['state_action_values'] for r in test_results]))
+            #self.state_action_values.append(np.mean(
+            #    [r['state_action_values'] for r in test_results]))
             self.steps_to_reward.append(np.mean(
                 [r['steps'] for r in test_results]))
             self.eval_steps.append(self.steps)
@@ -1273,9 +1275,9 @@ def get_experiment_params(directory):
 
             'delay': 0,
             'action_mem': 0,
-            'cnet_structure': [],
+            'cnet_structure': [8],
             'snet_structure': [],
-            'qnet_structure': [],
+            'qnet_structure': [10,10],
             'num_options': 5,
             'directory': directory
     }
@@ -1510,10 +1512,14 @@ def run():
         elif args.command == 'controller-dropout':
             #initial_checkpoint = args.initial_checkpoint
             checkpoint_dirs = [
-                    '/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d0m0',
-                    '/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d1m0',
-                    '/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d2m0',
-                    '/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d3m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-001-d0m0',
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-001-d1m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-001-d2m0',
+
+                    #'/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d0m0',
+                    #'/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d1m0',
+                    #'/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d2m0',
+                    #'/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d3m0',
             ]
 
             results = {}
@@ -1529,7 +1535,7 @@ def run():
                 for initial_checkpoint,dropout_prob in tqdm(params, desc=exp_name):
                     params = {
                             'max_steps': 500,
-                            'test_iters': 10,
+                            'test_iters': 30,
                             'dropout_probability': dropout_prob,
                             'seed': 1,
                             'initial_checkpoint': initial_checkpoint,
@@ -1541,6 +1547,10 @@ def run():
 
                     #r = exp.state_dict()
                     results[exp_name][dropout_prob] += exp.steps_to_reward
+                    try:
+                        tqdm.write('%.2f\t%s\t%s' % (dropout_prob,str(exp.steps_to_reward),str(exp.agent.option_counts[1]))) # Agent is only loaded if the experiment was run in this process
+                    except:
+                        tqdm.write('%.2f\t%s' % (dropout_prob,str(exp.steps_to_reward)))
 
             import matplotlib
             matplotlib.use('Agg')
