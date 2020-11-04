@@ -357,7 +357,8 @@ def create_agent(agent_name, env, device, seed, **agent_params):
                 replay_buffer_size=replay_buffer_size,
                 delay_steps=delay,
                 action_mem=action_mem,
-                ac_variant=agent_params.pop('ac_variant','advantage'),
+                ac_variant=agent_params.pop('ac_variant',None),
+                algorithm=agent_params.pop('algorithm',None),
                 controller_net=PolicyFunction(
                     layer_sizes=cnet_structure,
                     input_size=4+4*action_mem,output_size=num_options),
@@ -429,9 +430,25 @@ def run_trial_with_checkpoint(**params):
     return exp.run()
 
 class Experiment:
-    def __init__(self, directory=None, steps_per_task=100, total_steps=1000,
-            epoch=50, test_iters=1, verbose=False, seed=None, keep_checkpoint=False, checkpoint_path=None,
+    def __init__(self, directory=None,
+            steps_per_task=100, episodes_per_task=None, task_dist='uniform',
+            num_training_tasks=10, split_train_test=True, goal_repeat_allowed=False,
+            total_steps=1000, epoch=50, test_iters=1, verbose=False, seed=None, keep_checkpoint=False, checkpoint_path=None,
+            checkpoint_frequency=10000,
             agent_name='HDQNAgentWithDelayAC', **agent_params):
+        """
+        Args:
+            steps_per_task
+            episodes_per_task
+            task_dist: 'uniform' or 'nonstationary'
+                'uniform' = a new task is chosen after each episode in a uniform random manner.
+                'nonstationary' = The goal is fixed for a duration, but changes every `steps_per_task` steps.
+            num_training_tasks: The number of goal states available for training.
+            split_train_test: Boolean
+                If True, then the training and testing procedure will use different goals. If False, both training and testing will use the same set of goals.
+            checkpoint_frequency:
+                Number of steps between each saved checkpoint.
+        """
         self.args = locals()
         del self.args['self']
 
@@ -444,6 +461,7 @@ class Experiment:
         self.seed = seed
         self.keep_checkpoint = keep_checkpoint
         self.checkpoint_path = checkpoint_path
+        self.checkpoint_frequency = checkpoint_frequency
         self.agent_name = agent_name
         self.agent_params = agent_params
         self.steps = 0
@@ -455,9 +473,26 @@ class Experiment:
 
         rand = np.random.RandomState(seed)
 
-        self.env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
+        task_dist = 'uniform' # uniform, nonstationary
+        if task_dist == 'nonstationary':
+            self.env = gym.make(env_name,goal_duration_steps=steps_per_task).unwrapped
+            self.test_env = gym.make(env_name,goal_duration_steps=float('inf')).unwrapped
+        elif task_dist == 'uniform':
+            self.env = gym.make(env_name,goal_duration_episodes=1,goal_repeat_allowed=goal_repeat_allowed).unwrapped
+            self.test_env = gym.make(env_name,goal_duration_episodes=1,goal_repeat_allowed=goal_repeat_allowed).unwrapped
+            available_coords = self.env.coords
+            num_testing_goals = len(available_coords)-num_training_tasks
+            training_goal_indices = np.random.choice(len(available_coords),num_training_tasks,replace=False)
+            training_goals = [available_coords[i] for i in training_goal_indices]
+            if split_train_test:
+                testing_goals = [c for i,c in enumerate(available_coords) if i not in training_goal_indices]
+            else:
+                testing_goals = training_goals
+            self.env.available_goals = training_goals
+            self.test_env.available_goals = testing_goals
+        else:
+            raise ValueError('Invalid task distribution %s' % task_dist)
         self.env = TimeLimit(self.env,36)
-        self.test_env = gym.make(env_name,goal_duration_steps=float('inf')).unwrapped
         self.test_env = TimeLimit(self.test_env,500)
         if seed is not None:
             self.env.seed(seed)
@@ -481,7 +516,7 @@ class Experiment:
 
     def run_step(self):
         # Checkpoint
-        if self.steps % self.steps_per_task == 0:
+        if self.steps % self.checkpoint_frequency == 0:
             state = self.state_dict()
             path = self.checkpoint_path
             if path is None:
@@ -491,7 +526,8 @@ class Experiment:
             tqdm.write('Checkpoint saved')
         # Run tests
         if self.steps % self.epoch == 0:
-            self.test_env.reset_goal(self.env.goal)
+            if self.args['split_train_test'] == False and self.args['task_dist'] == 'nonstationary':
+                self.test_env.reset_goal(self.env.goal)
             test_results = self.agent.test(
                     self.test_env, self.test_iters, render=False, processors=1)
             self.rewards.append(np.mean(
@@ -622,8 +658,8 @@ class ExperimentRandomControllerDropout:
 
         self.env = gym.make(env_name,goal_duration_episodes=1).unwrapped
         self.env = TimeLimit(self.env,max_steps)
-        if seed is not None:
-            self.env.seed(seed)
+        #if seed is not None:
+        #    self.env.seed(seed)
 
         if torch.cuda.is_available():
             device = torch.device('cuda')
@@ -1010,9 +1046,18 @@ def plot_tsne_smooth(results_directory, plot_directory, agent_name, n_planes=4):
     plt.close()
     print('Saved plot %s' % plot_path)
 
-def smooth_lines(x,y,sigma=2):
+def smooth_lines_gaussian(x,y,sigma=2):
     from scipy.ndimage.filters import gaussian_filter1d
     ysmoothed = gaussian_filter1d(y, sigma=sigma)
+    return x,ysmoothed
+
+def smooth_lines_ema(x,y,weight=0.9):
+    ysmoothed = []
+    cur = y[0]
+    ysmoothed.append(cur)
+    for val in y[1:]:
+        cur = (1-weight)*cur + weight*val
+        ysmoothed.append(cur)
     return x,ysmoothed
 
 def smooth_lines_spline(x,y):
@@ -1290,6 +1335,165 @@ def get_experiment_params(directory):
                     'action_mem': mem
             }
 
+    params['hrl_v4-002'] = { # Overfit Q function
+            **params['hrl_v4-001'],
+            'steps_per_task': None,
+            'episodes_per_task': 1,
+            'task_dist': 'uniform',
+            'num_training_tasks': 1,
+            'split_train_test': False,
+            'goal_repeat_allowed': True,
+            'q_net_learning_rate': 1e-2,
+
+            #'ac_variant': 'advantage',
+            #'ac_variant': 'q',
+            'algorithm': 'q-learning',
+            'delay': 0,
+            'action_mem': 0,
+            'cnet_structure': [],
+            'snet_structure': [10,10],
+            'qnet_structure': [10,10],
+            'num_options': 1,
+    }
+
+    # The above seems to be learning something. It's improving 
+
+    params['hrl_v4-003'] = { # More tasks
+            **params['hrl_v4-002'],
+            'num_training_tasks': 10,
+    } # Average over 10 trials is looking erratic. No clear improvement over time.
+
+    params['hrl_v4-004'] = { # Try a larger model.
+            **params['hrl_v4-002'],
+            'num_training_tasks': 10,
+            'qnet_structure': [20,20],
+    } # Still no clear trend of improvement over time
+
+    params['hrl_v4-005'] = { # Try a larger model.
+            **params['hrl_v4-002'],
+            'num_training_tasks': 10,
+            'qnet_structure': [30,30],
+    } # This one performed worse over time. But it also started off with a better performance, so that might just be chance.
+
+    params['hrl_v4-006'] = { # Try a larger model. Running this simultaneously with 005
+            **params['hrl_v4-002'],
+            'num_training_tasks': 10,
+            'qnet_structure': [30,30,30],
+    } # Same here. No clear improvement. Hovers around 400+/-20 steps to reward.
+
+    params['hrl_v4-007'] = { # Try fewer tasks
+            **params['hrl_v4-002'],
+            'num_training_tasks': 2,
+            'qnet_structure': [30,30,30],
+    } # Improves quickly from 440 to 390, then hovers there. Seems to gradually improve from there, but very gradually.
+
+    params['hrl_v4-008'] = { # Try faster learning rate
+            **params['hrl_v4-002'],
+            'q_net_learning_rate': 1e-1,
+            'num_training_tasks': 2,
+            'qnet_structure': [30,30,30],
+    } # Found a bug in my training code. I don't know how it ever learned anything in the previous runs. Dumb luck? Fixed the bug and now it's clearly learning something. After about 60000 steps, it consistently hits the goal state within ~50 steps.
+
+    params['hrl_v4-009'] = { # Now try more tasks again
+            **params['hrl_v4-002'],
+            'q_net_learning_rate': 1e-1,
+            'num_training_tasks': 10,
+            'qnet_structure': [30,30,30],
+    } # Very clear improvement here too. Goes down to ~120 steps instead of 50 as above.
+
+    params['hrl_v4-010'] = { # Try Actor-critic with Q function learned with Q learning off-policy
+            **params['hrl_v4-002'],
+            'ac_variant': 'advantage',
+            'algorithm': 'actor-critic-v2',
+            'q_net_learning_rate': 1e-1,
+            'num_training_tasks': 10,
+            'qnet_structure': [30,30,30],
+    } # Tried once using the target Q function as a target for the policy, and it didn't work. No learning. Too slow I guess, since the target Q function lags behind, then the policy lags behind that.
+    # Trying again with the same parameters, but using the more current Q function for training the policy. (Code changes)
+    # Still no difference.
+
+    params['hrl_v4-011'] = { # Try increasing policy model capacity and learning rate
+            **params['hrl_v4-010'],
+            'ac_variant': 'advantage',
+            'temp_b': 10,
+            'algorithm': 'actor-critic-v3',
+            'subpolicy_learning_rate': 1e-3,
+            'snet_structure': [30,30,30],
+    } # the learned policy seems to converge on something that isn't the optimal policy. The learned policy seems to be near deterministic and outputs the same action regardless of input.
+    # Try supervised learning with the ideal policy as a target. This is to make sure that we're capable of representing the optimal policy.
+    # Result: Turns out I was doing log probability wrong. It's actually the log of the softmax, and not the unnormalized neural net output. I did not know that.
+
+    params['hrl_v4-012'] = { # Try again with multiple subpolicies, now that the log probs are fixed
+            **params['hrl_v4-011'],
+            'ac_variant': 'advantage',
+            'temp_b': 10,
+            'algorithm': 'actor-critic-v3',
+            'subpolicy_learning_rate': 1e-3,
+            'snet_structure': [30,30,30],
+            'num_options': 3,
+    }
+
+    # Run a few experiments with different delays and look at how the controller dropout experiment resuls differ between them. I would expect a higher delay to lead to a better performance when there's a delay, since there's likely going to be less reliance on the controller policy.
+    # Also want to look at how the decision boundaries differ. Does it make more sense with certain parameters than others? Making more sense = closer to our intuition on what makes good subpolicy splits.
+    for delay in range(5):
+        for mem in range(delay+1):
+            params['hrl_v4-012-d%dm%d' % (delay,mem)] = {
+                    **params['hrl_v4-012'],
+                    'delay': delay,
+                    'action_mem': mem
+            }
+
+    # Try using different seeds for each run. I think keeping the same seed just amplifies noise from a single run rather than removing a source of variance.
+    # Result: Things look better I think. Recorded the plots in HackMD.
+
+    params['hrl_v4-013'] = { # Try evaluating on different tasks
+            **params['hrl_v4-012'],
+            'split_train_test': True,
+    }
+    for delay in range(5):
+        for mem in range(delay+1):
+            params['hrl_v4-013-d%dm%d' % (delay,mem)] = {
+                    **params['hrl_v4-013'],
+                    'delay': delay,
+                    'action_mem': mem
+            }
+
+    params['hrl_v4-014'] = { # Decrease subpolicy capacity.
+            **params['hrl_v4-013'],
+            'snet_structure': [30,30],
+    }
+    for delay in range(5):
+        for mem in range(delay+1):
+            params['hrl_v4-014-d%dm%d' % (delay,mem)] = {
+                    **params['hrl_v4-014'],
+                    'delay': delay,
+                    'action_mem': mem
+            }
+
+    params['hrl_v4-015'] = { # Decrease subpolicy capacity again. Run concurrently with 013.
+            **params['hrl_v4-013'],
+            'snet_structure': [30],
+    }
+    for delay in range(5):
+        for mem in range(delay+1):
+            params['hrl_v4-015-d%dm%d' % (delay,mem)] = {
+                    **params['hrl_v4-015'],
+                    'delay': delay,
+                    'action_mem': mem
+            }
+
+    # Just realized that I multiplied by the primitive action probabilities instead of the option probabilities
+    params['hrl_v4-016'] = { # Bug fix. Same params, but keeping old results for comparison.
+            **params['hrl_v4-015'],
+    }
+    for delay in range(5):
+        for mem in range(delay+1):
+            params['hrl_v4-016-d%dm%d' % (delay,mem)] = {
+                    **params['hrl_v4-016'],
+                    'delay': delay,
+                    'action_mem': mem
+            }
+
     # Params for debugging purposes
     params['debug'] = {
             **params['hrl_v4-001'],
@@ -1375,7 +1579,8 @@ def run():
                         y.append(r[key])
                         count += 1
                 y = np.array(y).mean(axis=0)
-                x,y = smooth_lines(x,y,1)
+                #x,y = smooth_lines_gaussian(x,y,1)
+                x,y = smooth_lines_ema(x,y,0.2)
                 plt.plot(x,y,label='%s (%d)'%(exp_name,count))
             plt.legend(loc='best')
             plt.grid(which='both')
@@ -1512,9 +1717,15 @@ def run():
         elif args.command == 'controller-dropout':
             #initial_checkpoint = args.initial_checkpoint
             checkpoint_dirs = [
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-001-d0m0',
-                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-001-d1m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-001-d2m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-015-d0m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-015-d1m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-015-d2m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-015-d3m0',
+
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d0m0',
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d1m0',
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d2m0',
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d3m0',
 
                     #'/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d0m0',
                     #'/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d1m0',

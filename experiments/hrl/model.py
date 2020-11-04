@@ -26,11 +26,12 @@ class PolicyFunction(torch.nn.Module):
         layers.append(torch.nn.Linear(in_features=in_f,out_features=output_size))
         self.seq = torch.nn.Sequential(*layers)
         self.softmax = torch.nn.Softmax(dim=1)
+        self.log_softmax = torch.nn.LogSoftmax(dim=1)
     def forward(self, x, temperature=1, log=False):
         x = self.seq(x)
         x = x/temperature
         if log:
-            return x
+            return self.log_softmax(x)
         else:
             return self.softmax(x)
 
