@@ -1494,6 +1494,19 @@ def get_experiment_params(directory):
                     'action_mem': mem
             }
 
+    # Bug fix: controller probabilities computed wrong.
+    params['hrl_v4-017'] = { # Bug fix. Same params, but keeping old results for comparison.
+            **params['hrl_v4-015'],
+    }
+    base_exp_name = 'hrl_v4-017'
+    for delay in range(5):
+        for mem in range(delay+1):
+            params['%s-d%dm%d' % (base_exp_name,delay,mem)] = {
+                    **params[base_exp_name],
+                    'delay': delay,
+                    'action_mem': mem
+            }
+
     # Params for debugging purposes
     params['debug'] = {
             **params['hrl_v4-001'],
@@ -1717,10 +1730,10 @@ def run():
         elif args.command == 'controller-dropout':
             #initial_checkpoint = args.initial_checkpoint
             checkpoint_dirs = [
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-015-d0m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-015-d1m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-015-d2m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-015-d3m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-017-d0m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-017-d1m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-017-d2m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-017-d3m0',
 
                     #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d0m0',
                     #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d1m0',
@@ -1779,7 +1792,7 @@ def run():
                     x.append(results[exp_name][dropout_prob])
                     colours.append(colour)
             ax = plt.subplot(111)
-            bplot = ax.boxplot(x,labels=labels,vert=False,patch_artist=True)
+            bplot = ax.boxplot(x,labels=labels,vert=False,patch_artist=True,sym='|')
             for patch,c in zip(bplot['boxes'],colours):
                 patch.set_facecolor(c)
             plt.subplots_adjust(left=0.4)

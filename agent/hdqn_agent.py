@@ -1060,8 +1060,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             primitive_probs = [sp(s1,temp) for sp in self.subpolicy_nets]
             # Train subpolicies to maximize expected return, weighted by the probability of the controller choosing that subpolicy
             subpolicy_log_probs = [sp(s0,temp,log=True) for sp in self.subpolicy_nets] # Log action prob for each subpolicy
-            controller_probs = torch.exp(extras['controller_output']).detach() # batch size * # options
-            for sp_idx,log_prob in enumerate(subpolicy_log_probs):
+            for log_prob in subpolicy_log_probs:
                 # log_prob.shape = batch size * # actions
                 action_probs = torch.nn.functional.softmax(log_prob, dim=1).detach() # batch size * # actions
                 delta = None # batch size * # actions
@@ -1069,7 +1068,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
                     delta = (q0-action_probs*q0).detach()
                 elif self.ac_variant == 'q':
                     delta = (action_probs*q0).detach()
-                actor_loss = controller_probs[:,sp_idx].view(-1,1)*log_prob*delta
+                actor_loss = action_probs*log_prob*delta
                 actor_loss = actor_loss.sum(1)
                 actor_loss = actor_loss.mean()
                 actor_loss.backward() # Accumulate gradients
@@ -1220,7 +1219,9 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             primitive_probs = [sp(s1,temp) for sp in self.subpolicy_nets]
             # Train subpolicies to maximize expected return, weighted by the probability of the controller choosing that subpolicy
             subpolicy_log_probs = [sp(s0,temp,log=True) for sp in self.subpolicy_nets] # Log action prob for each subpolicy
-            for log_prob in subpolicy_log_probs:
+            controller_log_probs = extras['controller_log_probs'] # batch size * # options
+            option_probs = torch.exp(controller_log_probs).detach()
+            for sp_idx,log_prob in enumerate(subpolicy_log_probs):
                 # log_prob.shape = batch size * # actions
                 action_probs = torch.exp(log_prob) # batch size * # actions
                 delta = None # batch size * # actions
@@ -1228,21 +1229,19 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
                     delta = (q0-action_probs*q0).detach()
                 elif self.ac_variant == 'q':
                     delta = (action_probs*q0).detach()
-                actor_loss = action_probs*delta
+                actor_loss = option_probs[:,sp_idx]*action_probs*delta
                 actor_loss = actor_loss.sum(1)
                 actor_loss = actor_loss.mean()
                 actor_loss.backward() # Accumulate gradients
             # Train controller to favour subpolicies with higher expected return at this state
             q0_subpolicies = [torch.exp(splp)*q0 for splp in subpolicy_log_probs] # Expected Q value of each subpolicy
-            controller_log_probs = extras['controller_log_probs'] # batch size * # options
             option_q0 = torch.stack([(torch.exp(log_prob)*q0).sum(1) for log_prob in subpolicy_log_probs],dim=1) # batch size * # options
-            option_probs = torch.exp(controller_log_probs).detach()
             delta = None
             if self.ac_variant == 'advantage':
                 delta = (option_q0-option_probs*option_q0).detach()
             elif self.ac_variant == 'q':
                 delta = (option_probs*option_q0).detach()
-            actor_loss = option_probs*controller_log_probs*delta
+            actor_loss = controller_log_probs*delta
             actor_loss = actor_loss.sum(1)
             actor_loss = actor_loss.mean()
             actor_loss.backward() # Accumulate gradients
