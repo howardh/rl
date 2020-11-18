@@ -1003,8 +1003,9 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
         self.controller_dropout = None
         self.controller_obs = [None,None] # Dropout obs. Index 0 = training, index 1 = testing
 
+        num_options = len(self.subpolicy_nets)
         self.action_counts = [[0]*4,[0]*4]
-        self.option_counts = [[0]*5,[0]*5]
+        self.option_counts = [[0]*num_options,[0]*num_options]
         self.total_grad = [[] for _ in range(5)] # gradient of each subpolicy
 
     def train(self,batch_size=2,iterations=1):
@@ -1234,7 +1235,6 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
                 actor_loss = actor_loss.mean()
                 actor_loss.backward() # Accumulate gradients
             # Train controller to favour subpolicies with higher expected return at this state
-            q0_subpolicies = [torch.exp(splp)*q0 for splp in subpolicy_log_probs] # Expected Q value of each subpolicy
             option_q0 = torch.stack([(torch.exp(log_prob)*q0).sum(1) for log_prob in subpolicy_log_probs],dim=1) # batch size * # options
             delta = None
             if self.ac_variant == 'advantage':

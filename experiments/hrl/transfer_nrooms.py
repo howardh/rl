@@ -481,6 +481,7 @@ class Experiment:
             self.env = gym.make(env_name,goal_duration_episodes=1,goal_repeat_allowed=goal_repeat_allowed).unwrapped
             self.test_env = gym.make(env_name,goal_duration_episodes=1,goal_repeat_allowed=goal_repeat_allowed).unwrapped
             available_coords = self.env.coords
+            num_training_tasks = min(num_training_tasks, len(available_coords))
             num_testing_goals = len(available_coords)-num_training_tasks
             training_goal_indices = np.random.choice(len(available_coords),num_training_tasks,replace=False)
             training_goals = [available_coords[i] for i in training_goal_indices]
@@ -553,6 +554,7 @@ class Experiment:
 
     def run(self):
         if self.verbose:
+            pprint.pprint(self.args)
             step_range = tqdm(range(self.total_steps), total=self.total_steps, initial=self.step_range.start)
         try:
             for self.steps in step_range:
@@ -1506,6 +1508,67 @@ def get_experiment_params(directory):
                     'delay': delay,
                     'action_mem': mem
             }
+    # delay 0 is performing much worse than everything else. Ran extra trials to confirm and it just got worse, so unlikely to be due to
+
+    params['hrl_v4-018'] = { # train on all goals
+            **params['hrl_v4-017'],
+            'num_training_tasks': 1000,
+            'split_train_test': False
+    }
+    for delay in range(5):
+        params['hrl_v4-018-d%dm0' % (delay)] = {
+                **params['hrl_v4-018'],
+                'delay': delay,
+                'action_mem': 0
+        }
+
+    params['hrl_v4-019'] = { # Shot in the dark. Try increasing policy network capacity
+            **params['hrl_v4-017'],
+            'cnet_structure': [30]
+    }
+    for delay in range(5):
+        params['hrl_v4-019-d%dm0' % (delay)] = {
+                **params['hrl_v4-019'],
+                'delay': delay,
+                'action_mem': 0
+        }
+
+    params['hrl_v4-020'] = { # Further increase controller capacity and decrease supolicy capacity
+            **params['hrl_v4-017'],
+            'cnet_structure': [30,30],
+            'snet_structure': [15]
+    }
+    for delay in range(5):
+        params['hrl_v4-020-d%dm0' % (delay)] = {
+                **params['hrl_v4-020'],
+                'delay': delay,
+                'action_mem': 0
+        }
+
+    params['hrl_v4-021'] = { # Further decrease supolicy capacity
+            **params['hrl_v4-017'],
+            'cnet_structure': [30,30],
+            'snet_structure': [5]
+    }
+    for delay in range(5):
+        params['hrl_v4-021-d%dm0' % (delay)] = {
+                **params['hrl_v4-021'],
+                'delay': delay,
+                'action_mem': 0
+        }
+
+    params['hrl_v4-022'] = { # Let's see what happens at one of the extreme.
+            **params['hrl_v4-017'],
+            'cnet_structure': [30,30],
+            'snet_structure': [],
+            'num_options': 5
+    }
+    for delay in range(5):
+        params['hrl_v4-022-d%dm0' % (delay)] = {
+                **params['hrl_v4-022'],
+                'delay': delay,
+                'action_mem': 0
+        }
 
     # Params for debugging purposes
     params['debug'] = {
@@ -1592,8 +1655,8 @@ def run():
                         y.append(r[key])
                         count += 1
                 y = np.array(y).mean(axis=0)
-                #x,y = smooth_lines_gaussian(x,y,1)
                 x,y = smooth_lines_ema(x,y,0.2)
+                x,y = smooth_lines_gaussian(x,y,1)
                 plt.plot(x,y,label='%s (%d)'%(exp_name,count))
             plt.legend(loc='best')
             plt.grid(which='both')
@@ -1730,10 +1793,10 @@ def run():
         elif args.command == 'controller-dropout':
             #initial_checkpoint = args.initial_checkpoint
             checkpoint_dirs = [
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-017-d0m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-017-d1m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-017-d2m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-017-d3m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-022-d0m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-022-d1m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-022-d2m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-022-d3m0',
 
                     #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d0m0',
                     #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d1m0',
@@ -1792,7 +1855,7 @@ def run():
                     x.append(results[exp_name][dropout_prob])
                     colours.append(colour)
             ax = plt.subplot(111)
-            bplot = ax.boxplot(x,labels=labels,vert=False,patch_artist=True,sym='|')
+            bplot = ax.boxplot(x,labels=labels,vert=False,patch_artist=True,sym='|',showmeans=True)
             for patch,c in zip(bplot['boxes'],colours):
                 patch.set_facecolor(c)
             plt.subplots_adjust(left=0.4)
