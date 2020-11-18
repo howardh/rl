@@ -55,12 +55,14 @@ class PolicyFunctionAugmentatedState(torch.nn.Module):
         x = torch.cat([state,a],dim=1)
         return self.seq(x)
 
-class ConstantPolicyFunction():
+class ConstantPolicyFunction(torch.nn.Module):
     def __init__(self, output=None, output_size=None):
+        super().__init__()
         if output_size is None:
             self.output = output
         else:
             self.output = torch.zeros([output_size])
             self.output[output] = 1
-    def forward(self, *args, **kwargs):
-        return self.output
+    def forward(self, x, *args, **kwargs):
+        batch_size = x.shape[0]
+        return torch.stack([self.output for _ in range(batch_size)])

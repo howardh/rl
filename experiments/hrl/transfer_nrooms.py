@@ -13,7 +13,7 @@ import shelve
 from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3, HRLAgent_v4
 from agent.policy import get_greedy_epsilon_policy
 
-from .model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
+from .model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState, ConstantPolicyFunction
 from .long_trial import plot
 
 import utils
@@ -140,6 +140,7 @@ def create_agent(agent_name, env, device, seed, **agent_params):
 
     gamma = agent_params.pop('gamma',0.9)
     eps_b = agent_params.pop('eps_b',0.05)
+    num_actions = agent_params.pop('num_actions',4)
     num_options = agent_params.pop('num_options',3)
     min_replay_buffer_size = agent_params.pop('min_replay_buffer_size',1000)
     batch_size = agent_params.pop('batch_size',256)
@@ -343,6 +344,16 @@ def create_agent(agent_name, env, device, seed, **agent_params):
         qnet_structure = agent_params.pop(
                 'qnet_structure',None)
         action_mem = agent_params.pop('action_mem',0)
+        constant_subpolicies = agent_params.pop('constant_subpolicies',False)
+        if constant_subpolicies:
+            subpolicy_nets=[ConstantPolicyFunction(
+                output_size=num_actions,output=i)
+                for i in range(num_actions)]
+            assert num_actions == num_options
+        else:
+            subpolicy_nets=[PolicyFunction(
+                layer_sizes=snet_structure,input_size=4)
+                for _ in range(num_options)]
         agent = HRLAgent_v4(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
@@ -362,9 +373,7 @@ def create_agent(agent_name, env, device, seed, **agent_params):
                 controller_net=PolicyFunction(
                     layer_sizes=cnet_structure,
                     input_size=4+4*action_mem,output_size=num_options),
-                subpolicy_nets=[PolicyFunction(
-                    layer_sizes=snet_structure,input_size=4)
-                    for _ in range(num_options)],
+                subpolicy_nets=subpolicy_nets,
                 q_net=QFunction(layer_sizes=qnet_structure,
                     input_size=4,output_size=4),
                 seed=seed,
@@ -1566,6 +1575,19 @@ def get_experiment_params(directory):
     for delay in range(5):
         params['hrl_v4-022-d%dm0' % (delay)] = {
                 **params['hrl_v4-022'],
+                'delay': delay,
+                'action_mem': 0
+        }
+
+    params['hrl_v4-023'] = { # Found a bug. I was still using the v2 training code, meaning that the controller policy wasn't being trained at all. That explains why there was no difference between dropout rates.
+            **params['hrl_v4-017'],
+            'cnet_structure': [30,30],
+            'snet_structure': [],
+            'num_options': 5
+    }
+    for delay in range(5):
+        params['hrl_v4-023-d%dm0' % (delay)] = {
+                **params['hrl_v4-023'],
                 'delay': delay,
                 'action_mem': 0
         }

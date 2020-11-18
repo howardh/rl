@@ -1016,7 +1016,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
         elif self.algorithm == 'actor-critic-v2':
             self.train_actor_critic_v2(batch_size,iterations)
         elif self.algorithm == 'actor-critic-v3':
-            self.train_actor_critic_v2(batch_size,iterations)
+            self.train_actor_critic_v3(batch_size,iterations)
     def train_actor_critic(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
@@ -1230,7 +1230,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
                     delta = (q0-action_probs*q0).detach()
                 elif self.ac_variant == 'q':
                     delta = (action_probs*q0).detach()
-                actor_loss = option_probs[:,sp_idx]*action_probs*delta
+                actor_loss = option_probs[:,sp_idx].view(-1,1)*action_probs*delta
                 actor_loss = actor_loss.sum(1)
                 actor_loss = actor_loss.mean()
                 actor_loss.backward() # Accumulate gradients
