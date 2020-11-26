@@ -1017,6 +1017,8 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             self.train_actor_critic_v2(batch_size,iterations)
         elif self.algorithm == 'actor-critic-v3':
             self.train_actor_critic_v3(batch_size,iterations)
+        elif self.algorithm == 'actor-critic-v4':
+            self.train_actor_critic_v4(batch_size,iterations)
     def train_actor_critic(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
@@ -1184,6 +1186,60 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
                 p1.data = (1-tau)*p1+tau*p2
     def train_actor_critic_v3(self,batch_size=2,iterations=1):
         # Actor critic, with Q function learned off-policy
+        # No hierarchy, and the policy is learned via RL
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = self.get_dataloader(batch_size)
+        gamma = self.discount_factor
+        tau = self.polyak_rate
+        actor_optimizer = self.actor_optimizer
+        critic_optimizer = self.critic_optimizer
+        for i,((s0a,s0,m0),a0,r1,(s1a,s1,m1),t) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0a = s0a.float().to(self.device)   # State at which the subpolicy was chosen (augmented)
+            s0 = s0.float().to(self.device)     # State at which the subpolicy was chosen (not augmented)
+            m0 = m0.float().to(self.device)     # 1 if s0a exists, and 0 otherwise
+            a0 = a0.to(self.device)             # Action drawn from chosen subpolicy
+            r1 = r1.float().to(self.device)     # Reward obtained for taking action a1 at state s1
+            s1a = s1a.float().to(self.device)   # State on which the subpolicy was applied (augmented)
+            s1 = s1.float().to(self.device)     # State on which the subpolicy was applied (not augmented)
+            m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
+            t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
+            temp = self.target_temp             # Temperature
+            
+            # Update Q function
+            qs0a0_pred = self.q_net(s0)[range(batch_size),a0.squeeze()]
+            qs0a0_target = (r1+gamma*self.q_net_target(s1).max(1)[0]*(1-t)).detach()
+            critic_optimizer.zero_grad()
+            critic_loss = ((qs0a0_target-qs0a0_pred)**2).mean()
+            critic_loss.backward()
+            critic_optimizer.step()
+
+            # Update policy
+            actor_optimizer.zero_grad()
+
+            q0 = self.q_net(s0) # batch size * # actions
+            log_probs = self.subpolicy_nets[0](s0,temp,log=True) # log_prob.shape = batch size * # actions
+            action_probs = torch.exp(log_probs) # batch size * # actions
+            delta = None # batch size * # actions
+            if self.ac_variant == 'advantage':
+                delta = (q0-(action_probs*q0).sum(1).view(-1,1)).detach()
+            elif self.ac_variant == 'q':
+                delta = q0.detach()
+            actor_loss = -log_probs*delta*(action_probs.detach())
+            actor_loss = actor_loss.sum(1)
+            actor_loss = actor_loss.mean()
+            actor_loss.backward() # Accumulate gradients
+
+            actor_optimizer.step()
+
+            # Update target weights
+            params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]
+            for p1,p2 in itertools.chain.from_iterable(params):
+                p1.data = (1-tau)*p1+tau*p2
+    def train_actor_critic_v4(self,batch_size=2,iterations=1):
+        # Actor critic, with Q function learned off-policy
+        # With hierarchy
         if len(self.replay_buffer) < batch_size:
             return
         dataloader = self.get_dataloader(batch_size)
@@ -1222,15 +1278,15 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             subpolicy_log_probs = [sp(s0,temp,log=True) for sp in self.subpolicy_nets] # Log action prob for each subpolicy
             controller_log_probs = extras['controller_log_probs'] # batch size * # options
             option_probs = torch.exp(controller_log_probs).detach()
-            for sp_idx,log_prob in enumerate(subpolicy_log_probs):
+            for sp_idx,log_probs in enumerate(subpolicy_log_probs):
                 # log_prob.shape = batch size * # actions
-                action_probs = torch.exp(log_prob) # batch size * # actions
+                action_probs = torch.exp(log_probs) # batch size * # actions
                 delta = None # batch size * # actions
                 if self.ac_variant == 'advantage':
-                    delta = (q0-action_probs*q0).detach()
+                    delta = (q0-(action_probs*q0).sum(1).view(-1,1)).detach()
                 elif self.ac_variant == 'q':
-                    delta = (action_probs*q0).detach()
-                actor_loss = option_probs[:,sp_idx].view(-1,1)*action_probs*delta
+                    delta = q0.detach()
+                actor_loss = -log_probs*delta*(action_probs.detach())*option_probs[:,sp_idx].view(-1,1)
                 actor_loss = actor_loss.sum(1)
                 actor_loss = actor_loss.mean()
                 actor_loss.backward() # Accumulate gradients
@@ -1238,10 +1294,10 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             option_q0 = torch.stack([(torch.exp(log_prob)*q0).sum(1) for log_prob in subpolicy_log_probs],dim=1) # batch size * # options
             delta = None
             if self.ac_variant == 'advantage':
-                delta = (option_q0-option_probs*option_q0).detach()
+                delta = (option_q0-(option_probs*option_q0).sum(1).view(-1,1)).detach()
             elif self.ac_variant == 'q':
-                delta = (option_probs*option_q0).detach()
-            actor_loss = controller_log_probs*delta
+                delta = option_q0.detach()
+            actor_loss = -controller_log_probs*delta*(option_probs.detach())
             actor_loss = actor_loss.sum(1)
             actor_loss = actor_loss.mean()
             actor_loss.backward() # Accumulate gradients
@@ -1331,6 +1387,8 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
         elif self.algorithm == 'actor-critic-v2':
             return self.act_actor_critic_v2(testing)
         elif self.algorithm == 'actor-critic-v3':
+            return self.act_actor_critic_v2(testing) # Save as v2
+        elif self.algorithm == 'actor-critic-v4':
             return self.act_actor_critic_v2(testing) # Save as v2
     def act_actor_critic(self, testing=False):
         """

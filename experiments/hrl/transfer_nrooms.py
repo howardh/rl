@@ -1592,6 +1592,32 @@ def get_experiment_params(directory):
                 'action_mem': 0
         }
 
+    params['hrl_v4-024'] = { # Testing training only a flat policy again.
+            **params['hrl_v4-017'],
+            'snet_structure': [30,30],
+            'cnet_structure': [],
+            'num_options': 1,
+    }
+
+    params['hrl_v4-025'] = { # Same params, just different code as I'm trying to figure things out
+            **params['hrl_v4-024'],
+    } # Seems to be working well. I'm getting a lot of sub-100 step episodes.
+
+    params['hrl_v4-026'] = { # Another debugging run. Now with the code that trains multiple subpolicies.
+            **params['hrl_v4-025'],
+            'algorithm': 'actor-critic-v4'
+    }
+    # Seems to be working. Getting a few sub-100s.
+
+    params['hrl_v4-027'] = { # Another debugging run. Now with the code that trains multiple subpolicies.
+            **params['hrl_v4-026'],
+            'algorithm': 'actor-critic-v4',
+            'cnet_structure': [30,30],
+            'snet_structure': [],
+            'num_options': 4,
+    }
+
+
     # Params for debugging purposes
     params['debug'] = {
             **params['hrl_v4-001'],
@@ -1815,10 +1841,10 @@ def run():
         elif args.command == 'controller-dropout':
             #initial_checkpoint = args.initial_checkpoint
             checkpoint_dirs = [
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-022-d0m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-022-d1m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-022-d2m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-022-d3m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d0m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d1m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d2m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d3m0',
 
                     #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d0m0',
                     #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d1m0',
