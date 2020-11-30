@@ -519,6 +519,8 @@ class Experiment:
         self.results_file_path = None
         self.rewards = []
         self.state_action_values = []
+        self.training_state_values_1 = []
+        self.training_state_values_2 = []
         self.steps_to_reward = []
         self.eval_steps = []
         self.step_range = range(self.total_steps)
@@ -546,10 +548,14 @@ class Experiment:
             #    [r['state_action_values'] for r in test_results]))
             self.steps_to_reward.append(np.mean(
                 [r['steps'] for r in test_results]))
+            self.training_state_values_1.append(np.mean(self.agent.state_values_1))
+            self.training_state_values_2.append(np.mean(self.agent.state_values_2))
             self.eval_steps.append(self.steps)
             if self.verbose:
-                tqdm.write('steps %d \t Reward: %f \t Steps: %f' % (
-                    self.steps, self.rewards[-1], self.steps_to_reward[-1]))
+                tqdm.write('steps %d \t Reward: %f \t Steps: %f \t State values 1: %f \t State values 2: %f' % (
+                    self.steps, self.rewards[-1], self.steps_to_reward[-1], self.training_state_values_1[-1], self.training_state_values_2[-1]))
+                self.agent.state_values_1 = []
+                self.agent.state_values_2 = []
 
         self.before_step(self.steps)
         # Run step
@@ -602,6 +608,8 @@ class Experiment:
             'results_file_path': self.results_file_path,
             'rewards': self.rewards,
             'state_action_values': self.state_action_values,
+            'training_state_values_1': self.training_state_values_1,
+            'training_state_values_2': self.training_state_values_2,
             'steps_to_reward': self.steps_to_reward,
             'eval_steps': self.eval_steps,
             'steps': self.steps,
@@ -626,6 +634,8 @@ class Experiment:
         self.results_file_path = state['results_file_path']
         self.rewards = state['rewards']
         self.state_action_values = state['state_action_values']
+        self.training_state_values_1 = state['training_state_values_1']
+        self.training_state_values_2 = state['training_state_values_2']
         self.steps_to_reward = state['steps_to_reward']
         self.eval_steps = state['eval_steps']
         self.steps = state['steps']
@@ -1617,6 +1627,33 @@ def get_experiment_params(directory):
             'num_options': 4,
     }
 
+    # One run out of 10 managed to get decent performance. The others were all trash.
+    # Maybe the subpolicies aren't being learned well enough. I'll try using more subpolicies so there's a higher chance that there will be at least one associated with each primitive action.
+
+    params['hrl_v4-028'] = { # 
+            **params['hrl_v4-027'],
+            'num_options': 8,
+    }
+
+    # Did not improve much. 
+
+    params['hrl_v4-029'] = { # I need a point of comparison using the supervised learning results.
+            **params['hrl_v4-017'],
+            'algorithm': 'actor-critic-v2',
+            'snet_structure': [30,30],
+            'cnet_structure': [],
+            'num_options': 1,
+    }
+
+    params['hrl_v4-030'] = { # with the objective as `actor_loss = -q0*action_probs`
+            **params['hrl_v4-017'],
+            'algorithm': 'actor-critic-v3',
+            'snet_structure': [30,30],
+            'cnet_structure': [],
+            #'subpolicy_learning_rate': 1e-3,
+            'num_options': 1,
+    }
+
 
     # Params for debugging purposes
     params['debug'] = {
@@ -1698,11 +1735,13 @@ def run():
                 y = []
                 count = 0
                 for r in utils.get_all_results(directory):
-                    if len(r[key]) == 101:
+                    if key in r and len(r[key]) == 101:
                         x = r['eval_steps']
                         y.append(r[key])
                         count += 1
                 y = np.array(y).mean(axis=0)
+                x = np.array(x)[~np.isnan(y)]
+                y = y[~np.isnan(y)]
                 x,y = smooth_lines_ema(x,y,0.2)
                 x,y = smooth_lines_gaussian(x,y,1)
                 plt.plot(x,y,label='%s (%d)'%(exp_name,count))
@@ -1841,15 +1880,12 @@ def run():
         elif args.command == 'controller-dropout':
             #initial_checkpoint = args.initial_checkpoint
             checkpoint_dirs = [
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d0m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d1m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d2m0',
-                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d3m0',
+                    '/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-027',
 
-                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d0m0',
-                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d1m0',
-                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d2m0',
-                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-012-d3m0',
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d0m0',
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d1m0',
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d2m0',
+                    #'/miniscratch/huanghow/dev/experiments.hrl.transfer_nrooms/hrl_v4-023-d3m0',
 
                     #'/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d0m0',
                     #'/network/tmp1/huanghow/hrl-5/experiments.hrl.transfer_nrooms/hrl_v4-001-d1m0',

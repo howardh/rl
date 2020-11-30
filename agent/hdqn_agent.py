@@ -63,8 +63,6 @@ class HierarchicalPolicyNetwork(torch.nn.Module):
         action_probs = subpolicy_probabilities @ primitive_action_probabilities
         action_probs = action_probs.squeeze(1)
 
-        action_probs = primitive_action_probabilities[:,0,:] # DEBUG
-
         if extras:
             return action_probs, {
                     'controller_log_probs': self.log_softmax(controller_output),
@@ -980,8 +978,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             algorithm: 'q-learning', 'actor-critic', 'actor-critic-v2'
                 q-learning: Value-based learning using off-policy Q learning.
         """
-        super().__init__(**kwargs)
-
+        super().__init__(**kwargs) 
         self.behaviour_temp = behaviour_temp
         self.target_temp = target_temp
         self.algorithm = algorithm
@@ -1007,6 +1004,8 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
         self.action_counts = [[0]*4,[0]*4]
         self.option_counts = [[0]*num_options,[0]*num_options]
         self.total_grad = [[] for _ in range(5)] # gradient of each subpolicy
+        self.state_values_1 = []
+        self.state_values_2 = []
 
     def train(self,batch_size=2,iterations=1):
         if self.algorithm == 'q-learning':
@@ -1166,6 +1165,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
 
             # Update policy
             q0 = self.q_net(s0) # batch size * # actions
+            self.state_values_1.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
             ideal_policy = torch.zeros_like(q0)
             ideal_policy[range(batch_size),q0.max(1)[1]]=1
             pol_before = self.subpolicy_nets[0](s0,temp,log=False)
@@ -1175,6 +1175,8 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             actor_loss.backward()
             actor_optimizer.step()
             actor_loss_after = criterion(self.subpolicy_nets[0](s0,temp,log=True),q0.max(1)[1])
+
+            self.state_values_2.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
 
             #print((actor_loss_after-actor_loss).item(), '\t', actor_loss_after.item(), '\t', pol_before[0,:].detach(), ideal_policy[0,:], ideal_policy.mean(0))
             #print(diff_after)
@@ -1219,6 +1221,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             actor_optimizer.zero_grad()
 
             q0 = self.q_net(s0) # batch size * # actions
+            self.state_values_1.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
             log_probs = self.subpolicy_nets[0](s0,temp,log=True) # log_prob.shape = batch size * # actions
             action_probs = torch.exp(log_probs) # batch size * # actions
             delta = None # batch size * # actions
@@ -1226,10 +1229,13 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
                 delta = (q0-(action_probs*q0).sum(1).view(-1,1)).detach()
             elif self.ac_variant == 'q':
                 delta = q0.detach()
-            actor_loss = -log_probs*delta*(action_probs.detach())
+            #actor_loss = -log_probs*delta*(action_probs.detach())
+            actor_loss = -q0*action_probs
             actor_loss = actor_loss.sum(1)
             actor_loss = actor_loss.mean()
-            actor_loss.backward() # Accumulate gradients
+            actor_loss.backward()
+
+            self.state_values_2.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
 
             actor_optimizer.step()
 
@@ -1400,7 +1406,6 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
 
         obs0,obs1,mask = self.get_current_obs(testing)
 
-        # DEBUG (Test Q learning)
         action = self.q_net(obs1).squeeze().argmax().item()
         if testing:
             self.obs_stack_testing.append_action(action)
@@ -1473,12 +1478,15 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
 
         # Sample an action
         temp = self.target_temp if testing else self.behaviour_temp
-        action_probs,policy_net_output = self.policy_net(obs_aug,obs,mask,temp,temp,extras=True)
+        _,policy_net_output = self.policy_net(obs_aug,obs,mask,temp,temp,extras=True)
 
         # Sample a subpolicy
         subpolicy_probs = policy_net_output['subpolicy_probabilities'].squeeze().detach().numpy()
         subpolicy_probs = subpolicy_probs.reshape(-1) # In case there's only one subpolicy
         subpolicy_choice = self.rand.choice(len(subpolicy_probs),p=subpolicy_probs)
+
+        #self.current_action = subpolicy_choice # DEBUG: One action per subpolicy
+        #action = subpolicy_choice
 
         # Sample action from chosen subpolicy
         action_probs = policy_net_output['primitive_action_probabilities'][0,subpolicy_choice,:].detach().numpy() # policy_net_output['primitive_action_probabilities'] has shape [1 * # options * # primitive actions]
