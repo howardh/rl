@@ -345,6 +345,7 @@ def create_agent(agent_name, env, device, seed, **agent_params):
                 'qnet_structure',None)
         action_mem = agent_params.pop('action_mem',0)
         constant_subpolicies = agent_params.pop('constant_subpolicies',False)
+        train_iterations_per_step = agent_params.pop('train_iterations_per_step',1)
         if constant_subpolicies:
             subpolicy_nets=[ConstantPolicyFunction(
                 output_size=num_actions,output=i)
@@ -357,6 +358,7 @@ def create_agent(agent_name, env, device, seed, **agent_params):
         agent = HRLAgent_v4(
                 action_space=env.action_space,
                 observation_space=env.observation_space,
+                subpolicy_learning_rate=subpolicy_learning_rate,
                 controller_learning_rate=controller_learning_rate,
                 q_net_learning_rate=q_net_learning_rate,
                 discount_factor=gamma,
@@ -383,7 +385,7 @@ def create_agent(agent_name, env, device, seed, **agent_params):
             pass
         def after_step(steps):
             if steps >= min_replay_buffer_size:
-                agent.train(batch_size=batch_size,iterations=1)
+                agent.train(batch_size=batch_size,iterations=train_iterations_per_step)
 
     if len(agent_params) > 0:
         raise Exception('Unused agent parameters: %s' % agent_params.keys())
@@ -518,11 +520,12 @@ class Experiment:
 
         self.results_file_path = None
         self.rewards = []
-        self.state_action_values = []
+        self.testing_state_action_values = []
         self.training_state_values_1 = []
         self.training_state_values_2 = []
         self.steps_to_reward = []
         self.eval_steps = []
+        self.logs = defaultdict(lambda: [])
         self.step_range = range(self.total_steps)
         self.done = True
 
@@ -544,16 +547,26 @@ class Experiment:
                     self.test_env, self.test_iters, render=False, processors=1)
             self.rewards.append(np.mean(
                 [r['total_rewards'] for r in test_results]))
-            #self.state_action_values.append(np.mean(
-            #    [r['state_action_values'] for r in test_results]))
+            self.testing_state_action_values.append(np.mean(
+                [r['state_action_values'] for r in test_results]))
             self.steps_to_reward.append(np.mean(
                 [r['steps'] for r in test_results]))
             self.training_state_values_1.append(np.mean(self.agent.state_values_1))
             self.training_state_values_2.append(np.mean(self.agent.state_values_2))
+            for k,v in self.agent.debug.items():
+                self.logs[k].append(np.mean(v))
+                self.agent.debug[k] = []
             self.eval_steps.append(self.steps)
             if self.verbose:
-                tqdm.write('steps %d \t Reward: %f \t Steps: %f \t State values 1: %f \t State values 2: %f' % (
-                    self.steps, self.rewards[-1], self.steps_to_reward[-1], self.training_state_values_1[-1], self.training_state_values_2[-1]))
+                tqdm.write('steps %d \t Reward: %f \t Steps: %f \t State values: %f \t Testing state values: %f\t%.2e\t%.2e\t Poldiff1: %f\tconst: %f\t%f\t%.2e' % (
+                    self.steps, self.rewards[-1], self.steps_to_reward[-1], self.training_state_values_1[-1], self.testing_state_action_values[-1],
+                    self.logs['q_diff_diff'][-1] if 'q_diff_diff' in self.logs else np.nan,
+                    self.logs['grad_snet0'][-1] if 'grad_snet0' in self.logs else np.nan,
+                    self.logs['policy_diff_1'][-1] if 'policy_diff_1' in self.logs else np.nan,
+                    self.logs['policy_is_constant'][-1] if 'policy_is_constant' in self.logs else np.nan,
+                    self.logs['policy_entropy'][-1] if 'policy_entropy' in self.logs else np.nan,
+                    self.logs['l2_loss'][-1] if 'l2_loss' in self.logs else np.nan,
+                ))
                 self.agent.state_values_1 = []
                 self.agent.state_values_2 = []
 
@@ -607,7 +620,7 @@ class Experiment:
             'agent_state': self.agent.state_dict(),
             'results_file_path': self.results_file_path,
             'rewards': self.rewards,
-            'state_action_values': self.state_action_values,
+            'testing_state_action_values': self.testing_state_action_values,
             'training_state_values_1': self.training_state_values_1,
             'training_state_values_2': self.training_state_values_2,
             'steps_to_reward': self.steps_to_reward,
@@ -616,7 +629,9 @@ class Experiment:
             'env': self.env.state_dict(),
             'test_env': self.test_env.state_dict(),
             'env_steps': self.env._elapsed_steps,
-            'done': self.done
+            'done': self.done,
+            'log_keys': list(self.logs.keys()),
+            **self.logs
         }
 
     def load_state_dict(self, state):
@@ -633,10 +648,13 @@ class Experiment:
         # Experiment progress
         self.results_file_path = state['results_file_path']
         self.rewards = state['rewards']
-        self.state_action_values = state['state_action_values']
+        self.testing_state_action_values = state['testing_state_action_values']
         self.training_state_values_1 = state['training_state_values_1']
         self.training_state_values_2 = state['training_state_values_2']
         self.steps_to_reward = state['steps_to_reward']
+        log_keys = state['log_keys']
+        for k in log_keys:
+            self.logs[k] = state[k]
         self.eval_steps = state['eval_steps']
         self.steps = state['steps']
         self.step_range = range(self.steps,self.total_steps)
@@ -1650,8 +1668,59 @@ def get_experiment_params(directory):
             'algorithm': 'actor-critic-v3',
             'snet_structure': [30,30],
             'cnet_structure': [],
+            'num_options': 1,
+    }
+
+    params['hrl_v4-031'] = { # With the "correct" objective
+            **params['hrl_v4-017'],
+            'algorithm': 'actor-critic-v3',
+            'ac_variant': 'q',
+            'snet_structure': [30,30],
+            'cnet_structure': [],
             #'subpolicy_learning_rate': 1e-3,
             'num_options': 1,
+    }
+
+    params['hrl_v4-032'] = { # Using `delta = qs0a0_pred.detach()` and `actor_loss = -log_probs*delta`
+            **params['hrl_v4-031'],
+    }
+
+    params['hrl_v4-033'] = { # How does it work with advantage?
+            **params['hrl_v4-032'],
+            'ac_variant': 'advantage',
+    }
+
+    # I forgot to save the code changes
+
+    params['hrl_v4-034'] = { #
+            **params['hrl_v4-032'],
+    }
+    params['hrl_v4-035'] = { #
+            **params['hrl_v4-033'],
+    }
+
+    params['hrl_v4-036'] = { # What if I increase the number of training iterations per step
+            **params['hrl_v4-034'],
+            'train_iterations_per_step': 2
+    }
+    for i in range(10):
+        params['hrl_v4-036-%d'%i] = {
+                **params['hrl_v4-034'],
+                'train_iterations_per_step': i
+        }
+
+    params['hrl_v4-037'] = {
+            **params['hrl_v4-034'],
+            'algorithm': 'actor-critic-v5'
+    }
+
+    params['hrl_v4-038'] = {
+            **params['hrl_v4-034'],
+            'algorithm': 'actor-critic-v6',
+            'subpolicy_learning_rate': 5e-4,
+            'temp_b': 1,
+            'temp_t': 1,
+            'train_iterations_per_step': 2,
     }
 
 
@@ -1734,13 +1803,19 @@ def run():
                 x = None
                 y = []
                 count = 0
-                for r in utils.get_all_results(directory):
-                    if key in r and len(r[key]) == 101:
+                max_len = 0
+                for r in tqdm(utils.get_all_results(directory)):
+                    print(r.keys())
+                    if key in r and len(r[key]) >= max_len:
+                        if len(r[key]) > max_len:
+                            max_len = len(r[key])
+                            y = []
+                            count = 0
                         x = r['eval_steps']
                         y.append(r[key])
                         count += 1
                 y = np.array(y).mean(axis=0)
-                x = np.array(x)[~np.isnan(y)]
+                x = np.array(x[-max_len:])[~np.isnan(y)]
                 y = y[~np.isnan(y)]
                 x,y = smooth_lines_ema(x,y,0.2)
                 x,y = smooth_lines_gaussian(x,y,1)

@@ -1,4 +1,4 @@
-from collections import deque
+from collections import deque, defaultdict
 import numpy as np
 from tqdm import tqdm
 import torch
@@ -277,6 +277,8 @@ class HDQNAgentWithDelayAC(Agent):
         self.polyak_rate = polyak_rate
         self.behaviour_epsilon = behaviour_epsilon
         self.device = device
+        self.subpolicy_learning_rate = subpolicy_learning_rate
+        self.controller_learning_rate = controller_learning_rate
 
         self.rand = np.random.RandomState(seed)
         self.generator = torch.Generator()
@@ -472,7 +474,7 @@ class HDQNAgentWithDelayAC(Agent):
         self.observe_change(obs,testing=True)
         for steps in itertools.count():
             action = self.act(testing=True)
-            #sa_vals.append(self.get_state_action_value(self.current_obs_testing,action))
+            sa_vals.append(self.get_state_action_value(self.obs_stack_testing.get(0,0),action))
             obs, reward, done, _ = env.step(action)
             self.observe_change(obs,reward,testing=True)
             reward_sum += reward
@@ -482,7 +484,7 @@ class HDQNAgentWithDelayAC(Agent):
                 break
         return {
             'total_rewards': reward_sum,
-            #'state_action_values': np.mean(sa_vals),
+            'state_action_values': np.mean(sa_vals),
             'steps': steps
         }
 
@@ -1003,9 +1005,10 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
         num_options = len(self.subpolicy_nets)
         self.action_counts = [[0]*4,[0]*4]
         self.option_counts = [[0]*num_options,[0]*num_options]
-        self.total_grad = [[] for _ in range(5)] # gradient of each subpolicy
+        self.total_grad = [[] for _ in range(num_options)] # gradient of each subpolicy
         self.state_values_1 = []
         self.state_values_2 = []
+        self.debug = defaultdict(lambda: [])
 
     def train(self,batch_size=2,iterations=1):
         if self.algorithm == 'q-learning':
@@ -1018,6 +1021,10 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             self.train_actor_critic_v3(batch_size,iterations)
         elif self.algorithm == 'actor-critic-v4':
             self.train_actor_critic_v4(batch_size,iterations)
+        elif self.algorithm == 'actor-critic-v5':
+            self.train_actor_critic_v5(batch_size,iterations)
+        elif self.algorithm == 'actor-critic-v6':
+            self.train_actor_critic_v6(batch_size,iterations)
     def train_actor_critic(self,batch_size=2,iterations=1):
         if len(self.replay_buffer) < batch_size:
             return
@@ -1118,6 +1125,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
             t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
             temp = self.target_temp             # Temperature
+            batch_size = s0a.shape[0]
             
             # Update Q function
             qs0a0_pred = self.q_net(s0)[range(batch_size),a0.squeeze()]
@@ -1154,6 +1162,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
             t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
             temp = self.target_temp             # Temperature
+            batch_size = s0a.shape[0]
             
             # Update Q function
             qs0a0_pred = self.q_net(s0)[range(batch_size),a0.squeeze()]
@@ -1177,10 +1186,10 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             actor_loss_after = criterion(self.subpolicy_nets[0](s0,temp,log=True),q0.max(1)[1])
 
             self.state_values_2.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
-
-            #print((actor_loss_after-actor_loss).item(), '\t', actor_loss_after.item(), '\t', pol_before[0,:].detach(), ideal_policy[0,:], ideal_policy.mean(0))
-            #print(diff_after)
-            #breakpoint()
+            self.debug['ideal_q'].append(q0.max(1)[0].mean(0).item())
+            self.debug['q_diff_1'].append(self.debug['ideal_q'][-1]-self.state_values_1[-1])
+            self.debug['q_diff_2'].append(self.debug['ideal_q'][-1]-self.state_values_2[-1])
+            self.debug['q_diff_diff'].append(self.debug['q_diff_1'][-1]-self.debug['q_diff_2'][-1])
 
             # Update target weights
             params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]
@@ -1208,6 +1217,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
             t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
             temp = self.target_temp             # Temperature
+            batch_size = s0a.shape[0]
             
             # Update Q function
             qs0a0_pred = self.q_net(s0)[range(batch_size),a0.squeeze()]
@@ -1226,13 +1236,16 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             action_probs = torch.exp(log_probs) # batch size * # actions
             delta = None # batch size * # actions
             if self.ac_variant == 'advantage':
-                delta = (q0-(action_probs*q0).sum(1).view(-1,1)).detach()
+                #delta = (q0-(action_probs*q0).sum(1).view(-1,1)).detach()
+                delta = (qs0a0_pred-(action_probs*q0).sum(1)).detach()
             elif self.ac_variant == 'q':
-                delta = q0.detach()
+                #delta = q0.detach()
+                delta = qs0a0_pred.detach()
             #actor_loss = -log_probs*delta*(action_probs.detach())
-            actor_loss = -q0*action_probs
-            actor_loss = actor_loss.sum(1)
-            actor_loss = actor_loss.mean()
+            log_probs = log_probs[range(batch_size),a0.squeeze()]
+            actor_loss = -log_probs*delta
+            #actor_loss = actor_loss.sum(1)
+            actor_loss = actor_loss.mean(0)
             actor_loss.backward()
 
             self.state_values_2.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
@@ -1265,6 +1278,7 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
             t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
             temp = self.target_temp             # Temperature
+            batch_size = s0a.shape[0]
             
             # Update Q function
             qs0a0_pred = self.q_net(s0)[range(batch_size),a0.squeeze()]
@@ -1309,6 +1323,163 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             actor_loss.backward() # Accumulate gradients
 
             actor_optimizer.step()
+
+            # Update target weights
+            params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]
+            for p1,p2 in itertools.chain.from_iterable(params):
+                p1.data = (1-tau)*p1+tau*p2
+    def train_actor_critic_v5(self,batch_size=2,iterations=1):
+        # Actor critic, with Q function learned off-policy
+        # Optimize for expected return
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = self.get_dataloader(batch_size)
+        gamma = self.discount_factor
+        tau = self.polyak_rate
+        actor_optimizer = self.actor_optimizer
+        critic_optimizer = self.critic_optimizer
+        for i,((s0a,s0,m0),a0,r1,(s1a,s1,m1),t) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0a = s0a.float().to(self.device)   # State at which the subpolicy was chosen (augmented)
+            s0 = s0.float().to(self.device)     # State at which the subpolicy was chosen (not augmented)
+            m0 = m0.float().to(self.device)     # 1 if s0a exists, and 0 otherwise
+            a0 = a0.to(self.device)             # Action drawn from chosen subpolicy
+            r1 = r1.float().to(self.device)     # Reward obtained for taking action a1 at state s1
+            s1a = s1a.float().to(self.device)   # State on which the subpolicy was applied (augmented)
+            s1 = s1.float().to(self.device)     # State on which the subpolicy was applied (not augmented)
+            m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
+            t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
+            temp = self.target_temp             # Temperature
+            batch_size = s0a.shape[0]
+            
+            # Update Q function
+            qs0a0_pred = self.q_net(s0)[range(batch_size),a0.squeeze()]
+            qs0a0_target = (r1+gamma*self.q_net_target(s1).max(1)[0]*(1-t)).detach()
+            critic_optimizer.zero_grad()
+            critic_loss = ((qs0a0_target-qs0a0_pred)**2).mean()
+            critic_loss.backward()
+            critic_optimizer.step()
+
+            # Update policy
+            actor_optimizer.zero_grad()
+
+            q0 = self.q_net(s0) # batch size * # actions
+            ideal_policy = torch.zeros_like(q0)
+            ideal_policy[range(batch_size),q0.max(1)[1]]=1
+
+            self.state_values_1.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
+            log_probs = self.subpolicy_nets[0](s0,temp,log=True) # log_prob.shape = batch size * # actions
+            action_probs = torch.exp(log_probs) # batch size * # actions
+            self.debug['policy_diff_1'].append(((action_probs-ideal_policy)**2).sum(1).mean(0).item())
+            actor_loss = -action_probs*(q0.detach())
+            actor_loss = actor_loss.sum(1)
+            actor_loss = actor_loss.mean(0)
+            actor_loss.backward()
+
+            self.state_values_2.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
+            self.debug['ideal_q'].append(q0.max(1)[0].mean(0).item())
+            self.debug['q_diff_1'].append(self.debug['ideal_q'][-1]-self.state_values_1[-1])
+            self.debug['q_diff_2'].append(self.debug['ideal_q'][-1]-self.state_values_2[-1])
+            self.debug['q_diff_diff'].append(self.debug['q_diff_1'][-1]-self.debug['q_diff_2'][-1])
+
+            action_probs = self.subpolicy_nets[0](s0,temp,log=False) # log_prob.shape = batch size * # actions
+            self.debug['policy_diff_2'].append(((action_probs-ideal_policy)**2).sum(1).mean(0).item())
+
+            actor_optimizer.step()
+
+            # Update target weights
+            params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]
+            for p1,p2 in itertools.chain.from_iterable(params):
+                p1.data = (1-tau)*p1+tau*p2
+    def train_actor_critic_v6(self,batch_size=2,iterations=1):
+        # Actor critic, with Q function learned off-policy
+        # Optimize for expected return using advantage AC
+        if len(self.replay_buffer) < batch_size:
+            return
+        dataloader = self.get_dataloader(batch_size)
+        gamma = self.discount_factor
+        tau = self.polyak_rate
+        actor_optimizer = self.actor_optimizer
+        critic_optimizer = self.critic_optimizer
+        for i,((s0a,s0,m0),a0,r1,(s1a,s1,m1),t) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0a = s0a.float().to(self.device)   # State at which the subpolicy was chosen (augmented)
+            s0 = s0.float().to(self.device)     # State at which the subpolicy was chosen (not augmented)
+            m0 = m0.float().to(self.device)     # 1 if s0a exists, and 0 otherwise
+            a0 = a0.to(self.device)             # Action drawn from chosen subpolicy
+            r1 = r1.float().to(self.device)     # Reward obtained for taking action a1 at state s1
+            s1a = s1a.float().to(self.device)   # State on which the subpolicy was applied (augmented)
+            s1 = s1.float().to(self.device)     # State on which the subpolicy was applied (not augmented)
+            m1 = m1.float().to(self.device)     # 1 if s1a exists, and 0 otherwise
+            t = t.float().to(self.device)       # 1 if s1 is a terminal state, 0 otherwise
+            temp = self.target_temp             # Temperature
+            batch_size = s0a.shape[0]
+            
+            # Update Q function
+            qs0a0_pred = self.q_net(s0)[range(batch_size),a0.squeeze()]
+            qs0a0_target = (r1+gamma*self.q_net_target(s1).max(1)[0]*(1-t)).detach()
+            critic_optimizer.zero_grad()
+            critic_loss = ((qs0a0_target-qs0a0_pred)**2).mean()
+            critic_loss.backward()
+            critic_optimizer.step()
+
+            # Update policy
+            actor_optimizer.zero_grad()
+
+            q0 = self.q_net(s0).detach() # batch size * # actions
+            ideal_policy = torch.zeros_like(q0)
+            ideal_policy[range(batch_size),q0.max(1)[1]]=1
+            self.debug['ideal_policy_entropy'].append(
+                -(torch.log(ideal_policy.sum(0)/ideal_policy.sum())*ideal_policy.sum(0)/ideal_policy.sum()).sum().item()
+            )
+
+            self.state_values_1.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
+            log_probs = self.subpolicy_nets[0](s0,temp,log=True) # log_prob.shape = batch size * # actions
+            action_probs = torch.exp(log_probs) # batch size * # actions
+            expected_q0 = (action_probs*q0).sum(1).view(-1,1).detach()
+
+            self.debug['policy_diff_1'].append(((action_probs-ideal_policy)**2).sum(1).mean(0).item())
+            self.debug['policy_entropy'].append(
+                -(torch.log(action_probs.sum(0)/action_probs.sum())*action_probs.sum(0)/action_probs.sum()).nansum().item()
+            )
+            self.debug['policy_is_constant'].append((action_probs.sum(0)==0).sum().item()==3)
+
+            actor_loss = -log_probs*(q0-expected_q0)
+            #actor_loss = actor_loss.sum(1)
+            actor_loss = actor_loss[range(batch_size),a0.squeeze()]
+            actor_loss = actor_loss.mean(0)
+
+            l2_loss = 0
+            l2_count = 0
+            l2_weight = 1e-3
+            for p in self.subpolicy_nets[0].parameters():
+                l2_loss += (p**2).sum()
+                l2_count += p.flatten().shape[0]
+            l2_loss /= l2_count
+            actor_loss += l2_weight*l2_loss
+            self.debug['l2_loss'].append(l2_loss.item())
+
+            actor_loss.backward()
+            actor_optimizer.step()
+
+            g = 0
+            for p in self.subpolicy_nets[0].parameters():
+                g += p.grad.abs().sum().item()
+                #with torch.no_grad():
+                #    p -= self.subpolicy_learning_rate*p.grad
+            self.debug['grad_snet0'].append(g)
+
+            #if g > 10000:
+            #    breakpoint()
+
+            self.state_values_2.append((q0*self.subpolicy_nets[0](s0,temp,log=False)).sum(1).mean().item())
+            self.debug['ideal_q'].append(q0.max(1)[0].mean(0).item())
+            self.debug['q_diff_1'].append(self.debug['ideal_q'][-1]-self.state_values_1[-1])
+            self.debug['q_diff_2'].append(self.debug['ideal_q'][-1]-self.state_values_2[-1])
+            self.debug['q_diff_diff'].append(self.debug['q_diff_1'][-1]-self.debug['q_diff_2'][-1])
+
+            action_probs = self.subpolicy_nets[0](s0,temp,log=False) # log_prob.shape = batch size * # actions
+            self.debug['policy_diff_2'].append(((action_probs-ideal_policy)**2).sum(1).mean(0).item())
 
             # Update target weights
             params = [zip(self.q_net_target.parameters(), self.q_net.parameters())]
@@ -1394,7 +1565,8 @@ class HRLAgent_v4(HDQNAgentWithDelayAC):
             return self.act_actor_critic_v2(testing)
         elif self.algorithm == 'actor-critic-v3':
             return self.act_actor_critic_v2(testing) # Save as v2
-        elif self.algorithm == 'actor-critic-v4':
+        #elif self.algorithm == 'actor-critic-v4':
+        else:
             return self.act_actor_critic_v2(testing) # Save as v2
     def act_actor_critic(self, testing=False):
         """
