@@ -367,6 +367,7 @@ def create_agent(agent_name, env, device, seed, **agent_params):
                 behaviour_epsilon=None,
                 behaviour_temp=agent_params.pop('temp_b',0.01),
                 target_temp=agent_params.pop('temp_t',0.01),
+                l2_weight=agent_params.pop('l2_weight',1e-3),
                 replay_buffer_size=replay_buffer_size,
                 delay_steps=delay,
                 action_mem=action_mem,
@@ -583,7 +584,7 @@ class Experiment:
     def run(self):
         if self.verbose:
             pprint.pprint(self.args)
-            step_range = tqdm(range(self.total_steps), total=self.total_steps, initial=self.step_range.start)
+            step_range = tqdm(range(self.step_range.start,self.total_steps), total=self.total_steps, initial=self.step_range.start)
         try:
             for self.steps in step_range:
                 self.run_step()
@@ -1282,7 +1283,7 @@ def compute_subpolicy_boundaries(agent, shape=[10,10], goal=None):
 # Execution
 ##################################################
 
-def get_experiment_params(directory):
+def get_experiment_params(directory, *args):
     params = {}
     params['ac-001'] = {
         'agent_name': 'ActorCritic',
@@ -1721,8 +1722,190 @@ def get_experiment_params(directory):
             'temp_b': 1,
             'temp_t': 1,
             'train_iterations_per_step': 2,
+            'l2_weight': 1e-3,
     }
 
+    params['hrl_v4-039'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v6',
+            'subpolicy_learning_rate': 1e-3,
+    } # Diverges 2/10 times
+
+    params['hrl_v4-040'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v6',
+            'subpolicy_learning_rate': 1e-2,
+    } # This one diverges 9/10 times
+
+    params['hrl_v4-041'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v6',
+            'train_iterations_per_step': 3,
+    } # Diverges 1/10 times
+
+    params['hrl_v4-042'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v6',
+            'subpolicy_learning_rate': 1e-3,
+            'l2_weight': 1e-2,
+    }
+
+    params['hrl_v4-043'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v6',
+            'subpolicy_learning_rate': 1e-2,
+            'l2_weight': 1e-2,
+    } # All diverged
+
+    params['hrl_v4-044'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v6',
+            'subpolicy_learning_rate': 1e-2,
+            'l2_weight': 1e-0,
+    } # All diverged
+
+    params['hrl_v4-045'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v6',
+            'subpolicy_learning_rate': 1e-2,
+            'l2_weight': 1e-5,
+    } # Diverged 4/10 times
+
+    params['hrl_v4-046'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v7',
+    }
+    params['hrl_v4-047'] = {
+            **params['hrl_v4-038'],
+            'algorithm': 'actor-critic-v7',
+            'subpolicy_learning_rate': 1e-3,
+            'train_iterations_per_step': 1,
+            'l2_weight': 0,
+    }
+    params['hrl_v4-048'] = {
+            **params['hrl_v4-047'],
+            'algorithm': 'actor-critic-v8',
+    }
+    params['hrl_v4-049'] = {
+            **params['hrl_v4-048'],
+            'subpolicy_learning_rate': 1e-4,
+    }
+    params['hrl_v4-050'] = {
+            **params['hrl_v4-047'],
+            'algorithm': 'actor-critic-v9',
+            'train_iterations_per_step': 5,
+    }
+    params['hrl_v4-051-debug'] = { # Clip [0,1]
+            **params['hrl_v4-047'],
+            'algorithm': 'actor-critic-v9',
+            'train_iterations_per_step': 1,
+    }
+    params['hrl_v4-051-debug-1'] = { # Clip [-0.01,1]
+            **params['hrl_v4-051-debug'],
+    }
+    params['hrl_v4-051-debug-2'] = { # Clip [0,1]
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    }
+    params['hrl_v4-051-debug-3'] = { # Unclipped
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    }
+    params['hrl_v4-051-debug-4'] = { # Clipped below only at 0
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    }
+    params['hrl_v4-051-debug-5'] = { # Clipped below only at -0.01
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    }
+    params['hrl_v4-051-debug-6'] = { # Clipped below only at -0.05
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    } # 1/10 diverged
+    params['hrl_v4-051-debug-7'] = { # Clipped below only at -0.03
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    } # 4/10 diverged
+    params['hrl_v4-051-debug-8'] = { # Clipped below only at -0.02
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    }
+    params['hrl_v4-051-debug-9'] = { # Clipped below only at -0.02, and added a constant of 0.02
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    }
+    params['hrl_v4-051-debug-10'] = { # Clipped below only at -0.05, and added a constant of 0.05
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 4e-3,
+    }
+    params['hrl_v4-051-debug-11'] = { # Normalized between [0,1] so that 
+            **params['hrl_v4-051-debug'],
+            'subpolicy_learning_rate': 1e-3,
+    }
+
+    params['hrl_v4-052'] = {
+            **params['hrl_v4-049'],
+            'algorithm': 'actor-critic-v10',
+            'subpolicy_learning_rate': 4e-3,
+    }
+
+    params['hrl_v4-053'] = {
+            **params['hrl_v4-052'],
+            'ac_variant': 'advantage',
+    }
+
+    params['hrl_v4-054'] = {
+            **params['hrl_v4-053'],
+            'ac_variant': 'advantage',
+            'num_options': 2,
+    }
+
+    params['hrl_v4-055'] = {
+            **params['hrl_v4-054'],
+            'num_options': 2,
+            'snet_structure': [20,20],
+    }
+
+    params['hrl_v4-056'] = {
+            **params['hrl_v4-054'],
+            'num_options': 2,
+            'snet_structure': [15,15],
+    }
+
+    params['hrl_v4-057'] = {
+            **params['hrl_v4-054'],
+            'num_options': 2,
+            'snet_structure': [15,15],
+            'controller_learning_rate': 4e-3,
+    }
+
+    params['hrl_v4-058'] = {
+            **params['hrl_v4-054'],
+            'algorithm': 'actor-critic-v11',
+            'num_options': 3,
+            'snet_structure': [15,15],
+            'controller_learning_rate': 4e-3,
+    }
+
+    params['hrl_v4-059'] = {
+            **params['hrl_v4-054'],
+            'algorithm': 'actor-critic-v11',
+            'num_options': 4,
+            'cnet_structure': [20,20],
+            'snet_structure': [5,5],
+            'controller_learning_rate': 4e-3,
+    }
+
+    params['hrl_v4-060'] = {
+            **params['hrl_v4-054'],
+            'constant_subpolicies': True,
+            'algorithm': 'actor-critic-v11',
+            'num_options': 4,
+            'cnet_structure': [30,30],
+            'snet_structure': [],
+            'controller_learning_rate': 4e-3,
+    }
 
     # Params for debugging purposes
     params['debug'] = {
@@ -1736,7 +1919,8 @@ def get_experiment_params(directory):
             'total_steps': 100,
             'ac_variant': 'q',
             'delay': 3,
-            'action_mem': 1
+            'action_mem': 1,
+            'checkpoint_frequency': 20
     }
 
     return params
@@ -1767,6 +1951,7 @@ def run():
         parsers[c].set_defaults(command=c)
 
     parsers['run'].add_argument('exp_name', type=str, choices=list(get_experiment_params(None).keys()))
+    parsers['run'].add_argument('args', type=str, nargs='*',help='Additional experiment parameters')
     parsers['controller-dropout'].add_argument('initial_checkpoint', type=str, default=None)
     parsers['checkpoint'].add_argument('checkpoint_files', type=str, nargs='*')
     parsers['plot'].add_argument('directories', type=str, nargs='+')
@@ -1805,7 +1990,6 @@ def run():
                 count = 0
                 max_len = 0
                 for r in tqdm(utils.get_all_results(directory)):
-                    print(r.keys())
                     if key in r and len(r[key]) >= max_len:
                         if len(r[key]) > max_len:
                             max_len = len(r[key])

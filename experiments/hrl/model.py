@@ -58,11 +58,15 @@ class PolicyFunctionAugmentatedState(torch.nn.Module):
 class ConstantPolicyFunction(torch.nn.Module):
     def __init__(self, output=None, output_size=None):
         super().__init__()
+        self.output_size = output_size
         if output_size is None:
             self.output = output
         else:
             self.output = torch.zeros([output_size])
             self.output[output] = 1
-    def forward(self, x, *args, **kwargs):
+    def forward(self, x, temperature=1, log=False):
         batch_size = x.shape[0]
-        return torch.stack([self.output for _ in range(batch_size)])
+        output = self.output*0.999+(1-self.output)*0.001/(self.output_size-1)
+        if log:
+            output = torch.log(output)
+        return torch.stack([output for _ in range(batch_size)])
