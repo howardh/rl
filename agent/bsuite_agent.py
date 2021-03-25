@@ -107,16 +107,16 @@ class BsuiteAgent(Agent):
             self.__setattr__(k,v)
 
 class A2CAgent(BsuiteAgent):
-    def __init__(self, action_space, observation_space, discount_factor,
-            learning_rate=1e-4, rng=None):
+    def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-4,
+            sequence_length=32, td_lambda=0.9, network_structure=[128, 128, 128], 
+            rng=None):
         super().__init__(action_space, observation_space, discount_factor)
-        self.rng = rng
 
         obs_spec = dm_env.specs.Array(shape=observation_space.low.shape, dtype=jnp.float32)
         action_spec = dm_env.specs.DiscreteArray(num_values=action_space.n)
         def network(inputs):
             flat_inputs = hk.Flatten()(inputs)
-            torso = hk.nets.MLP([128, 128, 128])
+            torso = hk.nets.MLP(network_structure)
             policy_head = hk.Linear(action_spec.num_values)
             value_head = hk.Linear(1)
             embedding = torso(flat_inputs)
@@ -128,15 +128,28 @@ class A2CAgent(BsuiteAgent):
             action_spec=action_spec,
             network=network,
             optimizer=optax.adam(learning_rate),
-            rng=self.rng,
-            sequence_length=32,
+            rng=rng,
+            sequence_length=sequence_length,
             discount=discount_factor,
-            td_lambda=0.9,
+            td_lambda=td_lambda,
         )
+    def state_dict(self):
+        return {
+                **super().state_dict(),
+                'agent_rng': self.agent._rng.internal_state,
+        }
+    def load_state_dict(self, state):
+        state = {k:v for k,v in state.items()} # Copy so we can pop without modifying the original
+        self.agent._rng.replace_internal_state(state.pop('agent_rng'))
+        super().load_state_dict(state)
 
 class DQNAgent(BsuiteAgent):
+    """ Wrapper around the Bsuite Jax DQN agent.
+    Note: Not deterministic w.r.t. rng.
+    """
     def __init__(self, action_space, observation_space, discount_factor,
-            warmup_steps=10, epsilon=0.05, batch_size=32,
+            min_replay_size=10, epsilon=0.05, batch_size=32, replay_capacity=1000,
+            network_structure=[64,64],
             learning_rate=1e-4, rng=None):
         super().__init__(action_space, observation_space, discount_factor)
         self.rng = rng
@@ -145,7 +158,7 @@ class DQNAgent(BsuiteAgent):
         action_spec = dm_env.specs.DiscreteArray(num_values=action_space.n)
         def network(inputs: jnp.ndarray) -> jnp.ndarray:
             flat_inputs = hk.Flatten()(inputs)
-            mlp = hk.nets.MLP([64, 64, action_spec.num_values])
+            mlp = hk.nets.MLP(network_structure+[action_spec.num_values])
             action_values = mlp(flat_inputs)
             return action_values
         self.agent = bsuite.baselines.jax.dqn.agent.DQN(
@@ -155,10 +168,10 @@ class DQNAgent(BsuiteAgent):
             optimizer=optax.adam(learning_rate),
             rng=self.rng,
             discount=discount_factor,
-            min_replay_size=warmup_steps,
+            min_replay_size=min_replay_size,
             batch_size=batch_size,
             epsilon=epsilon,
-            replay_capacity=1000,
+            replay_capacity=replay_capacity,
             sgd_period=1,
             target_update_period=4
         )
