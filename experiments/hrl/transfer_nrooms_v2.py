@@ -12,6 +12,7 @@ from matplotlib import pyplot as plt
 
 from skopt.learning.gaussian_process.kernels import Matern
 
+import utils
 from agent.hrl_agent_v5 import HRLAgent_v5
 from agent.bsuite_agent import A2CAgent, DQNAgent
 
@@ -251,7 +252,7 @@ def run():
             'test_iters': 5,
             'test_max_steps': 500,
     }
-
+    results_root_dir = utils.get_results_root_directory()
     bo_kernel = Matern(length_scale=10,nu=2.5,length_scale_bounds='fixed')
 
     def get_exp_params():
@@ -380,6 +381,7 @@ def run():
                     },
                     score_fn=lambda exp: exp.logger.mean('steps_to_reward'),
                     kernel=bo_kernel,
+                    root_directory=results_root_dir,
                     output_directory=output_directory,
                     epoch=10,
                     checkpoint_frequency=100,
@@ -393,6 +395,7 @@ def run():
                     search_space=params['search_space'],
                     score_fn=lambda exp: exp.logger.mean('steps_to_reward'),
                     kernel=bo_kernel,
+                    root_directory=results_root_dir,
                     output_directory=output_directory,
                     epoch=1000,
                     checkpoint_frequency=10000,

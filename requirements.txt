@@ -1,6 +1,6 @@
 absl-py==0.11.0
 attrs==20.3.0
--e git+git@github.com:howardh/rl.git@6fa5371e9cd4110312c96b426ea5c7025db627d4#egg=bsuite
+bsuite==0.3.5
 chex==0.0.3
 click==7.1.2
 cloudpickle==1.6.0
@@ -11,12 +11,12 @@ dill==0.3.3
 dm-env==1.3
 dm-haiku==0.0.3
 dm-tree==0.1.5
--e git+git@github.com:howardh/experiment.git@2482e2828edff809b88d1f980b60881101a68bf7#egg=experiment
+-e git+ssh://git@github.com/howardh/experiment.git@633803946c6bd7952ffc4fcf90fd84966ef9a0eb#egg=experiment
 flatbuffers==1.12
 frozendict==1.2
 future==0.18.2
 gym==0.17.3
--e git+git@github.com:howardh/gym-fourrooms.git@4576383f830a7d80e75a83dc8efc25b0ffee4280#egg=gym_fourrooms
+-e git+ssh://git@github.com/howardh/gym-fourrooms.git@4576383f830a7d80e75a83dc8efc25b0ffee4280#egg=gym_fourrooms
 imageio==2.9.0
 importlib-metadata==3.4.0
 iniconfig==1.1.1
@@ -35,6 +35,7 @@ palettable==3.3.0
 pandas==1.2.1
 patsy==0.5.1
 Pillow==7.2.0
+pkg-resources==0.0.0
 plotnine==0.7.1
 pluggy==0.13.1
 py==1.10.0

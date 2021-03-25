@@ -39,7 +39,7 @@ def get_results_root_directory(temp=False):
              return "/network/projects/h/huanghow"
     # RL Lab
     if host_name == "agent-server-1" or host_name == "agent-server-2":
-        return "/home/ml/hhuang63/results"
+        return "/home/ml/users/hhuang63/results"
         #return "/NOBACKUP/hhuang63/results"
     if host_name == "garden-path" or host_name == "ppl-3":
         return "/home/ml/hhuang63/results"
