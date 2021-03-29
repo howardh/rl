@@ -108,9 +108,13 @@ class BsuiteAgent(Agent):
 
 class A2CAgent(BsuiteAgent):
     def __init__(self, action_space, observation_space, discount_factor, learning_rate=1e-4,
-            sequence_length=32, td_lambda=0.9, network_structure=[128, 128, 128], 
+            sequence_length=32, td_lambda=0.9,
+            network_structure=None, num_layers=3, layer_size=128,
             rng=None):
         super().__init__(action_space, observation_space, discount_factor)
+
+        if network_structure is None:
+            network_structure = [layer_size]*num_layers
 
         obs_spec = dm_env.specs.Array(shape=observation_space.low.shape, dtype=jnp.float32)
         action_spec = dm_env.specs.DiscreteArray(num_values=action_space.n)
@@ -149,10 +153,13 @@ class DQNAgent(BsuiteAgent):
     """
     def __init__(self, action_space, observation_space, discount_factor,
             min_replay_size=10, epsilon=0.05, batch_size=32, replay_capacity=1000,
-            network_structure=[64,64],
+            network_structure=None, num_layers=2, layer_size=64,
             learning_rate=1e-4, rng=None):
         super().__init__(action_space, observation_space, discount_factor)
         self.rng = rng
+
+        if network_structure is None:
+            network_structure = [layer_size]*num_layers
 
         obs_spec = dm_env.specs.Array(shape=observation_space.low.shape, dtype=jnp.float32)
         action_spec = dm_env.specs.DiscreteArray(num_values=action_space.n)

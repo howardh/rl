@@ -20,7 +20,7 @@ import experiment
 import experiment.plotter
 from experiment import Experiment, ExperimentRunner, load_checkpoint
 from experiment.logger import Logger
-from experiment.hyperparam import Uniform, LogUniform, GridSearch, RandomSearch, BayesianOptimizationSearch
+from experiment.hyperparam import Uniform, IntUniform, LogUniform, LogIntUniform, GridSearch, RandomSearch, BayesianOptimizationSearch
 
 ENV_MAP = """
 xxxxxxxxxxxxxxxxx
@@ -236,6 +236,9 @@ class A2CExperiment(BaseExperiment):
             observation_space=self.env.observation_space,
             discount_factor=config.get('discount_factor'),
             learning_rate=config.get('learning_rate'),
+            td_lambda=config.get('td_lambda'),
+            num_layers=config.get('num_layers'),
+            layer_size=config.get('layer_size'),
             rng=hk.PRNGSequence(0)
         )
 
@@ -253,7 +256,8 @@ def run():
             'test_max_steps': 500,
     }
     results_root_dir = utils.get_results_root_directory()
-    bo_kernel = Matern(length_scale=10,nu=2.5,length_scale_bounds='fixed')
+    #bo_kernel = Matern(length_scale=10,nu=2.5,length_scale_bounds='fixed')
+    bo_kernel = Matern()
 
     def get_exp_params():
         params = {}
@@ -270,6 +274,22 @@ def run():
                 'batch_size': 32,
                 'replay_capacity': 10000,
                 'network_structure': [64,64],
+                'test_iters': 5,
+                'test_max_steps': 500,
+            },
+        }
+        params['a2c-001'] = {
+            'cls': A2CExperiment,
+            'search_space': {
+                'goal_repeat_allowed': True,
+                'num_training_tasks': 10,
+                'split_train_test': False,
+                'discount_factor': 0.99,
+                'learning_rate': LogUniform(1e-5,1e-1,3),
+                'td_lambda': Uniform(0,1),
+                #'network_structure': [64,64],
+                'num_layers': IntUniform(1,3),
+                'layer_size': LogIntUniform(1,128),
                 'test_iters': 5,
                 'test_max_steps': 500,
             },
@@ -415,31 +435,23 @@ def run():
         print('To run additional search, run\n\t%s'%cmd)
 
     @app.command()
-    def hyperparam_search_results(directory:str):
+    def hyperparam_search_results(directory:str, exp_name:str):
         """ Return the best configuration and score for a hyperparameter search whose experiment results are stored in the provided directory. """
         import dill
         from pprint import pprint
         from experiment.hyperparam.search import SimpleAnalysis, GroupedAnalysis, GaussianProcessAnalysis
 
-        search_space = {
-            'goal_repeat_allowed': True,
-            'num_training_tasks': 10,
-            'split_train_test': False,
-            'discount_factor': 0.99,
-            'learning_rate': LogUniform(1e-5,1e-1,3),
-            'test_iters': 5,
-            'test_max_steps': 50,
-        }
+        params = get_exp_params()[exp_name]
 
         #analysis = SimpleAnalysis(A2CExperiment, directory=directory,
         #        score_fn=lambda exp: exp.logger.mean('steps_to_reward'))
         #analysis = GroupedAnalysis(A2CExperiment, directory=directory,
         #        score_fn=lambda exp: exp.logger.mean('steps_to_reward'))
-        analysis = GaussianProcessAnalysis(DQNExperiment,
+        analysis = GaussianProcessAnalysis(params['cls'],
                 kernel=bo_kernel,
                 directory=directory,
                 score_fn=lambda exp: exp.logger.mean('steps_to_reward'),
-                search_space=search_space)
+                search_space=params['search_space'])
         print(analysis.get_best_score())
         pprint(analysis.get_best_config())
         analysis.plot()

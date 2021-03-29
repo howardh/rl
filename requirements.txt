@@ -11,7 +11,7 @@ dill==0.3.3
 dm-env==1.3
 dm-haiku==0.0.3
 dm-tree==0.1.5
--e git+ssh://git@github.com/howardh/experiment.git@633803946c6bd7952ffc4fcf90fd84966ef9a0eb#egg=experiment
+-e git+ssh://git@github.com/howardh/experiment.git@329b046d4ded112a7907734e151bd9dd898204ee#egg=experiment
 flatbuffers==1.12
 frozendict==1.2
 future==0.18.2
@@ -35,7 +35,6 @@ palettable==3.3.0
 pandas==1.2.1
 patsy==0.5.1
 Pillow==7.2.0
-pkg-resources==0.0.0
 plotnine==0.7.1
 pluggy==0.13.1
 py==1.10.0
