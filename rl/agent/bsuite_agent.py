@@ -13,7 +13,7 @@ import bsuite.baselines.jax.actor_critic.agent
 import bsuite.baselines.jax.dqn.agent
 import dm_env
 
-from agent.agent import Agent
+from rl.agent.agent import Agent
 from . import ReplayBufferJax
 
 class BsuiteAgent(Agent):

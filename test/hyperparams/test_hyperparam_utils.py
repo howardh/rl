@@ -1,8 +1,8 @@
 import pytest
 
-import hyperparams
-from hyperparams.utils import sample_hyperparam, list_extremes, param_to_vec, vec_to_param
-from hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
+import rl.hyperparams
+from rl.hyperparams.utils import sample_hyperparam, list_extremes, param_to_vec, vec_to_param
+from rl.hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
 
 def test_sample_empty():
     space = {}

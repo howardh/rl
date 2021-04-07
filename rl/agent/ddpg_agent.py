@@ -5,7 +5,7 @@ import torch.utils.data
 import gym
 import copy
 
-from agent.agent import Agent
+from rl.agent.agent import Agent
 
 import numpy as np
 

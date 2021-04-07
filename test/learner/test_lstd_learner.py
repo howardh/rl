@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import scipy.sparse
 
-from learner import lstd_learner as learner
+from rl.learner import lstd_learner as learner
 
 class TestLSTDLearner(unittest.TestCase):
 

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 
-from learner.learner import Learner
+from rl.learner.learner import Learner
 
 class RBFFunction(torch.autograd.Function):
     def forward(self, x, c, w, s=None):

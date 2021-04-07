@@ -4,7 +4,7 @@ import numpy as np
 import scipy.sparse
 import gym
 
-from learner import learner 
+from rl.learner import learner 
 
 class TestTabularLearner(unittest.TestCase):
 

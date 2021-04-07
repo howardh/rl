@@ -1,8 +1,8 @@
 import numpy as np
 
-from agent.agent import Agent
-from learner.rbf_learner import RBFLearner
-from learner.rbf_learner import RBFTracesLearner
+from rl.agent.agent import Agent
+from rl.learner.rbf_learner import RBFLearner
+from rl.learner.rbf_learner import RBFTracesLearner
 
 class RBFAgent(Agent):
 

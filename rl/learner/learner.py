@@ -7,10 +7,11 @@ import scipy.sparse.linalg
 import timeit
 import dill
 import concurrent.futures
-import utils
+
+import rl.utils
 
 #from enum import auto
-from agent.policy import get_greedy_epsilon_policy
+from rl.agent.policy import get_greedy_epsilon_policy
 
 class Learner(object):
     """

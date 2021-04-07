@@ -7,7 +7,7 @@ import itertools
 
 import numpy as np
 
-from agent.agent import Agent
+from rl.agent.agent import Agent
 from . import ReplayBuffer
 from .policy import get_greedy_epsilon_policy, greedy_action
 

@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 import haiku as hk
 import gym.spaces
-from agent.bsuite_agent import A2CAgent, DQNAgent
+from rl.agent.bsuite_agent import A2CAgent, DQNAgent
 
 def test_A2C_load_state_dict():
     action_space = gym.spaces.Discrete(10)

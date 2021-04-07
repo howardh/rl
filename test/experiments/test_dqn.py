@@ -1,6 +1,6 @@
 import pytest
 
-from experiments.dqn.main import run_trial_steps as run_trial, run_trial_steps
+from rl.experiments.dqn.main import run_trial_steps as run_trial, run_trial_steps
 
 @pytest.mark.skip(reason="Unimportant for now. Fix later.")
 def test_run_trial(tmp_path):

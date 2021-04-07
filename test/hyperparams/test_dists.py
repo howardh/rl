@@ -1,10 +1,10 @@
 import pytest
 
-import hyperparams
-import hyperparams.distributions
+import rl.hyperparams
+import rl.hyperparams.distributions
 
 def test_uniform():
-    dist = hyperparams.distributions.Uniform(5,10)
+    dist = rl.hyperparams.distributions.Uniform(5,10)
     x = dist.sample()
     assert x >= 5
     assert x <= 10
@@ -24,7 +24,7 @@ def test_uniform():
 
 @pytest.mark.skip(reason="Unimportant for now. Fix later.")
 def test_loguniform():
-    dist = hyperparams.distributions.LogUniform(1e-10,1e-5)
+    dist = rl.hyperparams.distributions.LogUniform(1e-10,1e-5)
     x = dist.sample()
     assert x >= 1e-10
     assert x <= 1e-5
@@ -44,7 +44,7 @@ def test_loguniform():
 
 def test_categoricaluniform():
     vals = ['a','b','c']
-    dist = hyperparams.distributions.CategoricalUniform(vals)
+    dist = rl.hyperparams.distributions.CategoricalUniform(vals)
     x = dist.sample()
     assert x in vals
     x_norm = dist.normalize(x)
@@ -54,7 +54,7 @@ def test_categoricaluniform():
     assert x2 in vals
 
 def test_discreteuniform():
-    dist = hyperparams.distributions.DiscreteUniform(5,10)
+    dist = rl.hyperparams.distributions.DiscreteUniform(5,10)
     x = dist.sample()
     assert x >= 5
     assert x <= 10

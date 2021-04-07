@@ -5,8 +5,8 @@ import gym
 import copy
 from collections import defaultdict
 
-from agent.agent import Agent
-from agent.hdqn_agent import create_augmented_obs_transform_one_hot_action, AugmentedObservationStack
+from rl.agent.agent import Agent
+from rl.agent.hdqn_agent import create_augmented_obs_transform_one_hot_action, AugmentedObservationStack
 
 from . import ReplayBuffer
 

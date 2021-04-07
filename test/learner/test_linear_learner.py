@@ -4,7 +4,7 @@ import scipy.sparse
 import torch
 from tqdm import tqdm
 
-from learner.linear_learner import LinearLearner
+from rl.learner.linear_learner import LinearLearner
 
 #class TestTabularLearner(unittest.TestCase):
 #

@@ -1,4 +1,4 @@
-from learner.learner import Learner
+from rl.learner.learner import Learner
 
 import numpy as np
 

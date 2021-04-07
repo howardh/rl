@@ -1,8 +1,8 @@
 import numpy as np
 from tqdm import tqdm
 
-from agent.agent import Agent
-from learner.linear_learner import LinearQsLearner
+from rl.agent.agent import Agent
+from rl.learner.linear_learner import LinearQsLearner
 
 class LinearAgent(Agent):
 

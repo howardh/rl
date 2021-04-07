@@ -14,12 +14,12 @@ import numpy as np
 import gym
 from gym import spaces
 
-from agent.agent import Agent
-from learner.lstd_learner import LSTDLearner
-from learner.lstd_learner import LSPILearner
-from learner.lstd_learner import LSTDTraceLearner
-from learner.lstd_learner import LSTDTraceQsLearner
-from learner.lstd_learner import SparseLSTDLearner
+from rl.agent.agent import Agent
+from rl.learner.lstd_learner import LSTDLearner
+from rl.learner.lstd_learner import LSPILearner
+from rl.learner.lstd_learner import LSTDTraceLearner
+from rl.learner.lstd_learner import LSTDTraceQsLearner
+from rl.learner.lstd_learner import SparseLSTDLearner
 
 class LSTDAgent(Agent):
 

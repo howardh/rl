@@ -4,10 +4,10 @@ import numpy as np
 import torch
 import itertools
 
-import agent
-from experiments.hrl.model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
-from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3, AugmentedObservationStack, create_augmented_obs_transform_one_hot_action
-from agent.dqn_agent import DQNAgent
+import rl.agent
+from rl.experiments.hrl.model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
+from rl.agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3, AugmentedObservationStack, create_augmented_obs_transform_one_hot_action
+from rl.agent.dqn_agent import DQNAgent
 
 def create_agent(agent_name, env, seed=None, params={}):
     num_actions = env.action_space.n

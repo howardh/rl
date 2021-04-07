@@ -8,11 +8,11 @@ import itertools
 
 import numpy as np
 
-from agent.agent import Agent
+from rl.agent.agent import Agent
 from .replay_buffer import ReplayBuffer,ReplayBufferStackedObs,ReplayBufferStackedObsAction
 from .policy import get_greedy_epsilon_policy, greedy_action
 
-import utils
+import rl.utils as utils
 
 class HierarchicalQNetwork(torch.nn.Module):
     def __init__(self, controller, subpolicies):

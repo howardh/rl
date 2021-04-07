@@ -4,9 +4,9 @@ import numpy as np
 
 import torch
 
-from learner import learner 
-from learner.rbf_learner import RBFFunction
-from learner.rbf_learner import RBFLearner
+from rl.learner import learner 
+from rl.learner.rbf_learner import RBFFunction
+from rl.learner.rbf_learner import RBFLearner
 
 class TestRBFFunction(unittest.TestCase):
 

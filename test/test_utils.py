@@ -3,7 +3,7 @@ import numpy as np
 import scipy.sparse
 import itertools
 
-import utils
+import rl.utils as utils
 
 def test_solve():
     a = scipy.sparse.lil_matrix(np.random.rand(5,5))

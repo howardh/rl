@@ -6,7 +6,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import utils
+import rl.utils as utils
 
 def get_data(params, directory, label=''):
     print("Parsing plotting data for params: ", params)

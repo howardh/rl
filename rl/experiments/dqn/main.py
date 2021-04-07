@@ -4,11 +4,11 @@ import torch
 from tqdm import tqdm
 import dill
 
-import utils
-from agent.dqn_agent import DQNAgent
-from agent.policy import get_greedy_epsilon_policy
+import rl.utils
+from rl.agent.dqn_agent import DQNAgent
+from rl.agent.policy import get_greedy_epsilon_policy
 
-from environment.wrappers import AtariPreprocessing, FrameStack
+from rl.environment.wrappers import AtariPreprocessing, FrameStack
 
 def run_trial(gamma, alpha, eps_b, eps_t, directory=None,
         max_iters=5000, epoch=50, test_iters=1):

@@ -1,7 +1,7 @@
 import torch
 
-import hyperparams.distributions
-from hyperparams.distributions import Distribution, Uniform, LogUniform, CategoricalUniform, DiscreteUniform
+import rl.hyperparams.distributions
+from rl.hyperparams.distributions import Distribution, Uniform, LogUniform, CategoricalUniform, DiscreteUniform
 
 def sample_hyperparam(space):
     # Type checking

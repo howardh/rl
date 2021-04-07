@@ -3,9 +3,9 @@ import torch
 torch.set_num_threads(1) # torch.svd takes up multiple cores
 import itertools
 
-import utils
+import rl.utils
 
-from learner.learner import Learner
+from rl.learner.learner import Learner
 
 class LSTDLearner(Learner):
     """
