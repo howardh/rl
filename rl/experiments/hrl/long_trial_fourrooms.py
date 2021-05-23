@@ -6,15 +6,15 @@ import dill
 import os
 import itertools
 
-from agent.dqn_agent import DQNAgent
-from agent.policy import get_greedy_epsilon_policy
+from rl.agent.dqn_agent import DQNAgent
+from rl.agent.policy import get_greedy_epsilon_policy
 
-from environment.wrappers import FrozenLakeToCoords
+from rl.environment.wrappers import FrozenLakeToCoords
 
 from .model import QFunction
 from .long_trial import plot
 
-import utils
+from rl import utils
 
 def run_trial(gamma, alpha, eps_b, eps_t, tau, directory=None,
         net_structure=[2,3,4],

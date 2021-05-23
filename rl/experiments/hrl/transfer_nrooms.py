@@ -10,16 +10,16 @@ import pprint
 from skopt import gp_minimize
 import shelve
 
-from agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3, HRLAgent_v4
-from agent.policy import get_greedy_epsilon_policy
+from rl.agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3, HRLAgent_v4
+from rl.agent.policy import get_greedy_epsilon_policy
 
 from .model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState, ConstantPolicyFunction
 from .long_trial import plot
 
-import utils
-import hyperparams
-import hyperparams.utils
-from hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
+from rl import utils
+from rl import hyperparams
+import rl.hyperparams.utils
+from rl.hyperparams.distributions import Uniform, LogUniform, CategoricalUniform, DiscreteUniform
 
 ##################################################
 # Search Space

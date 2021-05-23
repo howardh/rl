@@ -7,15 +7,15 @@ import os
 import itertools
 import time
 
-from agent.dqn_agent import DQNAgent, HierarchicalDQNAgent
-from agent.policy import get_greedy_epsilon_policy, greedy_action
+from rl.agent.dqn_agent import DQNAgent, HierarchicalDQNAgent
+from rl.agent.policy import get_greedy_epsilon_policy, greedy_action
 
-from environment.wrappers import FrozenLakeToCoords
+from rl.environment.wrappers import FrozenLakeToCoords
 
 from .gridsearch_hierarchical import HRLWrapper
 from .model import QFunction
 
-import utils
+from rl import utils
 
 class DummyPolicy():
     def __call__(self,state):

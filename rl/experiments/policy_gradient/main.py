@@ -3,10 +3,9 @@ import gym
 import torch
 from tqdm import tqdm
 
-from agent.ddpg_agent import DDPGAgent
-from agent.policy import get_greedy_epsilon_policy
+from rl.agent.ddpg_agent import DDPGAgent
 
-import utils
+import rl.utils as utils
 import dill
 
 try:

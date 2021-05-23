@@ -12,9 +12,9 @@ from matplotlib import pyplot as plt
 
 from skopt.learning.gaussian_process.kernels import Matern
 
-import utils
-from agent.hrl_agent_v5 import HRLAgent_v5
-from agent.bsuite_agent import A2CAgent, DQNAgent
+from rl import utils
+from rl.agent.hrl_agent_v5 import HRLAgent_v5
+from rl.agent.bsuite_agent import A2CAgent, DQNAgent
 
 import experiment
 import experiment.plotter
@@ -186,33 +186,16 @@ class HRLExperiment(BaseExperiment):
     def setup(self,config,output_directory=None):
         super().setup(config, output_directory)
 
-        #self.agent = HRLAgent_v5(
-        #    action_space=self.env.action_space,
-        #    observation_space=self.env.observation_space,
-        #    discount_factor=config.get('discount_factor'),
-        #    actor_lr=config.get('actor_learning_rate'),
-        #    critic_lr=config.get('critic_learning_rate'),
-        #    polyak_rate=config.get('polyak_rate'),
-        #    actor=None,
-        #    critic=None
-        #)
-        self.agent = A2CAgent(
+        self.agent = HRLAgent_v5(
             action_space=self.env.action_space,
             observation_space=self.env.observation_space,
             discount_factor=config.get('discount_factor'),
-            learning_rate=config.get('learning_rate'),
-            rng=hk.PRNGSequence(0)
+            actor_lr=config.get('actor_learning_rate'),
+            critic_lr=config.get('critic_learning_rate'),
+            polyak_rate=config.get('polyak_rate'),
+            actor=None,
+            critic=None
         )
-        #self.agent = DQNAgent(
-        #    action_space=self.env.action_space,
-        #    observation_space=self.env.observation_space,
-        #    discount_factor=config.get('discount_factor'),
-        #    learning_rate=config.get('actor_learning_rate'),
-        #    #polyak_rate=config.get('polyak_rate'),
-        #    #actor_model=actor_network,
-        #    #critic_model=critic_network,
-        #    rng=hk.PRNGSequence(0)
-        #)
 
 class DQNExperiment(BaseExperiment):
     def setup(self,config,output_directory=None):
@@ -290,6 +273,25 @@ def run():
                 #'network_structure': [64,64],
                 'num_layers': IntUniform(1,3),
                 'layer_size': LogIntUniform(1,128),
+                'test_iters': 5,
+                'test_max_steps': 500,
+            },
+        }
+        params['hrl-001'] = {
+            'cls': HRLExperiment,
+            'search_space': {
+                'goal_repeat_allowed': True,
+                'num_training_tasks': 10,
+                'split_train_test': False,
+                'discount_factor': 0.99,
+                'actor_learning_rate': LogUniform(1e-5,1e-1,3),
+                'critic_learning_rate': LogUniform(1e-5,1e-1,3),
+                'polyak_rate': LogUniform(1e-3,1),
+                #'network_structure': [64,64],
+                'actor_num_layers': IntUniform(1,3),
+                'actor_layer_size': LogIntUniform(1,128),
+                'critic_num_layers': IntUniform(1,3),
+                'critic_layer_size': LogIntUniform(1,128),
                 'test_iters': 5,
                 'test_max_steps': 500,
             },

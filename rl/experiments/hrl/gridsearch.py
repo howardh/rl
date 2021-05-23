@@ -5,10 +5,10 @@ from tqdm import tqdm
 import dill
 import os
 
-from agent.dqn_agent import DQNAgent
-from agent.policy import get_greedy_epsilon_policy
-from environment.wrappers import DiscreteObservationToBox
-import utils
+from rl.agent.dqn_agent import DQNAgent
+from rl.agent.policy import get_greedy_epsilon_policy
+from rl.environment.wrappers import DiscreteObservationToBox
+from rl import utils
 
 from .model import QFunction
 

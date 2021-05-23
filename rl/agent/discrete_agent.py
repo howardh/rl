@@ -1,7 +1,6 @@
 import torch
 import numpy as np 
-from learner.learner import TabularLearner
-from learner.learner import TabularQsLearner
+from rl.learner.learner import TabularQsLearner
 
 from .agent import Agent
 from .policy import get_greedy_epsilon_policy, greedy_action

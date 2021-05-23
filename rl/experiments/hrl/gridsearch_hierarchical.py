@@ -6,11 +6,11 @@ import dill
 import os
 import itertools
 
-#from agent.hierarchical_dqn_agent import HierarchicalDQNAgent
-from agent.dqn_agent import DQNAgent, HierarchicalDQNAgent
-from agent.policy import get_greedy_epsilon_policy, greedy_action
-from environment.wrappers import FrozenLakeToCoords
-import utils
+#from rl.agent.hierarchical_dqn_agent import HierarchicalDQNAgent
+from rl.agent.dqn_agent import DQNAgent, HierarchicalDQNAgent
+from rl.agent.policy import get_greedy_epsilon_policy, greedy_action
+from rl.environment.wrappers import FrozenLakeToCoords
+from rl import utils
 
 from .model import QFunction
 

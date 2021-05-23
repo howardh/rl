@@ -1,3 +1,6 @@
+import os
+os.environ['GYM_NO_LOGGER_SETUP'] = "1"
+
 show_warning_trace = False
 if show_warning_trace:
     import traceback

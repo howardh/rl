@@ -6,15 +6,15 @@ import dill
 import os
 import itertools
 
-from agent.dqn_agent import DQNAgent
-from agent.policy import get_greedy_epsilon_policy
+from rl.agent.dqn_agent import DQNAgent
+from rl.agent.policy import get_greedy_epsilon_policy
 
-from environment.wrappers import DiscreteObservationToBox
+from rl.environment.wrappers import DiscreteObservationToBox
 
 from . import gridsearch
 from .model import QFunction
 
-import utils
+from rl import utils
 
 def plot(results_directory, plot_directory):
     results = utils.get_all_results(results_directory)

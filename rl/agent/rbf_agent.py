@@ -1,5 +1,3 @@
-import numpy as np
-
 from rl.agent.agent import Agent
 from rl.learner.rbf_learner import RBFLearner
 from rl.learner.rbf_learner import RBFTracesLearner

@@ -8,9 +8,9 @@ import os
 import itertools
 from collections import defaultdict
 
-from agent.discrete_agent import TabularAgent
-from agent.policy import get_greedy_epsilon_policy
-import utils
+from rl.agent.discrete_agent import TabularAgent
+from rl.agent.policy import get_greedy_epsilon_policy
+from rl import utils
 from .model import QFunction
 
 import gym_fourrooms.envs

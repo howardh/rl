@@ -6,13 +6,13 @@ import dill
 import os
 import itertools
 
-from agent.hdqn_agent import HDQNAgentWithDelayAC
-from agent.policy import get_greedy_epsilon_policy
+from rl.agent.hdqn_agent import HDQNAgentWithDelayAC
+from rl.agent.policy import get_greedy_epsilon_policy
 
 from .model import QFunction, PolicyFunction
 from .long_trial import plot
 
-import utils
+from rl import utils
 
 two_rooms_map = """
 xxxxxxxxxx

@@ -1,4 +1,6 @@
 ENV
+ENV3.7
+ENV3.9
 .cs_files
 results
 results/**

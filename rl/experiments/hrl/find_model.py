@@ -7,9 +7,9 @@ import os
 import itertools
 import Levenshtein
 
-from agent.discrete_agent import TabularAgent
-from agent.policy import get_greedy_epsilon_policy
-import utils
+from rl.agent.discrete_agent import TabularAgent
+from rl.agent.policy import get_greedy_epsilon_policy
+from rl import utils
 from .model import QFunction
 
 def run_trial_tabular(alpha, gamma, eps_b, eps_t, sigma, lam,
