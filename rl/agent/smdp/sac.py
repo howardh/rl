@@ -1,0 +1,397 @@
+import copy
+import itertools
+from collections import defaultdict
+from typing import Mapping
+
+import numpy as np
+import torch
+import torch.nn
+import torch.utils.data
+import torch.distributions
+import torch.optim
+import gym.spaces
+
+from rl.agent.agent import Agent
+from rl.agent import ReplayBuffer
+
+class QNetwork(torch.nn.Module):
+    def __init__(self, num_features, num_actions):
+        super().__init__()
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(in_features=num_features+num_actions,out_features=256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=256,out_features=256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=256,out_features=1),
+        )
+    def forward(self, obs, action):
+        x = torch.cat([obs, action], dim=1)
+        x = self.fc(x)
+        return x
+class VNetwork(torch.nn.Module):
+    def __init__(self, num_features):
+        super().__init__()
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(in_features=num_features,out_features=256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=256,out_features=256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=256,out_features=1),
+        )
+    def forward(self, obs):
+        x = obs
+        x = self.fc(x)
+        return x
+class PolicyNetwork(torch.nn.Module):
+    def __init__(self, num_features, num_actions):
+        super().__init__()
+        self.num_actions = num_actions
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(in_features=num_features,out_features=256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=256,out_features=256),
+            torch.nn.ReLU()
+        )
+        self.fc_mean = torch.nn.Linear(in_features=256,out_features=num_actions)
+        self.fc_log_std = torch.nn.Linear(in_features=256,out_features=num_actions)
+    def forward(self, obs):
+        x = obs
+        x = self.fc(x)
+        mean = self.fc_mean(x)
+        log_std = self.fc_log_std(x)
+        return mean,log_std
+
+class ObservationStack:
+    def __init__(self) -> None:
+        self.prev = None
+        self.curr = None
+        self.prev_a = None
+        self.curr_a = None
+    def append_obs(self, obs, reward, terminal):
+        if self.curr is not None and self.curr[2]: # If the last observation was terminal
+            self.prev = None
+            self.curr = None
+            self.prev_a = None
+            self.curr_a = None
+        else:
+            self.prev = self.curr
+            self.prev_a = self.curr_a
+        self.curr = (obs, reward, terminal)
+        self.curr_a = None
+    def append_action(self, action):
+        if self.curr_a is not None:
+            raise Exception('`append_action` was called twice in a row without a new observation. Make sure to call `append_obs` each time time an observation is received.')
+        self.curr_a = action
+    def get_transition(self):
+        """ Return the most recent transition tuple.
+
+        Returns:
+            Tuple: (`s0`, `a0`, `r1`, `s1`, `t1`)
+
+                - `s0`: Starting state
+                - `a0`: Action taken at state `s0`
+                - `r1`: Reward obtained from taking action `a0` at state `s0` and transitioning to `s1`
+                - `s1`: State reached by taking action `a0` at state `s0`
+                - `t1`: `True` if this transition is terminal, and `False` otherwise.
+            If no transition is available, return None.
+        """
+        if self.prev is None or self.curr is None:
+            return None
+        s0, _, _ = self.prev
+        a0 = self.prev_a
+        s1, r1, t1 = self.curr
+        return s0, a0, r1, s1, t1
+    def get_obs(self):
+        return self.curr[0]
+
+class SACAgent(Agent):
+    """
+    Implementation of SAC based on [Haarnoja 2018](https://arxiv.org/pdf/1801.01290.pdf), but with added support for semi-markov decision processes (i.e. observations include the number of time steps since the last observation), and variable discount rates.
+    """
+    def __init__(self,
+            action_space : gym.spaces.Box,
+            observation_space : gym.spaces.Box,
+            discount_factor : float = 0.99,       # Haarnoja 2018 Table 1 - Shared - discount
+            learning_rate : float = 3e-4,         # Haarnoja 2018 Table 1 - Shared - learning rate
+            batch_size : int = 256,               # Haarnoja 2018 Table 1 - Shared - number of samples per minibatch
+            warmup_steps : int = 1000,            # https://github.com/haarnoja/sac - `n_initial_exploration_steps`
+            replay_buffer_size : int = 1_000_000, # Haarnoja 2018 Table 1 - Shared - replay buffer size
+            target_update_frequency : int = 1,
+            polyak_rate : float = 0.005,          # Haarnoja 2018 Table 1 - SAC - target smoothing coefficient
+            reward_scale : float = 5,             # Haarnoja 2018 Table 2 (task dependent)
+            device : torch.device = torch.device('cpu'),
+            q_net_1 : torch.nn.Module = None,
+            q_net_2 : torch.nn.Module = None,
+            v_net : torch.nn.Module = None,
+            pi_net : torch.nn.Module = None):
+        """
+        Args:
+            action_space: Gym action space.
+            observation_space: Gym observation space.
+            warmup_steps (int): Number of steps to take using an exploration policy. This value isn't specified in the paper, but is found in Haarnoja's code under the variable name `n_initial_exploration_steps`. The exploration policy used is a uniform distribution in the range [-1,1]. See [code](https://github.com/haarnoja/sac/blob/8258e33633c7e37833cc39315891e77adfbe14b2/sac/policies/uniform_policy.py#L24) for details.
+        """
+        self.action_space = action_space
+        self.observation_space = observation_space
+
+        self.discount_factor = discount_factor
+        self.batch_size = batch_size
+        self.warmup_steps = warmup_steps
+        self.target_update_frequency = target_update_frequency
+        self.polyak_rate = polyak_rate
+        self.reward_scale = reward_scale
+        self.device = device
+
+        # State (training)
+        self.obs_stack = defaultdict(lambda: ObservationStack())
+        self._steps = 0 # Number of steps experienced
+        self._training_steps = 0 # Number of training steps experienced
+
+        self.replay_buffer = ReplayBuffer(replay_buffer_size)
+        self.q_net_1 = q_net_1
+        self.q_net_2 = q_net_2
+        self.v_net = v_net
+        self.v_net_target = copy.deepcopy(self.v_net)
+        self.pi_net = pi_net
+
+        self.optimizer_q_1 = torch.optim.Adam(self.q_net_1.parameters(), lr=learning_rate)
+        self.optimizer_q_2 = torch.optim.Adam(self.q_net_2.parameters(), lr=learning_rate)
+        self.optimizer_v = torch.optim.Adam(self.v_net.parameters(), lr=learning_rate)
+        self.optimizer_pi = torch.optim.Adam(self.pi_net.parameters(), lr=learning_rate)
+
+    def observe(self, obs, reward=None, terminal=False, testing=False, time=1, discount=None, env_key=None):
+        if env_key is None:
+            env_key = testing
+        if discount is None:
+            discount = self.discount_factor
+
+        self.obs_stack[env_key].append_obs(obs, reward, terminal)
+
+        # Add to replay buffer
+        x = self.obs_stack[env_key].get_transition()
+        if x is not None and not testing:
+            self._steps += 1
+
+            obs0, action0, reward1, obs1, terminal = x
+            obs0 = torch.Tensor(obs0)
+            obs1 = torch.Tensor(obs1)
+            transition = (obs0, action0, reward1, obs1, terminal, time, discount)
+            self.replay_buffer.add(transition)
+
+            # Train each time something is added to the buffer
+            self._train()
+
+    def _sample_action(self,
+            s : torch.Tensor,
+            include_log_prob : bool = False
+            ) -> Mapping[str,torch.Tensor]: # python 3.8 is required for `TypedDict`, so we use `Mapping` instead.
+        output = {}
+
+        # Sample an action
+        mean,log_std = self.pi_net(s)
+        output['mean'] = mean
+        output['log_std'] = log_std
+        #standard_norm = torch.distributions.Normal(0,1)
+        #z = standard_norm.sample(mean.shape)
+        #action = mean+z*torch.exp(log_std)
+        dist = torch.distributions.Normal(mean,torch.exp(log_std))
+        action = dist.rsample()
+
+        high = self.action_space.high
+        low = self.action_space.low
+        scale = torch.tensor((high-low)/2, device=self.device)
+        bias = torch.tensor((high+low)/2, device=self.device)
+        scaled_action = torch.tanh(action)*scale+bias
+        output['action'] = scaled_action.float() # `float()` converts it to the float32 (or whatever the default float precision is)
+
+        #weights = [p.abs().mean().item() for p in self.pi_net.parameters()]
+        #tqdm.write(str(weights))
+        if torch.isnan(scaled_action).any():
+            breakpoint()
+
+        # Compute log prob
+        if include_log_prob:
+            #output['log_prob'] = normal_log_prob(mean,log_std,action)
+            log_prob = dist.log_prob(action).sum(dim=1,keepdim=True)
+            log_prob -= torch.log(scale*(1-scaled_action**2) +  1e-6).sum(dim=1,keepdim=True) # See second equation of appendix C "Enforcing Action Bounds".
+            output['log_prob'] = log_prob
+
+        return output
+
+    def _train(self, iterations=1):
+        if len(self.replay_buffer) < self.batch_size*iterations:
+            return
+        if len(self.replay_buffer) < self.warmup_steps:
+            return
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
+        for _,(s0,a0,r1,s1,term,time,gamma) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0 = s0.to(self.device)
+            a0 = a0.float().to(self.device)
+            r1 = r1.float().to(self.device).view(-1,1)
+            s1 = s1.to(self.device)
+            term = term.float().to(self.device).view(-1,1)
+            time = time.to(self.device).view(-1,1)
+            gamma = gamma.float().to(self.device).view(-1,1)
+            g_t = torch.pow(gamma,time)
+
+            r1 *= self.reward_scale
+
+            # Sample an action and compute its value
+            sampled_a0 = self._sample_action(s0, include_log_prob=True)
+            q1 = self.q_net_1(s0,sampled_a0['action'])
+            q2 = self.q_net_2(s0,sampled_a0['action'])
+            q = torch.min(q1,q2)
+
+            ### Update state value function (equation 5/6) ###
+            #x = self.v_net(s0)-q+sampled_a0['log_prob']
+            #x = x.detach()
+            #loss = (self.v_net(s0)*x).mean()
+            v_pred = self.v_net(s0)
+            v_target = (q-sampled_a0['log_prob']).detach()
+            assert v_pred.shape == v_target.shape
+            loss = 1/2*(v_pred-v_target)**2
+            loss = loss.mean()
+            self.optimizer_v.zero_grad()
+            loss.backward()
+            self.optimizer_v.step()
+
+            ### Update state-action value function (equation 7/9) ###
+            q_target = (r1 + g_t*self.v_net_target(s1)*(1-term)).detach()
+            for q_net, optimizer in [(self.q_net_1, self.optimizer_q_1), (self.q_net_2, self.optimizer_q_2)]:
+                #q0 = q_net(s0,a0)
+                #vt = self.v_net_target(s1)
+                #x = (q0-r1-g_t*vt).detach()
+                q_pred = q_net(s0,a0)
+                assert q_pred.shape == q_target.shape
+                loss = 1/2*(q_pred-q_target)**2
+                loss = loss.mean()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            # Sample an action and compute its value (resampling because the Q networks have changed)
+            sampled_a0 = self._sample_action(s0, include_log_prob=True)
+            q1 = self.q_net_1(s0,sampled_a0['action'])
+            q2 = self.q_net_2(s0,sampled_a0['action'])
+            q = torch.min(q1,q2)
+
+            ### Update policy (equation 12/13) ###
+            self.optimizer_pi.zero_grad()
+            loss = sampled_a0['log_prob'] - q # This is equation 12, but OpenAI's pseudocode uses the negative of this.
+            loss = loss.mean()
+            loss.backward()
+            self.optimizer_pi.step()
+
+        self._training_steps += 1
+
+        self._update_target()
+
+    def _update_target(self):
+        if self._training_steps % self.target_update_frequency != 0:
+            return
+        tau = self.polyak_rate
+        for p1,p2 in zip(self.v_net_target.parameters(), self.v_net.parameters()):
+            p1.data = (1-tau)*p1+tau*p2
+
+    def act(self, testing=False, env_key=None):
+        """ Return a random action according to an epsilon-greedy policy. """
+        if env_key is None:
+            env_key = testing
+
+        obs = self.obs_stack[env_key].get_obs()
+        obs = torch.tensor(obs).unsqueeze(0).float().to(self.device)
+
+        if testing:
+            action = self._sample_action(obs)['mean'] # Is this right? Does the testing code use a sample or the mean?
+            action = action.flatten().detach().cpu().numpy()
+        else:
+            if self._steps < self.warmup_steps:
+                action = np.random.uniform(-1., 1., self.action_space.shape)
+            else:
+                action = self._sample_action(obs)['action']
+                action = action.flatten().detach().cpu().numpy()
+
+        self.obs_stack[env_key].append_action(action)
+
+        return action
+
+if __name__ == "__main__":
+    from tqdm import tqdm
+    import torch.cuda
+    import numpy as np
+    import pprint
+    import gym
+    #import pybullet_envs
+
+    def make_env(env_name):
+        env = gym.make(env_name)
+        if isinstance(env,gym.wrappers.TimeLimit):
+            env = env.env
+        return env
+    
+    def train(envs, agent, training_steps=1_000_000, test_frequency=1000):
+        test_results = {}
+        env = envs[0]
+        env_test = envs[1]
+
+        done = True
+        for i in tqdm(range(training_steps), desc='training'):
+            if i % test_frequency == 0:
+                test_results[i] = [test(env_test, agent) for _ in tqdm(range(5), desc='testing')]
+                avg = np.mean([x['total_reward'] for x in test_results[i]])
+                tqdm.write('Iteration {i}\t Average reward: {avg}'.format(i=i,avg=avg))
+                tqdm.write(pprint.pformat(test_results[i], indent=4))
+            if done:
+                obs = env.reset()
+                agent.observe(obs, testing=False)
+            obs, reward, done, _ = env.step(agent.act(testing=False))
+            agent.observe(obs, reward, done, testing=False)
+        env.close()
+
+        return test_results
+
+    def test(env, agent):
+        total_reward = 0
+        total_steps = 0
+
+        obs = env.reset()
+        agent.observe(obs, testing=True)
+        for total_steps in tqdm(itertools.count(), desc='test episode'):
+            obs, reward, done, _ = env.step(agent.act(testing=True))
+            total_reward += reward
+            agent.observe(obs, reward, done, testing=True)
+            if done:
+                break
+        env.close()
+
+        return {
+            'total_steps': total_steps,
+            'total_reward': total_reward
+        }
+
+    if torch.cuda.is_available():
+        print('GPU found')
+        device = torch.device('cuda')
+    else:
+        print('No GPU found. Running on CPU.')
+        device = torch.device('cpu')
+
+    env_name = 'Hopper-v1'
+    #env_name = 'HopperBulletEnv-v0'
+    env = [make_env(env_name), make_env(env_name)]
+
+    agent = SACAgent(
+        action_space=env[0].action_space,
+        observation_space=env[0].observation_space,
+        reward_scale=5,
+        q_net_1 = QNetwork(env[0].observation_space.shape[0], env[0].action_space.shape[0]).to(device),
+        q_net_2 = QNetwork(env[0].observation_space.shape[0], env[0].action_space.shape[0]).to(device),
+        v_net   = VNetwork(env[0].observation_space.shape[0]).to(device),
+        pi_net  = PolicyNetwork(env[0].observation_space.shape[0], env[0].action_space.shape[0]).to(device),
+        device=device,
+    )
+
+    results = train(env,agent)
+    test(env[1], agent)
+

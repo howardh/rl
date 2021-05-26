@@ -5,7 +5,7 @@ import torch.nn
 import torch.utils.data
 import torch.distributions
 import torch.optim
-#import copy
+import copy
 import itertools
 from collections import defaultdict
 
@@ -222,12 +222,12 @@ class DQNAgent(Agent):
 
         self.replay_buffer = ReplayBuffer(replay_buffer_size)
         if q_net is None:
-            self.q_net = QNetworkCNN(action_space.n-2).to(device)
+            self.q_net = QNetworkCNN(action_space.n).to(device)
         else:
             self.q_net = q_net
-        #self.q_net_target = copy.deepcopy(self.q_net)
-        self.q_net_target = QNetworkCNN(action_space.n-2).to(device)
-        self.q_net_target.load_state_dict(self.q_net.state_dict())
+        self.q_net_target = copy.deepcopy(self.q_net)
+        #self.q_net_target = QNetworkCNN(action_space.n).to(device)
+        #self.q_net_target.load_state_dict(self.q_net.state_dict())
 
         self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
         #self.optimizer = torch.optim.RMSprop(self.q_net.parameters(), lr=learning_rate, momentum=0.95)
@@ -343,7 +343,7 @@ class DQNAgent(Agent):
         if torch.rand(1) >= eps:
             action = vals.max(dim=1)[1].item()
         else:
-            action = torch.randint(0,self.action_space.n-2,[1]).item()
+            action = torch.randint(0,self.action_space.n,[1]).item()
         #probs = epsilon_greedy(vals,eps)
         #dist = torch.distributions.Categorical(probs=probs)
         #action = dist.sample().item()
@@ -359,8 +359,8 @@ class DQNAgent(Agent):
 
     def _compute_annealed_epsilon(self, max_steps=1_000_000):
         eps = self.eps[False]
-        #return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
-        return (1-eps)*np.exp(-self._steps/max_steps)+eps # Exponential
+        return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
+        #return (1-eps)*np.exp(-self._steps/max_steps)+eps # Exponential
 
 if __name__ == "__main__":
     from tqdm import tqdm
@@ -463,18 +463,18 @@ if __name__ == "__main__":
     agent = DQNAgent(
         action_space=env[0].action_space,
         observation_space=env[0].observation_space,
-        discount_factor=0.99,
-        behaviour_eps=0.02,
-        learning_rate=1e-4,
-        update_frequency=1,
-        target_update_frequency=1_000,
-        polyak_rate=1,
-        warmup_steps=10_000,
-        #warmup_steps=100,
-        replay_buffer_size=100_000,
-        q_net=QNetworkCNN(env[0].action_space.n-2).to(device),
+        #discount_factor=0.99,
+        #behaviour_eps=0.02,
+        #learning_rate=1e-4,
+        #update_frequency=1,
+        #target_update_frequency=1_000,
+        #polyak_rate=1,
+        #warmup_steps=10_000,
+        ##warmup_steps=100,
+        #replay_buffer_size=100_000,
+        q_net=QNetworkCNN(env[0].action_space.n).to(device),
         device=device,
     )
 
-    #results = train(env,agent)
-    results = train(env,agent,test_frequency=10_000)
+    results = train(env,agent)
+    #results = train(env,agent,test_frequency=10_000)
