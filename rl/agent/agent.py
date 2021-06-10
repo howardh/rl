@@ -1,13 +1,14 @@
 import abc
-from typing import Optional, Union
+from typing import Optional, Union, TypeVar, Generic
 
-import numpy as np
+ObsType = TypeVar('ObsType')
+ActionType = TypeVar('ActionType')
 
-class Agent(abc.ABC):
+class Agent(abc.ABC, Generic[ObsType,ActionType]):
     """ Base class for RL agents. """
     @abc.abstractclassmethod
     def observe(self,
-            obs : np.ndarray,
+            obs : ObsType,
             reward : Optional[float] = None,
             terminal : bool = False,
             testing: bool = False,
@@ -25,10 +26,10 @@ class Agent(abc.ABC):
             discount (Optional[float]): Discount factor.
             env_key (Union[int,str]): A unique key identifying the environment from which the observation was obtained. This is used when the agent is concurrently acting on multiple environments. For example, one environment for training, and another for testing, or on-policy deep RL which require multiple independent environments to train on.
         """
-        pass
+        raise NotImplementedError('observe({},{},{},{},{},{},{})'.format(obs,reward,terminal,testing,time,discount,env_key)) # Using all the variables to get rid of pyright's "unused variable" warning
 
     @abc.abstractclassmethod
-    def act(self, testing : bool = False, env_key : Union[int,str] = 0) -> Union[int,np.ndarray]:
+    def act(self, testing : bool = False, env_key : Union[int,str] = 0) -> ActionType:
         """[TODO:summary]
 
         [TODO:description]
@@ -41,4 +42,18 @@ class Agent(abc.ABC):
         Returns:
             Union[int,np.ndarray]: [TODO:description]
         """
-        pass
+        raise NotImplementedError('act({},{}) not defined'.format(testing, env_key)) # Using all the variables to get rid of pyright's "unused variable" warning
+
+    def state_dict(self):
+        raise NotImplementedError('State dict function not implemented.')
+
+    def load_state_dict(self, state):
+        raise NotImplementedError('Load state function not implemented. %s' % state)
+
+class DeployableAgent(Agent[ObsType,ActionType]):
+    @abc.abstractclassmethod
+    def state_dict_deploy(self):
+        raise NotImplementedError('State dict function not implemented.')
+    @abc.abstractclassmethod
+    def load_state_dict_deploy(self,state):
+        raise NotImplementedError('Load state function not implemented. %s' % state)

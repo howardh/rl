@@ -22,7 +22,8 @@ if show_warning_trace:
 #from experiments.hrl.long_trial_hierarchical_tworooms import run
 #from experiments.hrl.fully_differentiable_tworooms import run
 #from experiments.hrl.transfer_nrooms import run
-from experiments.hrl.transfer_nrooms_v2 import run
+#from experiments.hrl.transfer_nrooms_v2 import run
+from experiments.hrl2.disjoint import run
 
 #while True:
 #    q = run()

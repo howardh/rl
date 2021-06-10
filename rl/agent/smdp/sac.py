@@ -1,7 +1,7 @@
 import copy
 import itertools
 from collections import defaultdict
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import numpy as np
 import torch
@@ -11,7 +11,7 @@ import torch.distributions
 import torch.optim
 import gym.spaces
 
-from rl.agent.agent import Agent
+from rl.agent.agent import DeployableAgent
 from rl.agent import ReplayBuffer
 
 class QNetwork(torch.nn.Module):
@@ -43,17 +43,16 @@ class VNetwork(torch.nn.Module):
         x = self.fc(x)
         return x
 class PolicyNetwork(torch.nn.Module):
-    def __init__(self, num_features, num_actions):
+    def __init__(self, num_features : int, num_actions : int, structure : Sequence[int] = [256,256]):
         super().__init__()
         self.num_actions = num_actions
-        self.fc = torch.nn.Sequential(
-            torch.nn.Linear(in_features=num_features,out_features=256),
-            torch.nn.ReLU(),
-            torch.nn.Linear(in_features=256,out_features=256),
-            torch.nn.ReLU()
-        )
-        self.fc_mean = torch.nn.Linear(in_features=256,out_features=num_actions)
-        self.fc_log_std = torch.nn.Linear(in_features=256,out_features=num_actions)
+        layers = []
+        for in_size, out_size in zip([num_features,*structure],structure):
+            layers.append(torch.nn.Linear(in_features=in_size,out_features=out_size))
+            layers.append(torch.nn.ReLU())
+        self.fc = torch.nn.Sequential(*layers)
+        self.fc_mean = torch.nn.Linear(in_features=structure[-1],out_features=num_actions)
+        self.fc_log_std = torch.nn.Linear(in_features=structure[-1],out_features=num_actions)
     def forward(self, obs):
         x = obs
         x = self.fc(x)
@@ -104,7 +103,7 @@ class ObservationStack:
     def get_obs(self):
         return self.curr[0]
 
-class SACAgent(Agent):
+class SACAgent(DeployableAgent):
     """
     Implementation of SAC based on [Haarnoja 2018](https://arxiv.org/pdf/1801.01290.pdf), but with added support for semi-markov decision processes (i.e. observations include the number of time steps since the last observation), and variable discount rates.
     """
@@ -316,13 +315,48 @@ class SACAgent(Agent):
 
         return action
 
+    def state_dict(self):
+        return {
+                'q_net_1': self.q_net_1.state_dict(),
+                'q_net_2': self.q_net_2.state_dict(),
+                'v_net': self.v_net.state_dict(),
+                'v_net_target': self.v_net_target.state_dict(),
+                'pi_net': self.pi_net.state_dict(),
+                # TODO: Everything else
+        }
+
+    def load_state_dict(self, state):
+        self.q_net_1.load_state_dict(state['q_net_1'])
+        self.q_net_2.load_state_dict(state['q_net_2'])
+        self.v_net.load_state_dict(state['v_net'])
+        self.v_net_target.load_state_dict(state['v_net_target'])
+        self.pi_net.load_state_dict(state['pi_net'])
+
+    def state_dict_deploy(self):
+        return {
+            'q_net_1': self.q_net_1.state_dict(),
+            'q_net_2': self.q_net_2.state_dict(),
+            'v_net': self.v_net.state_dict(),
+            'v_net_target': self.v_net_target.state_dict(),
+            'pi_net': self.pi_net.state_dict(),
+        }
+    def load_state_dict_deploy(self, state):
+        self.q_net_1.load_state_dict(state['q_net_1'])
+        self.q_net_2.load_state_dict(state['q_net_2'])
+        self.v_net.load_state_dict(state['v_net'])
+        self.v_net_target.load_state_dict(state['v_net_target'])
+        self.pi_net.load_state_dict(state['pi_net'])
+
 if __name__ == "__main__":
+    import os
     from tqdm import tqdm
     import torch.cuda
     import numpy as np
     import pprint
     import gym
+    import gym.envs
     #import pybullet_envs
+    import cv2
 
     def make_env(env_name):
         env = gym.make(env_name)
@@ -330,7 +364,7 @@ if __name__ == "__main__":
             env = env.env
         return env
     
-    def train(envs, agent, training_steps=1_000_000, test_frequency=1000):
+    def train(envs, agent, training_steps=1_000_000, test_frequency=1000, render=False):
         test_results = {}
         env = envs[0]
         env_test = envs[1]
@@ -338,10 +372,12 @@ if __name__ == "__main__":
         done = True
         for i in tqdm(range(training_steps), desc='training'):
             if i % test_frequency == 0:
-                test_results[i] = [test(env_test, agent) for _ in tqdm(range(5), desc='testing')]
+                video_file_name = os.path.join('output','video-%d.avi'%i)
+                test_results[i] = [test(env_test, agent, render=(i==0 and render), video_file_name=video_file_name) for i in tqdm(range(5), desc='testing')]
                 avg = np.mean([x['total_reward'] for x in test_results[i]])
                 tqdm.write('Iteration {i}\t Average reward: {avg}'.format(i=i,avg=avg))
                 tqdm.write(pprint.pformat(test_results[i], indent=4))
+
             if done:
                 obs = env.reset()
                 agent.observe(obs, testing=False)
@@ -351,19 +387,28 @@ if __name__ == "__main__":
 
         return test_results
 
-    def test(env, agent):
+    def test(env, agent, render=False, video_file_name='output.avi'):
         total_reward = 0
         total_steps = 0
 
         obs = env.reset()
         agent.observe(obs, testing=True)
+        if render:
+            frame = env.render(mode='rgb_array')
+            video = cv2.VideoWriter(video_file_name, 0, 60, (frame.shape[0],frame.shape[1])) # type: ignore
+            video.write(frame)
         for total_steps in tqdm(itertools.count(), desc='test episode'):
             obs, reward, done, _ = env.step(agent.act(testing=True))
+            if render:
+                frame = env.render(mode='rgb_array')
+                video.write(frame) # type: ignore
             total_reward += reward
             agent.observe(obs, reward, done, testing=True)
             if done:
                 break
         env.close()
+        if render:
+            video.release() # type: ignore
 
         return {
             'total_steps': total_steps,
@@ -377,7 +422,11 @@ if __name__ == "__main__":
         print('No GPU found. Running on CPU.')
         device = torch.device('cpu')
 
-    env_name = 'Hopper-v1'
+    available_envs = [env_spec.id for env_spec in gym.envs.registry.all()]
+    if 'Hopper-v1' in available_envs:
+        env_name = 'Hopper-v1'
+    else:
+        env_name = 'Hopper-v2'
     #env_name = 'HopperBulletEnv-v0'
     env = [make_env(env_name), make_env(env_name)]
 

@@ -1,5 +1,7 @@
-from typing import Optional, Tuple, Generic, TypeVar
+from typing import Optional, Tuple, Generic, TypeVar, Sequence
 
+import gym
+import gym.spaces
 import torch
 import torch.nn
 import torch.utils.data
@@ -11,7 +13,7 @@ from collections import defaultdict
 
 from experiment.logger import Logger
 
-from rl.agent.agent import Agent
+from rl.agent.agent import DeployableAgent
 from rl.agent import ReplayBuffer
 
 class QNetworkCNN(torch.nn.Module):
@@ -107,16 +109,16 @@ class QNetworkCNN_3(torch.nn.Module):
         return x
 
 class QNetworkFCNN(torch.nn.Module):
-    def __init__(self, num_inputs, num_actions):
+    def __init__(self, sizes : Sequence[int] = [2,128,4]):
         super().__init__()
-        # TODO
-        self.fc = torch.nn.Sequential(
-            torch.nn.Linear(in_features=num_inputs,out_features=128),
-            torch.nn.ReLU(),
-            torch.nn.Linear(in_features=128,out_features=num_actions),
-        )
+        layers = []
+        for in_size,out_size in zip(sizes,sizes[1:]):
+            layers.append(torch.nn.Linear(in_features=in_size,out_features=out_size))
+            layers.append(torch.nn.ReLU())
+        layers.pop() # Remove last ReLU
+        self.fc = torch.nn.Sequential(*layers)
     def forward(self, obs):
-        return obs
+        return self.fc(obs)
 
 ObsType = TypeVar('ObsType')
 ActionType = TypeVar('ActionType')
@@ -177,11 +179,13 @@ def epsilon_greedy(vals : torch.Tensor, eps : float) -> torch.Tensor:
         return is_max/is_max.sum()
     return is_max/is_max.sum()*(1-eps) + not_max/not_max.sum()*eps
 
-class DQNAgent(Agent):
+class DQNAgent(DeployableAgent):
     """
     Implementation of DQN based on Mnih 2015, but with added support for semi-markov decision processes (i.e. observations include the number of time steps since the last observation), and variable discount rates.
     """
-    def __init__(self, action_space, observation_space,
+    def __init__(self,
+            action_space : gym.spaces.Discrete,
+            observation_space : gym.spaces.Box,
             discount_factor : float = 0.99,
             learning_rate : float = 2.5e-4,
             update_frequency : int = 4,
@@ -244,7 +248,7 @@ class DQNAgent(Agent):
         if discount is None:
             discount = self.discount_factor
 
-        obs = torch.tensor(obs)/255
+        obs = torch.tensor(obs).float()/255
 
         self.obs_stack[env_key].append_obs(obs, reward, terminal)
 
@@ -361,6 +365,24 @@ class DQNAgent(Agent):
         eps = self.eps[False]
         return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
         #return (1-eps)*np.exp(-self._steps/max_steps)+eps # Exponential
+
+    def state_dict(self):
+        return {
+                'q_net': self.q_net.state_dict(),
+                'q_net_target': self.q_net_target.state_dict(),
+                # TODO
+        }
+
+    def load_state_dict(self, state):
+        self.q_net.load_state_dict(state['q_net'])
+        self.q_net_target.load_state_dict(state['q_net_target'])
+
+    def state_dict_deploy(self):
+        return {
+                'q_net': self.q_net.state_dict(),
+        }
+    def load_state_dict_deploy(self, state):
+        self.q_net.load_state_dict(state['q_net'])
 
 if __name__ == "__main__":
     from tqdm import tqdm
