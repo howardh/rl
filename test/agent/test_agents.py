@@ -1,12 +1,14 @@
 import pytest
 import gym
+import gym.spaces
 import numpy as np
 import torch
+import torch.nn
 import itertools
 
-import rl.agent
 from rl.experiments.hrl.model import QFunction, PolicyFunction, PolicyFunctionAugmentatedState
-from rl.agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3, AugmentedObservationStack, create_augmented_obs_transform_one_hot_action
+from rl.agent.augmented_obs_stack import AugmentedObservationStack, create_transform_one_hot_action
+from rl.agent.hdqn_agent import HDQNAgentWithDelayAC, HDQNAgentWithDelayAC_v2, HDQNAgentWithDelayAC_v3
 from rl.agent.dqn_agent import DQNAgent
 
 def create_agent(agent_name, env, seed=None, params={}):
@@ -112,6 +114,8 @@ class DummyEnv(gym.Env):
         self.state = 0
 
     def step(self, action):
+        if self.state is None:
+            raise Exception('Must reset env')
         done = False
         reward = 0
         if type(self.action_space) is gym.spaces.Box:

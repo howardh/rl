@@ -14,7 +14,6 @@ import bsuite.baselines.jax.dqn.agent
 import dm_env
 
 from rl.agent.agent import Agent
-from . import ReplayBufferJax
 
 class BsuiteAgent(Agent):
     def __init__(self, action_space, observation_space, discount_factor):
