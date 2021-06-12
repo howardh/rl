@@ -170,6 +170,18 @@ class ObservationStack(Generic[ObsType,ActionType]):
         if self.curr is None:
             raise Exception('No observation available.')
         return self.curr[0]
+    def state_dict(self):
+        return {
+                'prev': self.prev,
+                'curr': self.curr,
+                'prev_a': self.prev_a,
+                'curr_a': self.curr_a
+        }
+    def load_state_dict(self,state):
+        self.prev = state['prev']
+        self.curr = state['curr']
+        self.prev_a = state['prev_a']
+        self.curr_a = state['curr_a']
 
 def epsilon_greedy(vals : torch.Tensor, eps : float) -> torch.Tensor:
     max_val = vals.max()
@@ -370,12 +382,22 @@ class DQNAgent(DeployableAgent):
         return {
                 'q_net': self.q_net.state_dict(),
                 'q_net_target': self.q_net_target.state_dict(),
-                # TODO
+                'optimizer': self.optimizer.state_dict(),
+                'obs_stack': {k:os.state_dict() for k,os in self.obs_stack.items()},
+                'steps': self._steps,
+                'training_steps': self._training_steps,
+                'logger': self.logger.state_dict(),
         }
 
     def load_state_dict(self, state):
         self.q_net.load_state_dict(state['q_net'])
         self.q_net_target.load_state_dict(state['q_net_target'])
+        self.optimizer.load_state_dict(state['optimizer'])
+        for k,os_state in state['obs_stack'].items():
+            self.obs_stack[k].load_state_dict(os_state)
+        self._steps = state['steps']
+        self._training_steps = state['training_steps']
+        self.logger.load_state_dict(state['logger'])
 
     def state_dict_deploy(self):
         return {

@@ -14,7 +14,6 @@ import torch.cuda
 import numpy as np
 import gym
 import gym.envs
-import cv2
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
@@ -81,6 +80,7 @@ def test(env, agent, render=False, video_file_name='output.avi'):
     }
 
 def render_test_episode(env, agent : hrl.HRLAgent, video_file_name : str ='output.avi'):
+    import cv2
     total_reward = 0
 
     obs = env.reset()
