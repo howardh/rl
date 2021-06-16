@@ -1,5 +1,7 @@
-from typing import Any, TypeVar, Sequence, Union, NamedTuple, Mapping
+from typing import Any, DefaultDict, TypeVar, Sequence, Union, NamedTuple, Mapping, Optional
+from copy import copy
 
+import dill
 import gym.spaces
 import numpy as np
 from collections import defaultdict
@@ -7,6 +9,8 @@ from collections import defaultdict
 from experiment.logger import Logger
 from rl.agent.agent import Agent, DeployableAgent
 from rl.agent.augmented_obs_stack import AugmentedObservationStack
+import rl.agent.smdp.sac as sac
+import rl.agent.smdp.dqn as dqn
 
 ObsType = TypeVar('ObsType')
 ActionType = TypeVar('ActionType')
@@ -42,6 +46,11 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
             raise TypeError('Expected children_discount to be a list or a float. Received %s.' % type(children_discount))
         self.delay = delay
 
+        # Dropout
+        self.dropout_prob = 0.
+        self.last_parent_action : DefaultDict[Any, Optional[int]] = defaultdict(lambda: None)
+
+        # Logs
         self.logger = Logger(key_name='step')
 
     def observe(self, obs, reward=None, terminal=False, testing=False, time=1, discount=None, env_key=None):
@@ -99,12 +108,18 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
             self.obs_stack[env_key].clear()
             for cr in self.children_rewards[env_key]:
                 cr.clear()
+            # Reset dropout variables
+            self.last_parent_action[env_key] = None
 
     def act(self, testing=False, env_key=None) -> ActionType:
         if env_key is None:
             env_key = testing
 
-        parent_action = self.agent.act(testing=testing, env_key=env_key)
+        parent_action = self.last_parent_action[env_key]
+        if np.random.rand() < self.dropout_prob or parent_action is None:
+            parent_action = self.agent.act(testing=testing, env_key=env_key)
+        self.last_parent_action[env_key] = parent_action
+
         active_child = self.children[parent_action]
 
         # Send observation to active child
@@ -165,6 +180,8 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
 
     def state_dict_deploy(self):
         return {
+                'action_space': self.action_space,
+                'observation_space': self.observation_space,
                 'agent': self.agent.state_dict_deploy(),
                 'children': [c.state_dict_deploy() for c in self.children],
                 'delay': self.delay,
@@ -174,6 +191,72 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
         for child,child_state in zip(self.children,state['children']):
             child.load_state_dict_deploy(child_state)
         self.delay = state['delay']
+
+def make_agent(
+        action_space : gym.spaces.Box,
+        observation_space : gym.spaces.Box,
+        parent_params,
+        children_params,
+        device):
+    # Children
+    children = []
+    for child_param in children_params:
+        child_param = copy(child_param)
+        pi_net  = sac.PolicyNetwork(
+                observation_space.shape[0],
+                action_space.shape[0],
+                structure = child_param.pop('pi_net_structure')
+        ).to(device)
+        sac_agent = sac.SACAgent(
+            action_space=action_space,
+            observation_space=observation_space,
+            reward_scale=5,
+            **child_param,
+            q_net_1 = sac.QNetwork(observation_space.shape[0], action_space.shape[0]).to(device),
+            q_net_2 = sac.QNetwork(observation_space.shape[0], action_space.shape[0]).to(device),
+            v_net   = sac.VNetwork(observation_space.shape[0]).to(device),
+            pi_net  = pi_net,
+            device=device,
+        )
+        children.append(sac_agent)
+    # Parent
+    parent_params = copy(parent_params)
+    q_net_structure = parent_params.pop('q_net_structure')
+    q_net = dqn.QNetworkFCNN([observation_space.shape[0],*q_net_structure,len(children)]).to(device)
+    dqn_agent = dqn.DQNAgent(
+        action_space=gym.spaces.Discrete(len(children)),
+        observation_space=observation_space,
+        **parent_params,
+        q_net=q_net,
+        device=device,
+    )
+    # Hierarchy
+    return HRLAgent(
+        action_space=action_space,
+        observation_space=observation_space,
+        agent = dqn_agent,
+        children = children,
+        children_discount = [p['discount_factor'] for p in children_params],
+    )
+
+def make_agent_from_deploy_state(state : Union[str,Mapping]):
+    if isinstance(state, str): # If it's a string, then it's the filename to the dilled state
+        filename = state
+        if not os.path.isfile(filename):
+            raise Exception('No file found at %s' % filename)
+        with open(filename, 'rb') as f:
+            state = dill.load(f)
+    if not isinstance(state, Mapping):
+        raise Exception('Invalid state')
+    parent_agent = dqn.make_agent_from_deploy_state(state['agent'])
+    children_agents = [sac.make_agent_from_deploy_state(s) for s in state['children']]
+    return HRLAgent(
+        action_space=state['action_space'],
+        observation_space=state['observation_space'],
+        agent = parent_agent,
+        children = children_agents,
+        children_discount = 0.99,
+    )
 
 if __name__ == "__main__":
     import os
@@ -191,8 +274,6 @@ if __name__ == "__main__":
     matplotlib.use('Agg')
     from matplotlib import pyplot as plt
     
-    import rl.agent.smdp.sac as sac
-    import rl.agent.smdp.dqn as dqn
     #import rl.agent.smdp.rand as rand
     #import rl.agent.smdp.constant as constant
 

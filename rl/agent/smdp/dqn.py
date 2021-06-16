@@ -1,5 +1,7 @@
-from typing import Optional, Tuple, Generic, TypeVar, Sequence
+import os
+from typing import Optional, Tuple, Generic, TypeVar, Sequence, Union, Mapping
 
+import dill
 import gym
 import gym.spaces
 import torch
@@ -111,6 +113,8 @@ class QNetworkCNN_3(torch.nn.Module):
 class QNetworkFCNN(torch.nn.Module):
     def __init__(self, sizes : Sequence[int] = [2,128,4]):
         super().__init__()
+        self.sizes = sizes
+
         layers = []
         for in_size,out_size in zip(sizes,sizes[1:]):
             layers.append(torch.nn.Linear(in_features=in_size,out_features=out_size))
@@ -119,6 +123,13 @@ class QNetworkFCNN(torch.nn.Module):
         self.fc = torch.nn.Sequential(*layers)
     def forward(self, obs):
         return self.fc(obs)
+    def state_dict(self):
+        return {
+                'sizes': self.sizes,
+                'model_state_dict': super().state_dict(),
+        }
+    def load_state_dict(self, state_dict):
+        return super().load_state_dict(state_dict['model_state_dict'])
 
 ObsType = TypeVar('ObsType')
 ActionType = TypeVar('ActionType')
@@ -277,7 +288,6 @@ class DQNAgent(DeployableAgent):
 
             # Train each time something is added to the buffer
             self._train()
-
     def _train(self, iterations=1):
         if len(self.replay_buffer) < self.batch_size*iterations:
             return
@@ -335,14 +345,12 @@ class DQNAgent(DeployableAgent):
         self._training_steps += 1
 
         self._update_target()
-
     def _update_target(self):
         if self._training_steps % self.target_update_frequency != 0:
             return
         tau = self.polyak_rate
         for p1,p2 in zip(self.q_net_target.parameters(), self.q_net.parameters()):
             p1.data = (1-tau)*p1+tau*p2
-
     def act(self, testing=False, env_key=None):
         """ Return a random action according to an epsilon-greedy policy. """
         if env_key is None:
@@ -372,7 +380,6 @@ class DQNAgent(DeployableAgent):
             )
 
         return action
-
     def _compute_annealed_epsilon(self, max_steps=1_000_000):
         eps = self.eps[False]
         return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
@@ -388,7 +395,6 @@ class DQNAgent(DeployableAgent):
                 'training_steps': self._training_steps,
                 'logger': self.logger.state_dict(),
         }
-
     def load_state_dict(self, state):
         self.q_net.load_state_dict(state['q_net'])
         self.q_net_target.load_state_dict(state['q_net_target'])
@@ -401,10 +407,39 @@ class DQNAgent(DeployableAgent):
 
     def state_dict_deploy(self):
         return {
+                'action_space': self.action_space,
+                'observation_space': self.observation_space,
                 'q_net': self.q_net.state_dict(),
+                'q_net_class': self.q_net.__class__,
         }
     def load_state_dict_deploy(self, state):
         self.q_net.load_state_dict(state['q_net'])
+
+def make_agent_from_deploy_state(state : Union[str,Mapping], device : torch.device = torch.device('cpu')):
+    if isinstance(state, str): # If it's a string, then it's the filename to the dilled state
+        filename = state
+        if not os.path.isfile(filename):
+            raise Exception('No file found at %s' % filename)
+        with open(filename, 'rb') as f:
+            state = dill.load(f)
+    if not isinstance(state,Mapping):
+        raise ValueError('State is expected to be a dictionary. Found a %s.' % type(state))
+
+    cls = state['q_net_class']
+    if cls is QNetworkCNN:
+        q_net = QNetworkCNN(state['action_space'].n).to(device)
+    elif cls is QNetworkFCNN:
+        q_net = QNetworkFCNN(state['q_net']['sizes']).to(device)
+    else:
+        raise Exception('Unable to initialize Q network of type %s' % cls)
+
+    agent = DQNAgent(
+            action_space=state['action_space'],
+            observation_space=state['observation_space'],
+            q_net = q_net,
+    )
+    agent.load_state_dict_deploy(state)
+    return agent
 
 if __name__ == "__main__":
     from tqdm import tqdm

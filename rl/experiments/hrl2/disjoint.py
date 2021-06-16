@@ -327,7 +327,7 @@ class HRLExperiment(Experiment): # DQN parent, SAC children
             env.unwrapped.set_state(**env_state)
         self.done = state['done']
 
-def run():
+def make_app():
     import typer
     app = typer.Typer()
 
@@ -371,17 +371,19 @@ def run():
     @app.command()
     def run(exp_name : str,
             trial_id : Optional[str] = None,
+            results_directory : Optional[str] = None,
             debug : bool = typer.Option(False, '--debug')):
 
         if trial_id is None:
             slurm_job_id = os.environ.get('SLURM_JOB_ID')
+            #slurm_job_id = os.environ.get('SLURM_ARRAY_JOB_ID')
             slurm_array_task_id = os.environ.get('SLURM_ARRAY_TASK_ID')
             trial_id = slurm_job_id
             if slurm_array_task_id is not None:
                 trial_id = '%s_%s' % (slurm_job_id, slurm_array_task_id)
 
+        config = get_params()[exp_name]
         if debug:
-            config = get_params()[exp_name]
             exp = make_experiment_runner(
                     HRLExperiment,
                     experiment_name=exp_name,
@@ -389,13 +391,13 @@ def run():
                     verbose=True,
                     checkpoint_frequency=10,
                     max_iterations=100,
+                    results_directory=results_directory,
                     config={
                         **config,
                         'test_iterations': 2,
                         'test_frequency': 20,
                     })
         else:
-            config = get_params()[exp_name]
             exp = make_experiment_runner(
                     HRLExperiment,
                     experiment_name=exp_name,
@@ -403,6 +405,7 @@ def run():
                     verbose=True,
                     checkpoint_frequency=10_000,
                     max_iterations=4_000_000,
+                    results_directory=results_directory,
                     config=config)
         exp.run()
 
@@ -454,11 +457,17 @@ def run():
         agent.load_state_dict_deploy(state)
         render_test_episode(env, agent, video_file_name=output)
 
-    app()
+    commands = {
+            'run': run,
+            'checkpoint': checkpoint,
+            'video': video
+    }
 
-    # XXX: Hack to prevent pyright's "X is not accessed" warning
-    x = run, checkpoint, video
-    x = x
+    return app, commands
+
+def run():
+    app,_ = make_app()
+    app()
 
 if __name__ == "__main__":
     run()

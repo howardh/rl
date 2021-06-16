@@ -30,13 +30,13 @@ lock = threading.Lock()
 
 def get_results_root_directory(temp=False):
     host_name = os.uname()[1]
-    # Mila
-    mila_hostnames = ['rtx', 'leto', 'eos', 'bart', 'mila', 'kepler', 'power', 'apollor', 'apollov']
+    # Mila (Check available resources with `sinfo`)
+    mila_hostnames = ['rtx', 'leto', 'eos', 'bart', 'mila', 'kepler', 'power', 'apollor', 'apollov', 'cn-', 'login-1', 'login-2', 'login-3', 'login-4']
     if host_name.endswith('server.mila.quebec') or any((host_name.startswith(n) for n in mila_hostnames)):
         if temp:
             return "/miniscratch/huanghow"
         else:
-             return "/network/projects/h/huanghow"
+            return "/network/projects/h/huanghow"
     # RL Lab
     if host_name == "agent-server-1" or host_name == "agent-server-2":
         return "/home/ml/users/hhuang63/results"

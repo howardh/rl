@@ -1,8 +1,9 @@
 import copy
 import itertools
 from collections import defaultdict
-from typing import Mapping, Sequence
+from typing import Mapping, Sequence, Union
 
+import dill
 import numpy as np
 import torch
 import torch.nn
@@ -17,6 +18,8 @@ from rl.agent import ReplayBuffer
 class QNetwork(torch.nn.Module):
     def __init__(self, num_features, num_actions):
         super().__init__()
+        self.num_actions = num_actions
+        self.num_features = num_features
         self.fc = torch.nn.Sequential(
             torch.nn.Linear(in_features=num_features+num_actions,out_features=256),
             torch.nn.ReLU(),
@@ -28,9 +31,18 @@ class QNetwork(torch.nn.Module):
         x = torch.cat([obs, action], dim=1)
         x = self.fc(x)
         return x
+    def state_dict(self):
+        return {
+                'num_actions': self.num_actions,
+                'num_features': self.num_features,
+                'model_state_dict': super().state_dict(),
+        }
+    def load_state_dict(self, state_dict):
+        return super().load_state_dict(state_dict['model_state_dict'])
 class VNetwork(torch.nn.Module):
     def __init__(self, num_features):
         super().__init__()
+        self.num_features = num_features
         self.fc = torch.nn.Sequential(
             torch.nn.Linear(in_features=num_features,out_features=256),
             torch.nn.ReLU(),
@@ -42,10 +54,20 @@ class VNetwork(torch.nn.Module):
         x = obs
         x = self.fc(x)
         return x
+    def state_dict(self):
+        return {
+                'num_features': self.num_features,
+                'model_state_dict': super().state_dict(),
+        }
+    def load_state_dict(self, state_dict):
+        return super().load_state_dict(state_dict['model_state_dict'])
 class PolicyNetwork(torch.nn.Module):
     def __init__(self, num_features : int, num_actions : int, structure : Sequence[int] = [256,256]):
         super().__init__()
         self.num_actions = num_actions
+        self.num_features = num_features
+        self.structure = structure
+
         layers = []
         for in_size, out_size in zip([num_features,*structure],structure):
             layers.append(torch.nn.Linear(in_features=in_size,out_features=out_size))
@@ -59,6 +81,15 @@ class PolicyNetwork(torch.nn.Module):
         mean = self.fc_mean(x)
         log_std = self.fc_log_std(x)
         return mean,log_std
+    def state_dict(self):
+        return {
+                'num_actions': self.num_actions,
+                'num_features': self.num_features,
+                'structure': self.structure,
+                'model_state_dict': super().state_dict(),
+        }
+    def load_state_dict(self, state_dict):
+        return super().load_state_dict(state_dict['model_state_dict'])
 
 class ObservationStack:
     def __init__(self) -> None:
@@ -334,11 +365,19 @@ class SACAgent(DeployableAgent):
 
     def state_dict_deploy(self):
         return {
+            'action_space': self.action_space,
+            'observation_space': self.observation_space,
+
             'q_net_1': self.q_net_1.state_dict(),
             'q_net_2': self.q_net_2.state_dict(),
             'v_net': self.v_net.state_dict(),
             'v_net_target': self.v_net_target.state_dict(),
             'pi_net': self.pi_net.state_dict(),
+
+            'q_net_1_class': self.q_net_1.__class__,
+            'q_net_2_class': self.q_net_2.__class__,
+            'v_net_class': self.v_net.__class__,
+            'pi_net_class': self.pi_net.__class__,
         }
     def load_state_dict_deploy(self, state):
         self.q_net_1.load_state_dict(state['q_net_1'])
@@ -346,6 +385,51 @@ class SACAgent(DeployableAgent):
         self.v_net.load_state_dict(state['v_net'])
         self.v_net_target.load_state_dict(state['v_net_target'])
         self.pi_net.load_state_dict(state['pi_net'])
+
+def make_agent_from_deploy_state(state : Union[str,Mapping]):
+    if isinstance(state, str): # If it's a string, then it's the filename to the dilled state
+        filename = state
+        if not os.path.isfile(filename):
+            raise Exception('No file found at %s' % filename)
+        with open(filename, 'rb') as f:
+            state = dill.load(f)
+    if not isinstance(state,Mapping):
+        raise ValueError('State is expected to be a dictionary. Found a %s.' % type(state))
+
+    # Q Network
+    if state['q_net_1_class'] is not state['q_net_2_class']:
+        raise NotImplementedError('The two Q networks use different models. Unable to handle this case.')
+    q_net_cls = state['q_net_1_class']
+    if q_net_cls is QNetwork:
+        q_net_1 = QNetwork(num_features=state['q_net_1']['num_features'],num_actions=state['q_net_1']['num_actions'])
+        q_net_2 = QNetwork(num_features=state['q_net_2']['num_features'],num_actions=state['q_net_2']['num_actions'])
+    else:
+        raise Exception('Unable to initialize policy network of type %s' % q_net_cls)
+
+    # Value Network
+    v_net_cls = state['v_net_class']
+    if v_net_cls is VNetwork:
+        v_net = VNetwork(num_features=state['v_net']['num_features'])
+    else:
+        raise Exception('Unable to initialize policy network of type %s' % v_net_cls)
+
+    # Policy Network
+    pi_net_cls = state['pi_net_class']
+    if pi_net_cls is PolicyNetwork:
+        pi_net = PolicyNetwork(num_features=state['pi_net']['num_features'],num_actions=state['pi_net']['num_actions'],structure=state['pi_net']['structure'])
+    else:
+        raise Exception('Unable to initialize policy network of type %s' % pi_net_cls)
+
+    agent = SACAgent(
+            action_space=state['action_space'],
+            observation_space=state['observation_space'],
+            q_net_1=q_net_1,
+            q_net_2=q_net_2,
+            v_net=v_net,
+            pi_net=pi_net,
+    )
+    agent.load_state_dict_deploy(state)
+    return agent
 
 if __name__ == "__main__":
     import os
