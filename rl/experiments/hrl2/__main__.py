@@ -5,6 +5,7 @@ import re
 import numpy as np
 import dill
 from simple_slurm import Slurm
+from matplotlib import pyplot as plt
 
 import rl.utils
 from rl.experiments.hrl2.disjoint import make_app as make_app_disjoint
@@ -14,33 +15,72 @@ PROJECT_ROOT = './rl'
 EXPERIMENT_GROUP_NAME = 'disjoint-dqn-sac-hopper'
 RESULTS_ROOT_DIRECTORY = rl.utils.get_results_root_directory()
 EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
+TRAIN_ID_RANGE = range(1,3)
 
-def run_slurm():
+def run_slurm(debug=False):
     """
     Exp 1: hrl-001
     Exp 2.1: distil
     Exp 2.2: dropout
     """
     print('Initializing experiments')
+
+    ##################################################
+    # Train
+
     slurm = Slurm(
-            array=range(3,4),
+            array=TRAIN_ID_RANGE,
             cpus_per_task=1,
             output='/miniscratch/huanghow/slurm/%A_%a.out',
             time='5:00:00',
     )
     #command = './sbatch37.sh {script} run hrl-001 --experiment-group {group}'
-    command = './sbatch37.sh {script} run hrl-001 --results-directory {results_directory}'
+    command = './sbatch37.sh {script} run hrl-001 --results-directory {results_directory} {debug}'
     command = command.format(
             script = os.path.join(PROJECT_ROOT, 'rl/experiments/hrl2/disjoint.py'),
             group = EXPERIMENT_GROUP_NAME,
-            results_directory = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME, 'train-$SLURM_ARRAY_TASK_ID'), # Note: The environment variable substitution is done by bash when this command is run
+            results_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'train-$SLURM_ARRAY_TASK_ID'), # Note: The environment variable substitution is done by bash when this command is run
+            debug = '--debug' if debug else ''
     )
     print(command)
+    train_job_id = slurm.sbatch(command)
+
+    ##################################################
+    # Dropout
+
+    # For each of these training experiments, we want a dropout experiment 
+    train_dir = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'train-$SLURM_ARRAY_TASK_ID')
+    command = './sbatch37.sh {script} run {filename} --results-directory {results_directory}'
+    command = command.format(
+            filename = os.path.join(train_dir,'output','deploy_state.pkl'),
+            script = os.path.join(PROJECT_ROOT, 'rl/experiments/hrl2/dropout.py'),
+            results_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'dropout-$SLURM_ARRAY_TASK_ID'),
+    )
+    slurm = Slurm(
+            array=TRAIN_ID_RANGE,
+            cpus_per_task=1,
+            output='/miniscratch/huanghow/slurm/%A_%a.out',
+            time='1:00:00',
+            dependency=dict(aftercorr=train_job_id), # 1-to-1 mapping of dropout job to train job
+    )
+    dropout_job_id = slurm.sbatch(command)
+    # Note: Check that this works with `scontrol show jobid -dd <job_id>`
+
+    ##################################################
+    # Plot
+
+    command = './sbatch37.sh {script} plot'
+    command = command.format(
+            script = os.path.join(PROJECT_ROOT, 'rl/experiments/hrl2/__main__.py'),
+    )
+    slurm = Slurm(
+            cpus_per_task=1,
+            output='/miniscratch/huanghow/slurm/%A_%a.out',
+            time='1:00:00',
+            dependency=dict(afterok=dropout_job_id),
+    )
     slurm.sbatch(command)
 
-    # TODO
-    # Find all directories named "train-*"
-    # For each of these training experiments, we want a dropout experiment 
 
 def run_local(debug=False):
     # Run training with an experiment group
@@ -95,9 +135,6 @@ def plot_dropout():
         for k,v in results.items():
             total_reward_mean = [x['total_reward'] for x in v]
             rewards[k].append(np.mean(total_reward_mean))
-    import matplotlib
-    matplotlib.use('TkAgg')
-    from matplotlib import pyplot as plt
     labels = sorted(rewards.keys())
     values = [rewards[l] for l in labels]
     plt.violinplot(
@@ -110,11 +147,42 @@ def plot_dropout():
     plt.xlabel('Total Reward')
     plt.title('Dropout on Hopper-v3')
     plt.grid()
-    plt.show()
-    breakpoint()
+
+    plot_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'GROUP')
+    os.makedirs(plot_directory, exist_ok=True)
+    plot_filename = os.path.join(plot_directory, 'dropout.png')
+    plt.savefig(plot_filename)
+    print('Plot saved at %s' % plot_filename)
+
+def make_app():
+    import typer
+    app = typer.Typer()
+
+    @app.command()
+    def slurm():
+        run_slurm()
+
+    @app.command()
+    def local():
+        run_local()
+
+    @app.command()
+    def plot():
+        plot_dropout()
+
+    commands = {
+            'slurm': slurm,
+            'local': local,
+            'plot': plot,
+    }
+
+    return app,commands
 
 if __name__=='__main__':
     #run()
     #run_train()
     #breakpoint()
-    run_local(debug=True)
+    #run_local(debug=True)
+    #run_slurm()
+    app,_ = make_app()
+    app()
