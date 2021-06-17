@@ -30,7 +30,7 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
         self.num_children = len(children)
 
         self.obs_stack = defaultdict(
-                lambda: AugmentedObservationStack(stack_len=2,action_len=0))
+                lambda: AugmentedObservationStack(stack_len=self.delay+1,action_len=0))
         self.children_rewards = defaultdict(
                 lambda: [[] for _ in children])
 
@@ -66,13 +66,12 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
         # Give the parent agent a delayed observation (memoryless)
         self.obs_stack[env_key].append_obs(obs,reward)
 
-        delayed_obs = self.obs_stack[env_key].get(self.delay,0)
-        delayed_reward = self.obs_stack[env_key].get_reward(self.delay,0)
+        delayed_obs, delayed_reward = self._get_delayed_obs_reward(env_key)
         if delayed_obs is not None:
             self.agent.observe(
                     obs=delayed_obs,
                     reward=delayed_reward,
-                    terminal=terminal,
+                    terminal=terminal if self.delay == 0 else False,
                     testing=testing,
                     time=time,
                     discount=discount,
@@ -84,11 +83,6 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
 
         # If terminal, then iterate through the remaining observations and pass them to the agents.
         if terminal:
-            # Parent agent receives all observations that it did not yet see because of the delay
-            for _ in range(self.delay-1,-1,-1):
-                action = self.agent.act()
-                self.obs_stack[env_key].append_action(action)
-                self.obs_stack[env_key].append_obs(np.empty([0]))
             # Children receive the last observation with all the rewards it didn't receive yet.
             for child_index in range(len(self.children)):
                 discount = self.children_discount[child_index]
@@ -104,12 +98,31 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
                         time=len(self.children_rewards[env_key][child_index]),
                         discount=discount,
                         env_key=env_key)
+            # Parent agent receives all observations that it did not yet see because of the delay
+            for i in range(self.delay-1,-1,-1):
+                action = self.agent.act(testing=testing,env_key=env_key)
+                self.obs_stack[env_key].append_action(action)
+                self.obs_stack[env_key].append_obs(np.empty([0]))
+                delayed_obs, delayed_reward = self._get_delayed_obs_reward(env_key)
+                if delayed_obs is not None:
+                    self.agent.observe(
+                            obs=delayed_obs,
+                            reward=delayed_reward,
+                            terminal = i!=0,
+                            testing=testing,
+                            time=time, # TODO: ??? Is this right?
+                            discount=discount,
+                            env_key=env_key)
             # Reset obs stack and rewards in preparation for the next episode
             self.obs_stack[env_key].clear()
             for cr in self.children_rewards[env_key]:
                 cr.clear()
             # Reset dropout variables
             self.last_parent_action[env_key] = None
+    def _get_delayed_obs_reward(self, env_key):
+        delayed_obs = self.obs_stack[env_key].get(self.delay,0)
+        delayed_reward = self.obs_stack[env_key].get_reward(self.delay,0)
+        return delayed_obs, delayed_reward
 
     def act(self, testing=False, env_key=None) -> ActionType:
         if env_key is None:
@@ -117,7 +130,10 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
 
         parent_action = self.last_parent_action[env_key]
         if np.random.rand() < self.dropout_prob or parent_action is None:
-            parent_action = self.agent.act(testing=testing, env_key=env_key)
+            if self._parent_can_act(env_key):
+                parent_action = self.agent.act(testing=testing, env_key=env_key)
+            else:
+                parent_action = np.random.choice(self.num_children)
         self.last_parent_action[env_key] = parent_action
 
         active_child = self.children[parent_action]
@@ -152,6 +168,10 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
             self.logger.log(step=self._steps, parent_action_training=parent_action)
 
         return action
+    def _parent_can_act(self, env_key) -> bool:
+        """ Return True if the parent has enough observations to act, otherwise return False. """
+        delayed_obs, _ = self._get_delayed_obs_reward(env_key)
+        return delayed_obs is not None
 
     def _compute_child_reward(self, child_index, env_key):
         discount = self.children_discount[child_index]

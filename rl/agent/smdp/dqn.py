@@ -135,10 +135,10 @@ ObsType = TypeVar('ObsType')
 ActionType = TypeVar('ActionType')
 class ObservationStack(Generic[ObsType,ActionType]):
     def __init__(self) -> None:
-        self.prev = None
-        self.curr = None
-        self.prev_a = None
-        self.curr_a = None
+        self.prev : Optional[Tuple[ObsType,Optional[float],bool]] = None
+        self.curr : Optional[Tuple[ObsType,Optional[float],bool]] = None
+        self.prev_a : Optional[ActionType] = None
+        self.curr_a : Optional[ActionType] = None
     def append_obs(self, obs : ObsType, reward : Optional[float], terminal : bool):
         if self.curr is not None and self.curr[2]: # If the last observation was terminal
             self.prev = None

@@ -152,10 +152,11 @@ class HRLExperiment(Experiment): # DQN parent, SAC children
 
         self.env = self._init_envs()
         self.agent = self._init_agents(
-                config.get('parent_params'),
-                config.get('children_params'),
-                self.env[0],
-                self.device
+                delay=config.get('delay'),
+                parent_params=config.get('parent_params'),
+                children_params=config.get('children_params'),
+                env=self.env[0],
+                device=self.device
         )
 
         self.done = True
@@ -176,7 +177,7 @@ class HRLExperiment(Experiment): # DQN parent, SAC children
             env_name = 'Hopper-v2'
         env = [make_env(env_name,1_000), make_env(env_name,1_000)]
         return env
-    def _init_agents(self, parent_params, children_params, env, device):
+    def _init_agents(self, delay, parent_params, children_params, env, device):
         # Children
         children = []
         for child_param in children_params:
@@ -216,6 +217,7 @@ class HRLExperiment(Experiment): # DQN parent, SAC children
             agent = dqn_agent,
             children = children,
             children_discount = [p['discount_factor'] for p in children_params],
+            delay=delay,
         )
     def run_step(self, iteration):
         # Save agent specs that can be deployed
@@ -370,6 +372,16 @@ def make_app():
         params['hrl-001'] = {
             'test_iterations': 5,
             'test_frequency': 1000,
+            'parent_params': base_dqn_params,
+            'children_params': [
+                base_sac_params,
+                base_sac_params,
+            ],
+        }
+        params['hrl-002'] = {
+            'test_iterations': 5,
+            'test_frequency': 1000,
+            'delay': 2,
             'parent_params': base_dqn_params,
             'children_params': [
                 base_sac_params,
