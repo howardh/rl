@@ -73,3 +73,32 @@ def test_deploy_state_from_file(tmpdir):
     a2 = agent2.act(testing=True)
 
     assert a1 == a2
+
+def test_checkpoint():
+    env = gym.make('PongNoFrameskip-v4')
+    env = AtariPreprocessing(env)
+    env = FrameStack(env, 4)
+    agent1 = DQNAgent(
+            action_space=env.action_space,
+            observation_space=env.observation_space,
+            target_eps=0,
+    )
+    agent2 = DQNAgent(
+            action_space=env.action_space,
+            observation_space=env.observation_space,
+            target_eps=0,
+    )
+
+    agent = agent1
+
+    obs = env.reset()
+    agent.observe(obs)
+    for _ in range(5):
+        obs, reward, done, _ = env.step(agent.act())
+        agent.observe(obs, reward, done)
+
+    agent2.load_state_dict(agent1.state_dict())
+    agent = agent2
+    for _ in range(5):
+        obs, reward, done, _ = env.step(agent.act())
+        agent.observe(obs, reward, done)

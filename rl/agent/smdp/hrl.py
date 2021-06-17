@@ -172,6 +172,9 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
         }
 
     def load_state_dict(self, state):
+        self.agent.load_state_dict(state['agent'])
+        for child,child_state in zip(self.children,state['children']):
+            child.load_state_dict(child_state)
         for k,v in state['obs_stack'].items():
             self.obs_stack[k].load_state_dict(v)
         for k,v in state['children_rewards'].items():

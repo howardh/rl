@@ -334,6 +334,7 @@ class HRLExperiment(Experiment): # DQN parent, SAC children
     def load_state_dict(self, state):
         self.agent.load_state_dict(state['agent'])
         for env,env_state in zip(self.env, state['env_state']):
+            env.reset() # Without this line, we get the error "Cannot call env.step() before calling reset()"
             env.unwrapped.set_state(**env_state)
         self.done = state['done']
 
