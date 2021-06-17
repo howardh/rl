@@ -148,7 +148,7 @@ class HRLExperiment(Experiment): # DQN parent, SAC children
 
         self._test_iterations = config.get('test_iterations',5)
         self._test_frequency = config.get('test_frequency',1000)
-        self._deploy_state_checkpoint_frequency = 10_000
+        self._deploy_state_checkpoint_frequency = 250_000
 
         self.env = self._init_envs()
         self.agent = self._init_agents(
@@ -159,6 +159,7 @@ class HRLExperiment(Experiment): # DQN parent, SAC children
         )
 
         self.done = True
+        self._best_score = float('-inf')
         self.logger = Logger(key_name='step')
     def _init_device(self):
         if torch.cuda.is_available():
@@ -219,17 +220,26 @@ class HRLExperiment(Experiment): # DQN parent, SAC children
     def run_step(self, iteration):
         # Save agent specs that can be deployed
         if iteration % self._deploy_state_checkpoint_frequency == 0:
-            filename = os.path.join(self.output_directory,'deploy_state.pkl')
-            data = self.agent.state_dict_deploy()
-            with open(filename, 'wb') as f:
-                dill.dump(data,f)
+            filename = os.path.join(self.output_directory,'deploy_state-%d.pkl'%iteration)
+            self._save_deploy_state(filename)
             tqdm.write('Saved deploy state at %s' % os.path.abspath(filename))
         # Test and plot results
         if iteration % self._test_frequency == 0:
             self._test(iteration)
             self._plot()
+            # Save best model
+            score = np.mean(self.logger[-1]['total_reward'])
+            if score > self._best_score:
+                self._best_score = score
+                filename = os.path.join(self.output_directory,'deploy_state-best.pkl')
+                self._save_deploy_state(filename)
+                tqdm.write('Saved deploy state at %s with score %f' % (os.path.abspath(filename), score))
         # Train agent
         self._train()
+    def _save_deploy_state(self, filename):
+        data = self.agent.state_dict_deploy()
+        with open(filename, 'wb') as f:
+            dill.dump(data,f)
     def _test(self,iteration):
         for _ in range(self._test_iterations):
             results = test(self.env[1], self.agent, render=False)

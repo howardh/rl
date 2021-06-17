@@ -32,7 +32,7 @@ def run_slurm(debug=False):
             array=TRAIN_ID_RANGE,
             cpus_per_task=1,
             output='/miniscratch/huanghow/slurm/%A_%a.out',
-            time='5:00:00',
+            time='24:00:00',
     )
     #command = './sbatch37.sh {script} run hrl-001 --experiment-group {group}'
     command = './sbatch37.sh {script} run hrl-001 --results-directory {results_directory} {debug}'
@@ -52,7 +52,7 @@ def run_slurm(debug=False):
     train_dir = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'train-$SLURM_ARRAY_TASK_ID')
     command = './sbatch37.sh {script} run {filename} --results-directory {results_directory}'
     command = command.format(
-            filename = os.path.join(train_dir,'output','deploy_state.pkl'),
+            filename = os.path.join(train_dir,'output','deploy_state-best.pkl'),
             script = os.path.join(PROJECT_ROOT, 'rl/experiments/hrl2/dropout.py'),
             results_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'dropout-$SLURM_ARRAY_TASK_ID'),
     )
@@ -80,7 +80,6 @@ def run_slurm(debug=False):
             dependency=dict(afterok=dropout_job_id),
     )
     slurm.sbatch(command)
-
 
 def run_local(debug=False):
     # Run training with an experiment group
@@ -125,6 +124,9 @@ def find_all_dropout_directories(root_directory):
         if d.startswith('dropout-'):
             yield os.path.join(root_directory,d)
 
+def plot_train():
+    pass # TODO: Plot performance over time with smoothing
+
 def plot_dropout():
     rewards = defaultdict(lambda: [])
     for dropout_dir in find_all_dropout_directories(EXPERIMENT_GROUP_DIRECTORY):
@@ -159,12 +161,12 @@ def make_app():
     app = typer.Typer()
 
     @app.command()
-    def slurm():
-        run_slurm()
+    def slurm(debug : bool = typer.Option(False, '--debug')):
+        run_slurm(debug=debug)
 
     @app.command()
-    def local():
-        run_local()
+    def local(debug : bool = typer.Option(False, '--debug')):
+        run_local(debug=debug)
 
     @app.command()
     def plot():
@@ -179,10 +181,5 @@ def make_app():
     return app,commands
 
 if __name__=='__main__':
-    #run()
-    #run_train()
-    #breakpoint()
-    #run_local(debug=True)
-    #run_slurm()
     app,_ = make_app()
     app()
