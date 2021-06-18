@@ -1,7 +1,7 @@
 import copy
 import itertools
 from collections import defaultdict
-from typing import Mapping, Sequence, Union
+from typing import Mapping, Sequence, Union, Generic, TypeVar, Optional, Tuple
 
 import dill
 import numpy as np
@@ -91,13 +91,15 @@ class PolicyNetwork(torch.nn.Module):
     def load_state_dict(self, state_dict):
         return super().load_state_dict(state_dict['model_state_dict'])
 
-class ObservationStack:
+ObsType = TypeVar('ObsType')
+ActionType = TypeVar('ActionType')
+class ObservationStack(Generic[ObsType,ActionType]):
     def __init__(self) -> None:
-        self.prev = None
-        self.curr = None
-        self.prev_a = None
-        self.curr_a = None
-    def append_obs(self, obs, reward, terminal):
+        self.prev : Optional[Tuple[ObsType,Optional[float],bool]] = None
+        self.curr : Optional[Tuple[ObsType,Optional[float],bool]] = None
+        self.prev_a : Optional[ActionType] = None
+        self.curr_a : Optional[ActionType] = None
+    def append_obs(self, obs : ObsType, reward : Optional[float], terminal : bool):
         if self.curr is not None and self.curr[2]: # If the last observation was terminal
             self.prev = None
             self.curr = None
@@ -108,11 +110,11 @@ class ObservationStack:
             self.prev_a = self.curr_a
         self.curr = (obs, reward, terminal)
         self.curr_a = None
-    def append_action(self, action):
+    def append_action(self, action : ActionType):
         if self.curr_a is not None:
             raise Exception('`append_action` was called twice in a row without a new observation. Make sure to call `append_obs` each time time an observation is received.')
         self.curr_a = action
-    def get_transition(self):
+    def get_transition(self) -> Optional[Tuple[ObsType,ActionType,float,ObsType,bool]]:
         """ Return the most recent transition tuple.
 
         Returns:
@@ -127,12 +129,30 @@ class ObservationStack:
         """
         if self.prev is None or self.curr is None:
             return None
+        if self.prev_a is None:
+            return None
         s0, _, _ = self.prev
         a0 = self.prev_a
         s1, r1, t1 = self.curr
+        if r1 is None:
+            return None
         return s0, a0, r1, s1, t1
-    def get_obs(self):
+    def get_obs(self) -> ObsType:
+        if self.curr is None:
+            raise Exception('No observation available.')
         return self.curr[0]
+    def state_dict(self):
+        return {
+                'prev': self.prev,
+                'curr': self.curr,
+                'prev_a': self.prev_a,
+                'curr_a': self.curr_a
+        }
+    def load_state_dict(self,state):
+        self.prev = state['prev']
+        self.curr = state['curr']
+        self.prev_a = state['prev_a']
+        self.curr_a = state['curr_a']
 
 class SACAgent(DeployableAgent):
     """
@@ -348,20 +368,40 @@ class SACAgent(DeployableAgent):
 
     def state_dict(self):
         return {
+                # Models
                 'q_net_1': self.q_net_1.state_dict(),
                 'q_net_2': self.q_net_2.state_dict(),
                 'v_net': self.v_net.state_dict(),
                 'v_net_target': self.v_net_target.state_dict(),
                 'pi_net': self.pi_net.state_dict(),
-                # TODO: Everything else
+                # Optimizers
+                'optimizer_q_1': self.optimizer_q_1.state_dict(),
+                'optimizer_q_2': self.optimizer_q_2.state_dict(),
+                'optimizer_v': self.optimizer_v.state_dict(),
+                'optimizer_pi': self.optimizer_pi.state_dict(),
+                # Misc
+                'obs_stack': {k:os.state_dict() for k,os in self.obs_stack.items()},
+                'steps': self._steps,
+                'training_steps': self._training_steps,
         }
 
     def load_state_dict(self, state):
+        # Models
         self.q_net_1.load_state_dict(state['q_net_1'])
         self.q_net_2.load_state_dict(state['q_net_2'])
         self.v_net.load_state_dict(state['v_net'])
         self.v_net_target.load_state_dict(state['v_net_target'])
         self.pi_net.load_state_dict(state['pi_net'])
+        # Optimizers
+        self.optimizer_q_1.load_state_dict(state['optimizer_q_1'])
+        self.optimizer_q_2.load_state_dict(state['optimizer_q_2'])
+        self.optimizer_v.load_state_dict(state['optimizer_v'])
+        self.optimizer_pi.load_state_dict(state['optimizer_pi'])
+        # Misc
+        for k,os_state in state['obs_stack'].items():
+            self.obs_stack[k].load_state_dict(os_state)
+        self._steps = state['steps']
+        self._training_steps = state['training_steps']
 
     def state_dict_deploy(self):
         return {
