@@ -1,6 +1,10 @@
+import os
 from collections import defaultdict
 from typing import Optional
 
+import numpy as np
+import matplotlib
+from matplotlib import pyplot as plt
 import dill
 import gym.spaces
 import gym
@@ -49,13 +53,29 @@ class DropoutExperiment(Experiment):
         self.results[agent.dropout_prob].append({
             'total_reward': total_reward
         })
+    def plot(self):
+        labels = sorted(self.results.keys())
+        values = [[v['total_reward'] for v in self.results[l]] for l in labels]
+        plt.violinplot(
+                values,
+                vert = False,
+                showmeans = True,
+        )
+        plt.yticks(ticks=list(range(1,len(labels)+1)),labels=labels)
+        plt.ylabel('Dropout Probability')
+        plt.xlabel('Total Reward')
+        plt.title('Dropout on Hopper-v3')
+        plt.grid()
+
+        plot_filename = os.path.join(self.output_directory, 'plot.png')
+        plt.savefig(plot_filename)
+        print('Plot saved at %s' % plot_filename)
     def state_dict(self):
         return {
                 'results': self.results
         }
     def load_state_dict(self, state):
-        state = state
-        # TODO
+        self.results = state['results']
 
 def make_app():
     import typer
@@ -75,12 +95,13 @@ def make_app():
                 experiment_name=exp_name,
                 verbose=True,
                 checkpoint_frequency=5,
-                max_iterations=3*5,
+                max_iterations=30*5,
                 results_directory=results_directory,
                 config={
                     'agent': filename
                 })
         exp.run()
+        exp.exp.plot()
 
     @app.command()
     def foo():
