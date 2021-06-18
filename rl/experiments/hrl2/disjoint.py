@@ -438,7 +438,7 @@ def make_app():
         exp.run()
 
     @app.command()
-    def video(state_filename : str = '/home/howard/Code/rl/checkpoints/deploy_state.pkl',
+    def video(state_filename : str,
             output : str = 'output.avi'):
         with open(state_filename,'rb') as f:
             state = dill.load(f)
@@ -479,6 +479,7 @@ def make_app():
         )
         agent.load_state_dict_deploy(state)
         render_test_episode(env, agent, video_file_name=output)
+        print('Saved video to %s' % os.path.abspath(output))
 
     commands = {
             'run': run,
