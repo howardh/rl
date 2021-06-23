@@ -24,12 +24,12 @@ Experiment details in appendix A
 - Batch size: ?? 
 """
 
+import re
 import os
 import itertools
 from rl.agent.agent import Agent
 from experiment.experiment import make_experiment_runner
-from typing import Optional
-from pprint import pprint
+from typing import Optional, NamedTuple, List
 
 from tqdm import tqdm
 import torch
@@ -45,11 +45,13 @@ from gym.wrappers import FrameStack, AtariPreprocessing
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
+from simple_slurm import Slurm
 
 import rl.utils
 from experiment import Experiment
 from experiment.logger import Logger
 import rl.agent.smdp.dqn as dqn
+import rl.agent.smdp.rand as rand
 
 def make_env(env_name):
     env = gym.make(env_name)
@@ -83,7 +85,7 @@ class TrainExperiment(Experiment):
         self.device = self._init_device()
 
         self._test_iterations = config.get('test_iterations',5)
-        self._test_frequency = config.get('test_frequency',1000)
+        self._test_frequency = config.get('test_frequency',10_000)
         self._deploy_state_checkpoint_frequency = 250_000
 
         self.env = self._init_envs(config['env_name'])
@@ -141,6 +143,7 @@ class TrainExperiment(Experiment):
             obs = env.reset()
             self.agent.observe(obs, testing=False)
         obs, reward, done, _ = env.step(self.agent.act(testing=False))
+        reward = np.clip(reward,-1,1)
         self.agent.observe(obs, reward, done, testing=False)
         self.done = done
     def _test(self,iteration):
@@ -176,8 +179,11 @@ class TrainExperiment(Experiment):
         with open(filename, 'wb') as f:
             dill.dump(data,f)
 
-def make_dataset(env, agent, num_samples):
-    data = []
+class DistillationDataPoint(NamedTuple):
+    obs : torch.Tensor
+    output : torch.Tensor
+def make_dataset(env, agent, num_samples) -> List[DistillationDataPoint]:
+    data : List[DistillationDataPoint] = []
     done = True
     for _ in tqdm(range(num_samples),'Generating Dataset'):
         if done:
@@ -187,18 +193,25 @@ def make_dataset(env, agent, num_samples):
         else:
             obs,reward,done,_ = env.step(agent.act(testing=True))
             agent.observe(obs,reward,done,testing=True)
-        data.append(obs)
+        data.append(
+                DistillationDataPoint(
+                    obs=torch.tensor(obs),
+                    output=agent.q_net(torch.tensor(obs).unsqueeze(0).float()).squeeze().detach()
+                )
+        )
     return data
 
-def distil_model(teacher_model, student_model, data,
+def distil_model(student_model : torch.nn.Module,
+        data : List[DistillationDataPoint],
         method : str = 'MSE',
         n_steps : int = 10_000):
     optimizer = torch.optim.RMSprop(student_model.parameters(), lr=1e-3)
-    data = torch.stack([torch.tensor(d) for d in data]).float()
+    data_obs = torch.stack([d.obs for d in data]).float()
+    data_output = torch.stack([d.output for d in data]).float()
     for _ in tqdm(range(n_steps), desc='Distilling'):
         indices = np.random.choice(500,32)
-        obs = data[indices,:,:,:]
-        y_target = teacher_model(obs)
+        obs = data_obs[indices,:,:,:]
+        y_target = data_output[indices,:]
         y_pred = student_model(obs)
         
         if method == 'MSE':
@@ -250,11 +263,16 @@ def make_app():
             'QNetworkCNN_2': dqn.QNetworkCNN_2,
             'QNetworkCNN_3': dqn.QNetworkCNN_3,
     }
+    PROJECT_ROOT = './rl'
+    EXPERIMENT_GROUP_NAME = 'rusu2016'
+    RESULTS_ROOT_DIRECTORY = rl.utils.get_results_root_directory()
+    EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
 
     @app.command()
     def train(env_name : str,
             results_directory : Optional[str] = None,
             debug : bool = typer.Option(False, '--debug')):
+        # Train
         exp_runner = make_experiment_runner(
                 TrainExperiment,
                 max_iterations=100 if debug else 50_000_000,
@@ -267,6 +285,33 @@ def make_app():
                 }
         )
         exp_runner.run()
+
+    @app.command()
+    def test_saved_model(
+            env_name : str,
+            filename : str,
+            output_filename : str):
+        n_test_runs = 5 # TODO: Make a parameter
+        env = make_env(env_name)
+        agent = dqn.make_agent_from_deploy_state(filename)
+        result = [test(env,agent)['total_reward'] for _ in range(n_test_runs)]
+        os.makedirs(os.path.join(*os.path.split(output_filename)[:-1]),exist_ok=True)
+        with open(output_filename,'wb') as f:
+            dill.dump(result,f)
+        print('Model test result saved in %s' % os.path.abspath(output_filename))
+
+    @app.command()
+    def test_random(
+            env_name : str,
+            output_filename : str):
+        n_test_runs = 5 # TODO: Make a parameter
+        env = make_env(env_name)
+        agent = rand.RandomAgent(action_space=env.action_space)
+        result = [test(env,agent)['total_reward'] for _ in range(n_test_runs)]
+        os.makedirs(os.path.join(*os.path.split(output_filename)[:-1]),exist_ok=True)
+        with open(output_filename,'wb') as f:
+            dill.dump(result,f)
+        print('Random test result saved in %s' % os.path.abspath(output_filename))
 
     @app.command()
     def generate_dataset(env_name : str,
@@ -289,7 +334,6 @@ def make_app():
     @app.command()
     def distill(env_name : str,
             dataset_filename : str,
-            teacher_filename : str,
             output_filename: str,
             model_name : str,
             method : str = 'KL',
@@ -301,16 +345,13 @@ def make_app():
         # Select student model
         student_model = models[model_name](env.action_space.n)
 
-        # Load teacher model
-        agent = dqn.make_agent_from_deploy_state(teacher_filename)
-
         # Load dataset
         with open(dataset_filename,'rb') as f:
-            dataset = dill.load(f)
+            dataset : List[DistillationDataPoint] = dill.load(f)
+            # XXX: How do I check `dataset`'s type?
 
         # Run distillation
         distilled_model = distil_model(
-                teacher_model=agent.q_net,
                 student_model=student_model,
                 data=dataset,
                 method=method,
@@ -332,131 +373,201 @@ def make_app():
         print('Distillation result saved in %s' % os.path.abspath(output_filename))
 
     @app.command()
-    def run_local(results_directory : Optional[str] = None,
-            debug : bool = typer.Option(False, '--debug')):
-        if results_directory is None:
-            results_directory = os.path.join(
-                    rl.utils.get_results_root_directory(),
-                    'rusu2016'
-            )
+    def run_local(debug : bool = typer.Option(False, '--debug')):
+        results = {}
         for env_name in environment_names:
-            train_directory = os.path.join(results_directory,'train',env_name)
+            train_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'train',env_name)
+            test_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'test')
+            teacher_test_filename = os.path.join(test_directory,'teacher','%s.pkl' % env_name)
+            random_test_filename = os.path.join(test_directory,'random','%s.pkl' % env_name)
             teacher_model_filename = os.path.join(train_directory,'output/deploy_state-best.pkl')
-            dataset_filename = os.path.join(results_directory,'dataset','%s.pkl'%env_name)
+            dataset_filename = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'dataset','%s.pkl'%env_name)
             train(
                     env_name=env_name,
                     results_directory=train_directory,
                     debug=debug
+            )
+            test_saved_model(
+                    env_name=env_name,
+                    filename=teacher_model_filename,
+                    output_filename=teacher_test_filename,
+            )
+            test_random(
+                    env_name=env_name,
+                    output_filename=random_test_filename,
             )
             generate_dataset(
                     env_name=env_name,
                     teacher_filename=teacher_model_filename,
                     output_filename=dataset_filename
             )
-            for i in range(1,6):
+            for i in range(1,2):
                 for model_name in models.keys():
                     for method in ['MSE', 'NLL', 'KL']:
                         distill(
                                 env_name=env_name,
                                 dataset_filename=dataset_filename,
-                                teacher_filename=teacher_model_filename,
                                 output_filename=os.path.join(
-                                    results_directory,'distill',env_name,'%d.pkl'%i
+                                    EXPERIMENT_GROUP_DIRECTORY,'distill',env_name,model_name,'%s-%d.pkl'%(method,i)
                                 ),
                                 model_name=model_name,
                                 method=method,
                                 n_test_runs=5,
                                 debug=debug
                         )
+            # Save results
+            results[env_name] = {}
+            with open(teacher_test_filename,'rb') as f:
+                results[env_name]['teacher_score'] = dill.load(f)
+            with open(random_test_filename,'rb') as f:
+                results[env_name]['random_score'] = dill.load(f)
+            results[env_name]['student_score'] = {
+                    model_name: {method: [] for method in ['MSE','NLL','KL']}
+                    for model_name in models.keys()
+            }
+            for model_name in models.keys():
+                directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'distill',env_name,model_name)
+                for filename in os.listdir(directory):
+                    match = re.match(r'([A-Z]+)-(\d+).pkl', filename)
+                    method = match.group(1)
+                    with open(os.path.join(directory,filename),'rb') as f:
+                        results[env_name]['student_score'][model_name][method].append(
+                                dill.load(f)
+                        )
+        breakpoint()
+
+    @app.command()
+    def run_slurm(debug : bool = typer.Option(False, '--debug')):
+        """
+        Train
+        Generate Dataset
+        """
+        print('Initializing experiments')
+
+        train_job_ids = {}
+        for env_name in environment_names:
+            train_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'train',env_name)
+            test_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'test')
+            teacher_test_filename = os.path.join(test_directory,'teacher','%s.pkl' % env_name)
+            random_test_filename = os.path.join(test_directory,'random','%s.pkl' % env_name)
+            teacher_model_filename = os.path.join(train_directory,'output/deploy_state-best.pkl')
+            dataset_filename = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'dataset','%s.pkl'%env_name)
+            ##################################################
+            # Train
+            slurm = Slurm(
+                    cpus_per_task=1,
+                    output='/miniscratch/huanghow/slurm/%A_%a.out',
+                    time='24:00:00',
+            )
+            command = './sbatch37.sh {script} train {env_name} --results-directory {results_directory} {debug}'
+            command = command.format(
+                    script = os.path.join(PROJECT_ROOT, 'rl/experiments/distillation/rusu2016.py'),
+                    env_name = env_name,
+                    results_directory = train_directory,
+                    debug = '--debug' if debug else ''
+            )
+            print(command)
+            train_job_id = slurm.sbatch(command)
+
+            ##################################################
+            # Test Teacher
+            slurm = Slurm(
+                    cpus_per_task=1,
+                    output='/miniscratch/huanghow/slurm/%A_%a.out',
+                    time='5:00:00',
+                    dependency=dict(afterok=train_job_ids[env_name])
+            )
+            command = './sbatch37.sh {script} test-saved-model {env_name} --filename {teacher_filename} --output-filename {output_filename}'
+            command = command.format(
+                    script = os.path.join(PROJECT_ROOT, 'rl/experiments/distillation/rusu2016.py'),
+                    env_name = env_name,
+                    teacher_filename = teacher_model_filename,
+                    output_filename = teacher_test_filename,
+                    debug = '--debug' if debug else ''
+            )
+            print(command)
+            slurm.sbatch(command)
+
+            ##################################################
+            # Test Random Agent
+            slurm = Slurm(
+                    cpus_per_task=1,
+                    output='/miniscratch/huanghow/slurm/%A_%a.out',
+                    time='5:00:00',
+                    dependency=dict(afterok=train_job_ids[env_name])
+            )
+            command = './sbatch37.sh {script} test-random {env_name} --output-filename {output_filename}'
+            command = command.format(
+                    script = os.path.join(PROJECT_ROOT, 'rl/experiments/distillation/rusu2016.py'),
+                    env_name = env_name,
+                    output_filename = random_test_filename,
+                    debug = '--debug' if debug else ''
+            )
+            print(command)
+            slurm.sbatch(command)
+
+            ##################################################
+            # Dataset
+            slurm = Slurm(
+                    cpus_per_task=1,
+                    output='/miniscratch/huanghow/slurm/%A_%a.out',
+                    time='5:00:00',
+                    dependency=dict(afterok=train_job_id)
+            )
+            command = './sbatch37.sh {script} generate-dataset {env_name} --teacher-filename {teacher_filename} --output-filename {output_filename} {debug}'
+            command = command.format(
+                    script = os.path.join(PROJECT_ROOT, 'rl/experiments/distillation/rusu2016.py'),
+                    env_name = env_name,
+                    teacher_filename = teacher_model_filename,
+                    output_filename = dataset_filename,
+                    debug = '--debug' if debug else ''
+            )
+            print(command)
+            gen_dataset_job_id = slurm.sbatch(command)
+
+            ##################################################
+            # Distill
+            for i in range(1,2):
+                for model_name in models.keys():
+                    for method in ['MSE', 'NLL', 'KL']:
+                        slurm = Slurm(
+                                cpus_per_task=1,
+                                output='/miniscratch/huanghow/slurm/%A_%a.out',
+                                time='5:00:00',
+                                dependency=dict(afterok=gen_dataset_job_id)
+                        )
+                        command = './sbatch37.sh {script} distill {env_name} --dataset-filename {dataset_filename} --output-filename {output_filename} --model-name {model_name} --method {method} --n-test-runs {n_test_runs} {debug}'
+                        command = command.format(
+                                script = os.path.join(PROJECT_ROOT, 'rl/experiments/distillation/rusu2016.py'),
+                                env_name = env_name,
+                                dataset_filename = dataset_filename,
+                                output_filename = os.path.join(
+                                    EXPERIMENT_GROUP_DIRECTORY,'distill',env_name,model_name,'%s-%d.pkl'%(method,i)
+                                ),
+                                model_name=model_name,
+                                method=method,
+                                n_test_runs=5,
+                                debug = '--debug' if debug else ''
+                        )
+                        print(command)
+                        slurm.sbatch(command)
+
+        ##################################################
+        # Plot?
+        # TODO
+
 
     commands = {
             'train': train,
+            'test_saved_model': test_saved_model,
+            'test_random': test_random,
             'generate_dataset': generate_dataset,
             'distill': distill,
-            'run_local': run_local
+            'run_local': run_local,
+            'run_slurm': run_slurm,
     }
 
     return app, commands
-
-def foo():
-    n_test_runs = 5 # Number of test episodes per distilled student model
-    n_distillations = 5 # Number of distillations per model architecture
-    checkpoint_filename = ''
-    teacher_model_filename = ''
-
-    environment_names = [
-            'BeamRiderNoFrameskip-v0',
-            'BreakoutNoFrameskip-v0',
-            'EnduroNoFrameskip-v0',
-            'FreewayNoFrameskip-v0',
-            'MsPacmanNoFrameskip-v0',
-            'PongNoFrameskip-v4',
-            'QbertNoFrameskip-v0',
-            'RiverraidNoFrameskip-v0',
-            'SeaquestNoFrameskip-v0',
-            'SpaceInvadersNoFrameskip-v0',
-    ]
-    models = [
-            dqn.QNetworkCNN,
-            dqn.QNetworkCNN_1,
-            dqn.QNetworkCNN_2,
-            dqn.QNetworkCNN_3,
-    ]
-    results = {}
-    for env_name in environment_names:
-        results[env_name] = {}
-        results[env_name]['teacher'] = []
-        for model in models:
-            results[env_name][model.__name__] = []
-    
-    for env_name in environment_names:
-        exp_runner = make_experiment_runner(
-                TrainExperiment,
-                #max_iterations=50_000_000,
-                max_iterations=100, # DEBUG
-                verbose=True,
-                config={
-                    'env_name': env_name,
-                    'test_iterations': 1,
-                    'test_frequency': 250_000,
-                }
-        )
-        exp_runner.run()
-
-        # Get output directory
-        train_directory = exp_runner.exp.output_directory
-
-        # Make dataset from the saved model
-        env = make_env(env_name)
-        agent = dqn.make_agent_from_deploy_state(
-                os.path.join(train_directory,'deploy_state-best.pkl'))
-        agent.eps = [0.05,0.05]
-        #dataset = make_dataset(env, agent, 500_000)
-        dataset = make_dataset(env, agent, 500) # DEBUG
-
-        # Evaluate teacher model
-        results[env_name]['teacher'] = [test(env,agent)['total_reward'] for _ in range(n_test_runs)]
-
-        # Evaluate distilled models
-        for model in models:
-            for method in ['MSE', 'NLL', 'KL']:
-                for _ in range(n_distillations):
-                    # Run distillation
-                    distilled_model = distil_model(
-                            teacher_model=agent.q_net,
-                            student_model=model(env.action_space.n),
-                            data=dataset,
-                            method=method)
-
-                    # Evaluate distilled model
-                    distilled_agent = dqn.make_agent_from_deploy_state(
-                            os.path.join(train_directory,'deploy_state-best.pkl'))
-                    distilled_agent.q_net = distilled_model
-                    results[env_name][model.__name__].append(
-                            [test(env,distilled_agent)['total_reward'] for _ in range(n_test_runs)]
-                    )
-
-                    pprint(results)
 
 if __name__ == '__main__':
     app,_ = make_app()

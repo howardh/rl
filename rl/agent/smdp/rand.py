@@ -8,10 +8,14 @@ class RandomAgent(Agent, Generic[ActionType]):
     def __init__(self, action_space):
         self.action_space = action_space
 
-    def observe(self, **_):
+    def observe(self, *args, **kwargs):
+        args = args
+        kwargs = kwargs
         return
 
-    def act(self, **_) -> ActionType:
+    def act(self, *args, **kwargs) -> ActionType:
+        args = args
+        kwargs = kwargs
         return self.action_space.sample()
 
     def state_dict(self):
