@@ -36,6 +36,7 @@ import torch
 import torch.nn
 import torch.cuda
 import torch.optim
+import torch.utils.data
 import numpy as np
 import dill
 import gym.spaces
@@ -52,6 +53,11 @@ from experiment import Experiment
 from experiment.logger import Logger
 import rl.agent.smdp.dqn as dqn
 import rl.agent.smdp.rand as rand
+from rl.agent import ReplayBuffer
+
+def count_parameters(model):
+    # https://discuss.pytorch.org/t/how-do-i-check-the-number-of-parameters-of-a-model/4325/9
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def make_env(env_name):
     env = gym.make(env_name)
@@ -204,7 +210,7 @@ def make_dataset(env, agent, num_samples) -> List[DistillationDataPoint]:
 def distil_model(student_model : torch.nn.Module,
         data : List[DistillationDataPoint],
         method : str = 'MSE',
-        n_steps : int = 10_000):
+        n_steps : int = 10_000*10):
     optimizer = torch.optim.RMSprop(student_model.parameters(), lr=1e-3)
     data_obs = torch.stack([d.obs for d in data]).float()
     data_output = torch.stack([d.output for d in data]).float()
@@ -236,26 +242,246 @@ def distil_model(student_model : torch.nn.Module,
 class DistillationExperiment(Experiment):
     def setup(self, config, output_directory):
         self.output_directory = output_directory
-        self.target_model = config['target_model']
-        self.agent = None
+
+        #self.target_model = config['target_model']
+        self.agent = dqn.make_agent_from_deploy_state(config['teacher_filename'])
+        self.replay_buffer = ReplayBuffer(
+                max_size=config.get('replay_buffer_size',500_000))
+        self.batch_size = config.get('batch_size',32)
+        self.train_frequency = config.get('train_frequency',50_000)
+        self.train_iterations = config.get('train_iterations',10_000)
+        self.test_iterations = config.get('test_iterations',5)
+
+        self.env_name = config['env_name']
+        self.env = make_env(self.env_name)
+        self.done = True
+
+        self.student_models = {
+            'MSE': {
+                'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
+                'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
+                'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
+                'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+            },
+            'NLL': {
+                'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
+                'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
+                'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
+                'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+            },
+            'KL': {
+                'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
+                'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
+                'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
+                'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+            },
+        }
+        self.num_params = {}
+        for models in self.student_models.values():
+            for model_name,model in models.items():
+                if model_name in self.num_params:
+                    continue
+                self.num_params[model_name] = count_parameters(model)
+        self.teacher_score = None
+        self.random_score = None
+        self.logger = Logger(key_name='step')
     def run_step(self, iteration):
-        return super().run_step(iteration)
+        if iteration == 0:
+            self.teacher_score = self._test_teacher()
+            self.random_score = self._test_random()
+        if iteration % self.train_frequency == 0 and len(self.replay_buffer) >= self.batch_size:
+            breakpoint()
+            self._train()
+            result = self._test()
+            self.logger.log(step=iteration,result=result)
+            self._plot()
+        self._generate_datapoint()
+    def _generate_datapoint(self):
+        env = self.env
+        if self.done:
+            self.done = False
+            obs = env.reset()
+            self.agent.observe(obs, testing=False)
+        else:
+            obs, reward, self.done, _ = env.step(self.agent.act(testing=False))
+            self.agent.observe(obs, reward, self.done, testing=False)
+        obs = torch.tensor(obs)
+        self.replay_buffer.add(
+                DistillationDataPoint(
+                    obs=obs,
+                    output=self.agent.q_net(obs.unsqueeze(0).float()).squeeze().detach()
+                )
+        )
+    def _train(self):
+        parameters = []
+        for models in self.student_models.values():
+            for model in models.values():
+                parameters += model.parameters()
+        optimizer = torch.optim.RMSprop(parameters, lr=1e-3)
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
+        for _,x in zip(range(self.train_iterations),dataloader):
+            obs = x.obs.float()
+            total_loss = torch.tensor(0.)
+            for method,models in self.student_models.items():
+                for model in models.values():
+                    y_target = x.output
+                    y_pred = model(obs)
+                    if method == 'MSE':
+                        criterion = torch.nn.MSELoss(reduction='mean')
+                        loss = criterion(y_pred,y_target)
+                    elif method == 'NLL':
+                        criterion = torch.nn.NLLLoss(reduction='mean')
+                        log_softmax = torch.nn.LogSoftmax()
+                        loss = criterion(log_softmax(y_pred),y_target.max(1)[1])
+                    elif method == 'KL':
+                        criterion = torch.nn.KLDivLoss(reduction='mean')
+                        log_softmax = torch.nn.LogSoftmax()
+                        loss = criterion(log_softmax(y_pred),log_softmax(y_target))
+                    else:
+                        raise Exception('Invalid method: %s' % method)
+                    total_loss += loss
+
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+    def _test(self):
+        results = {}
+        agent = dqn.DQNAgent(
+                action_space=self.env.action_space,
+                observation_space=self.env.observation_space,
+                q_net=self.student_models['MSE']['QNetworkCNN_3']
+        )
+        env = make_env(self.env_name)
+        for method,models in self.student_models.items():
+            results[method] = {}
+            for model_name,model in models.items():
+                print(method, model_name)
+                agent.q_net = model
+                results[method][model_name] = [test(env, agent) for _ in range(self.test_iterations)]
+        return results
+    def _test_teacher(self):
+        agent = self.agent
+        env = make_env(self.env_name)
+        return [test(env,agent) for _ in range(self.test_iterations)]
+    def _test_random(self):
+        env = make_env(self.env_name)
+        agent = rand.RandomAgent(env.action_space)
+        return [test(env,agent) for _ in range(self.test_iterations)]
+    def _plot(self):
+        plot_filename = os.path.join(self.output_directory,'plot.png')
+        bar_plot_filename = os.path.join(self.output_directory,'bar-plot.png')
+        line_plot_filename = os.path.join(self.output_directory,'line-plot.png')
+        num_params = self.num_params
+
+        teacher_score_mean = np.mean([x['total_reward'] for x in self.teacher_score])
+        random_score_mean = np.mean([x['total_reward'] for x in self.random_score])
+
+        labels = sorted([k for k in num_params.keys()], key=lambda k: num_params[k],reverse=True)
+        means = {}
+        results = self.logger[-1]['result']
+        for method,_ in results.items():
+            means[method] = {}
+            for l in labels:
+                if l in results[method]:
+                    score = np.mean([x['total_reward'] for x in results[method][l]])
+                    means[method][l] = (score-random_score_mean)/(teacher_score_mean-random_score_mean)
+                else:
+                    means[method][l] = np.nan
+
+        # Plot bar graph comparing different models and methods (i.e. multiple groups of bars, where each group consists of three bars, one for each method. See https://matplotlib.org/stable/gallery/lines_bars_and_markers/barchart.html and https://www.python-graph-gallery.com/11-grouped-barplot
+        bar_width = 0.25
+        x = np.arange(len(labels))
+        plt.figure()
+        for i,method in enumerate(means.keys()):
+            plt.bar(x + bar_width*i,
+                    [means[method][l] for l in labels],
+                    width=bar_width, edgecolor='white', label=method)
+        plt.xlabel('group', fontweight='bold')
+        plt.xticks([r + bar_width for r in range(len(labels))], labels)
+        plt.legend()
+        plt.savefig(bar_plot_filename)
+        print('Bar plot saved at %s' % os.path.abspath(bar_plot_filename))
+        plt.close()
+
+        # Plot a line graph with performance versus relative number of parameters compared to the teacher model (student size / teacher size)
+        teacher_model_size = num_params['QNetworkCNN']
+        plt.figure()
+        for i,method in enumerate(means.keys()):
+            x = [num_params[l]/teacher_model_size for l in labels if l in means[method].keys()]
+            y = [means[method][l] for l in labels if l in means[method].keys()]
+            plt.plot(x,y,label=method,marker='o')
+        plt.xlabel('Model size relative to teacher')
+        plt.ylabel('Student score')
+        plt.legend()
+        plt.grid()
+        plt.savefig(line_plot_filename)
+        print('Line plot saved at %s' % os.path.abspath(line_plot_filename))
+        plt.close()
+
+        # Plot the student performances over time
+        data = [x for x in self.logger if 'result' in x]
+        if len(data) > 2:
+            plt.figure()
+
+            for method,models in self.student_models.items():
+                for model_name in models.keys():
+                    x = [v['steps'] for v in data]
+                    y = [v['results'][method][model_name] for v in data]
+                    plt.plot(x,y,label='%s (%s)' % (model_name,method))
+            plt.xlabel('Training points')
+            plt.ylabel('Student score')
+            plt.title('Student performance over time')
+            plt.legend()
+            plt.grid()
+            plt.savefig(plot_filename)
+            print('Plot saved at %s' % os.path.abspath(plot_filename))
+            plt.close()
+
+    def state_dict(self):
+        return {
+                'replay_buffer_current_size': len(self.replay_buffer),
+                'student_models': {
+                    method: {
+                        name: model.state_dict()
+                        for name,model in models.items()
+                    }
+                    for method,models in self.student_models.items()
+                },
+                'logger': self.logger.state_dict(),
+                'teacher_score': self.teacher_score,
+                'random_score': self.random_score,
+        }
+    def load_state_dict(self, state):
+        if 'replay_buffer' in state:
+            self.replay_buffer.load_state_dict(state['replay_buffer'])
+        else:
+            for _ in tqdm(range(state['replay_buffer_current_size']),desc='Regenerating data'):
+                # This takes up too much disk space. It's faster to regenerate than to save/load from disk. It all comes from the same distribution anyway.
+                self._generate_datapoint()
+        for method,models in self.student_models.items():
+            for name,model in models.items():
+                model.load_state_dict(state['student_models'][method][name])
+        self.logger.load_state_dict(state['logger'])
+        self.teacher_score = state['teacher_score']
+        self.random_score = state['random_score']
+
 
 def make_app():
     import typer
     app = typer.Typer()
 
     environment_names = [
-            'BeamRiderNoFrameskip-v0',
-            'BreakoutNoFrameskip-v0',
-            'EnduroNoFrameskip-v0',
-            'FreewayNoFrameskip-v0',
-            'MsPacmanNoFrameskip-v0',
+            #'BeamRiderNoFrameskip-v0',
+            #'BreakoutNoFrameskip-v0',
+            #'EnduroNoFrameskip-v0',
+            #'FreewayNoFrameskip-v0',
+            #'MsPacmanNoFrameskip-v0',
             'PongNoFrameskip-v4',
-            'QbertNoFrameskip-v0',
-            'RiverraidNoFrameskip-v0',
-            'SeaquestNoFrameskip-v0',
-            'SpaceInvadersNoFrameskip-v0',
+            #'QbertNoFrameskip-v0',
+            #'RiverraidNoFrameskip-v0',
+            #'SeaquestNoFrameskip-v0',
+            #'SpaceInvadersNoFrameskip-v0',
     ]
     models = {
             'QNetworkCNN': dqn.QNetworkCNN,
@@ -355,7 +581,7 @@ def make_app():
                 student_model=student_model,
                 data=dataset,
                 method=method,
-                n_steps=100 if debug else 10_000)
+                n_steps=100 if debug else 10_000*10)
 
         # Evaluate distilled model
         distilled_agent = dqn.DQNAgent(
@@ -373,68 +599,96 @@ def make_app():
         print('Distillation result saved in %s' % os.path.abspath(output_filename))
 
     @app.command()
+    def distill2(env_name : str,
+            teacher_filename : str,
+            results_directory : Optional[str] = None,
+            debug : bool = typer.Option(False, '--debug')):
+        exp_runner = make_experiment_runner(
+                DistillationExperiment,
+                max_iterations=100 if debug else 5_000_000,
+                verbose=True,
+                results_directory=results_directory,
+                checkpoint_frequency=50_000,
+                config={
+                    'env_name': env_name,
+                    'batch_size': 8 if debug else 32,
+                    'train_iterations': 1 if debug else 10_000,
+                    'train_frequency': 5 if debug else 50_000,
+                    'teacher_filename': teacher_filename
+                }
+        )
+        exp_runner.run()
+
+    @app.command()
     def run_local(debug : bool = typer.Option(False, '--debug')):
         results = {}
         for env_name in environment_names:
             train_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'train',env_name)
             test_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'test')
+            distill2_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'distill2',env_name)
             teacher_test_filename = os.path.join(test_directory,'teacher','%s.pkl' % env_name)
             random_test_filename = os.path.join(test_directory,'random','%s.pkl' % env_name)
             teacher_model_filename = os.path.join(train_directory,'output/deploy_state-best.pkl')
             dataset_filename = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'dataset','%s.pkl'%env_name)
-            train(
+            #train(
+            #        env_name=env_name,
+            #        results_directory=train_directory,
+            #        debug=debug
+            #)
+            #test_saved_model(
+            #        env_name=env_name,
+            #        filename=teacher_model_filename,
+            #        output_filename=teacher_test_filename,
+            #)
+            #test_random(
+            #        env_name=env_name,
+            #        output_filename=random_test_filename,
+            #)
+            distill2(
                     env_name=env_name,
-                    results_directory=train_directory,
-                    debug=debug
-            )
-            test_saved_model(
-                    env_name=env_name,
-                    filename=teacher_model_filename,
-                    output_filename=teacher_test_filename,
-            )
-            test_random(
-                    env_name=env_name,
-                    output_filename=random_test_filename,
-            )
-            generate_dataset(
-                    env_name=env_name,
+                    results_directory=distill2_directory,
                     teacher_filename=teacher_model_filename,
-                    output_filename=dataset_filename
+                    debug=debug,
             )
-            for i in range(1,2):
-                for model_name in models.keys():
-                    for method in ['MSE', 'NLL', 'KL']:
-                        distill(
-                                env_name=env_name,
-                                dataset_filename=dataset_filename,
-                                output_filename=os.path.join(
-                                    EXPERIMENT_GROUP_DIRECTORY,'distill',env_name,model_name,'%s-%d.pkl'%(method,i)
-                                ),
-                                model_name=model_name,
-                                method=method,
-                                n_test_runs=5,
-                                debug=debug
-                        )
-            # Save results
-            results[env_name] = {}
-            with open(teacher_test_filename,'rb') as f:
-                results[env_name]['teacher_score'] = dill.load(f)
-            with open(random_test_filename,'rb') as f:
-                results[env_name]['random_score'] = dill.load(f)
-            results[env_name]['student_score'] = {
-                    model_name: {method: [] for method in ['MSE','NLL','KL']}
-                    for model_name in models.keys()
-            }
-            for model_name in models.keys():
-                directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'distill',env_name,model_name)
-                for filename in os.listdir(directory):
-                    match = re.match(r'([A-Z]+)-(\d+).pkl', filename)
-                    method = match.group(1)
-                    with open(os.path.join(directory,filename),'rb') as f:
-                        results[env_name]['student_score'][model_name][method].append(
-                                dill.load(f)
-                        )
-        breakpoint()
+            #generate_dataset(
+            #        env_name=env_name,
+            #        teacher_filename=teacher_model_filename,
+            #        output_filename=dataset_filename,
+            #        debug=debug,
+            #)
+            #for i in range(1,2):
+            #    for model_name in models.keys():
+            #        for method in ['MSE', 'NLL', 'KL']:
+            #            distill(
+            #                    env_name=env_name,
+            #                    dataset_filename=dataset_filename,
+            #                    output_filename=os.path.join(
+            #                        EXPERIMENT_GROUP_DIRECTORY,'distill',env_name,model_name,'%s-%d.pkl'%(method,i)
+            #                    ),
+            #                    model_name=model_name,
+            #                    method=method,
+            #                    n_test_runs=5,
+            #                    debug=debug
+            #            )
+            ## Save results
+            #results[env_name] = {}
+            #with open(teacher_test_filename,'rb') as f:
+            #    results[env_name]['teacher_score'] = dill.load(f)
+            #with open(random_test_filename,'rb') as f:
+            #    results[env_name]['random_score'] = dill.load(f)
+            #results[env_name]['student_score'] = {
+            #        model_name: {method: [] for method in ['MSE','NLL','KL']}
+            #        for model_name in models.keys()
+            #}
+            #for model_name in models.keys():
+            #    directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'distill',env_name,model_name)
+            #    for filename in os.listdir(directory):
+            #        match = re.match(r'([A-Z]+)-(\d+).pkl', filename)
+            #        method = match.group(1)
+            #        with open(os.path.join(directory,filename),'rb') as f:
+            #            results[env_name]['student_score'][model_name][method].append(
+            #                    dill.load(f)
+            #            )
 
     @app.command()
     def run_slurm(debug : bool = typer.Option(False, '--debug')):
@@ -563,6 +817,7 @@ def make_app():
             'test_random': test_random,
             'generate_dataset': generate_dataset,
             'distill': distill,
+            'distill2': distill2,
             'run_local': run_local,
             'run_slurm': run_slurm,
     }
