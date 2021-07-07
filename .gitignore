@@ -9,3 +9,12 @@ results/**
 **/__pycache__
 **/*.pyc
 **/Session.vim
+.coverage
+.vim
+*.vim
+*.png
+*.avi
+*.pkl
+html
+MUJOCO_LOG.TXT
+*.egg-info

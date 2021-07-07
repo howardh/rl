@@ -153,6 +153,8 @@ class ObservationStack(Generic[ObsType,ActionType]):
         self.curr = state['curr']
         self.prev_a = state['prev_a']
         self.curr_a = state['curr_a']
+ObsType = TypeVar('ObsType')
+ActionType = TypeVar('ActionType')
 
 class SACAgent(DeployableAgent):
     """

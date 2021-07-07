@@ -24,12 +24,12 @@ Experiment details in appendix A
 - Batch size: ?? 
 """
 
-import re
 import os
 import itertools
 from rl.agent.agent import Agent
 from experiment.experiment import make_experiment_runner
 from typing import Optional, NamedTuple, List
+from pprint import pprint
 
 from tqdm import tqdm
 import torch
@@ -137,9 +137,14 @@ class TrainExperiment(Experiment):
             score = np.mean(self.logger[-1]['total_reward'])
             if score > self._best_score:
                 self._best_score = score
+                # Deploy State
                 filename = os.path.join(self.output_directory,'deploy_state-best.pkl')
                 self._save_deploy_state(filename)
                 tqdm.write('Saved deploy state at %s with score %f' % (os.path.abspath(filename), score))
+                # Q Network
+                filename = os.path.join(self.output_directory,'qnet-best.pkl')
+                self._save_model(filename)
+                tqdm.write('Q Network saved at %s' % (os.path.abspath(filename), score))
         # Train agent
         self._train()
     def _train(self):
@@ -184,6 +189,8 @@ class TrainExperiment(Experiment):
         data = self.agent.state_dict_deploy()
         with open(filename, 'wb') as f:
             dill.dump(data,f)
+    def _save_model(self, filename):
+        torch.save(self.agent.q_net, filename)
 
 class DistillationDataPoint(NamedTuple):
     obs : torch.Tensor
@@ -243,7 +250,6 @@ class DistillationExperiment(Experiment):
     def setup(self, config, output_directory):
         self.output_directory = output_directory
 
-        #self.target_model = config['target_model']
         self.agent = dqn.make_agent_from_deploy_state(config['teacher_filename'])
         self.replay_buffer = ReplayBuffer(
                 max_size=config.get('replay_buffer_size',500_000))
@@ -256,45 +262,68 @@ class DistillationExperiment(Experiment):
         self.env = make_env(self.env_name)
         self.done = True
 
+        # Students
         self.student_models = {
             'MSE': {
                 'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
-                'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
-                'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
-                'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+                #'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
+                #'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
+                #'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
             },
             'NLL': {
                 'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
-                'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
-                'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
-                'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+                #'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
+                #'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
+                #'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
             },
             'KL': {
                 'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
-                'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
-                'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
-                'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+                #'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
+                #'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
+                #'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
             },
         }
+        ## XXX: DEBUG (Copy parameters from teacher model)
+        #for models in self.student_models.values():
+        #    for model in models.values():
+        #        model.load_state_dict(self.agent.q_net.state_dict())
+        self.losses = {'MSE': [], 'NLL': [], 'KL': []} # XXX: Debug
+        # Optimizer
+        self.optimizer = {}
+        for method,models in self.student_models.items():
+            self.optimizer[method] = {}
+            for model_name,model in models.items():
+                self.optimizer[method][model_name] = torch.optim.RMSprop(
+                        model.parameters(),
+                        lr=1e-4)
+        # Parameter count
         self.num_params = {}
         for models in self.student_models.values():
             for model_name,model in models.items():
                 if model_name in self.num_params:
                     continue
                 self.num_params[model_name] = count_parameters(model)
+        # Baselines
         self.teacher_score = None
         self.random_score = None
+        # Logs
         self.logger = Logger(key_name='step')
     def run_step(self, iteration):
         if iteration == 0:
+            print('Testing teacher...')
             self.teacher_score = self._test_teacher()
+            print('Teacher score', self.teacher_score)
+            print('Testing random agent...')
             self.random_score = self._test_random()
+            print('Random agent score', self.random_score)
+        #if len(self.replay_buffer) >= self.batch_size:
         if iteration % self.train_frequency == 0 and len(self.replay_buffer) >= self.batch_size:
-            breakpoint()
             self._train()
             result = self._test()
             self.logger.log(step=iteration,result=result)
             self._plot()
+            self._plot_debug()
+            pprint(result)
         self._generate_datapoint()
     def _generate_datapoint(self):
         env = self.env
@@ -313,18 +342,15 @@ class DistillationExperiment(Experiment):
                 )
         )
     def _train(self):
-        parameters = []
-        for models in self.student_models.values():
-            for model in models.values():
-                parameters += model.parameters()
-        optimizer = torch.optim.RMSprop(parameters, lr=1e-3)
+        optimizer = self.optimizer
         dataloader = torch.utils.data.DataLoader(
                 self.replay_buffer, batch_size=self.batch_size, shuffle=True)
-        for _,x in zip(range(self.train_iterations),dataloader):
+        debug_loss = {'MSE': [], 'NLL': [], 'KL': []}
+        for _,x in tqdm(zip(range(self.train_iterations),dataloader),desc='Training'):
             obs = x.obs.float()
-            total_loss = torch.tensor(0.)
             for method,models in self.student_models.items():
-                for model in models.values():
+                for model_name,model in models.items():
+                    optimizer = self.optimizer[method][model_name]
                     y_target = x.output
                     y_pred = model(obs)
                     if method == 'MSE':
@@ -335,22 +361,24 @@ class DistillationExperiment(Experiment):
                         log_softmax = torch.nn.LogSoftmax()
                         loss = criterion(log_softmax(y_pred),y_target.max(1)[1])
                     elif method == 'KL':
-                        criterion = torch.nn.KLDivLoss(reduction='mean')
+                        criterion = torch.nn.KLDivLoss(reduction='mean',log_target=True)
                         log_softmax = torch.nn.LogSoftmax()
                         loss = criterion(log_softmax(y_pred),log_softmax(y_target))
                     else:
                         raise Exception('Invalid method: %s' % method)
-                    total_loss += loss
-
-            optimizer.zero_grad()
-            total_loss.backward()
-            optimizer.step()
+                    debug_loss[method].append(loss.detach().item())
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+        for k,v in debug_loss.items():
+            self.losses[k].append(v)
     def _test(self):
         results = {}
+        q_net = next(iter(next(iter(self.student_models.values())).values())) # Choose an arbitrary network
         agent = dqn.DQNAgent(
                 action_space=self.env.action_space,
                 observation_space=self.env.observation_space,
-                q_net=self.student_models['MSE']['QNetworkCNN_3']
+                q_net=q_net
         )
         env = make_env(self.env_name)
         for method,models in self.student_models.items():
@@ -373,6 +401,11 @@ class DistillationExperiment(Experiment):
         bar_plot_filename = os.path.join(self.output_directory,'bar-plot.png')
         line_plot_filename = os.path.join(self.output_directory,'line-plot.png')
         num_params = self.num_params
+
+        if self.teacher_score is None:
+            raise Exception('_test_random() must be run before plotting.')
+        if self.random_score is None:
+            raise Exception('_test_teacher() must be run before plotting.')
 
         teacher_score_mean = np.mean([x['total_reward'] for x in self.teacher_score])
         random_score_mean = np.mean([x['total_reward'] for x in self.random_score])
@@ -426,8 +459,8 @@ class DistillationExperiment(Experiment):
 
             for method,models in self.student_models.items():
                 for model_name in models.keys():
-                    x = [v['steps'] for v in data]
-                    y = [v['results'][method][model_name] for v in data]
+                    x = [v['step'] for v in data]
+                    y = [np.mean([r['total_reward'] for r in v['result'][method][model_name]]) for v in data]
                     plt.plot(x,y,label='%s (%s)' % (model_name,method))
             plt.xlabel('Training points')
             plt.ylabel('Student score')
@@ -437,9 +470,54 @@ class DistillationExperiment(Experiment):
             plt.savefig(plot_filename)
             print('Plot saved at %s' % os.path.abspath(plot_filename))
             plt.close()
+    def _plot_debug(self):
+        # Loss over time
+        fig, axs = plt.subplots(len(self.losses), sharex=True)
+        for ax,(method,data) in zip(axs,self.losses.items()):
+            y = [np.mean(d) for d in data]
+            x = range(len(y))
+            ax.plot(x,y,label=method)
+            ax.grid()
+            ax.set_xlabel('Training iterations')
+            ax.set_ylabel('%s Loss' % method)
+        fig.suptitle('DEBUG: Losses')
+
+        filename = os.path.join(self.output_directory,'debug.png')
+        plt.savefig(filename)
+        tqdm.write('Debug plot saved to %s' % filename)
+
+        for ax in axs:
+            ax.set_yscale('log')
+        filename = os.path.join(self.output_directory,'debug-log.png')
+        fig.savefig(filename)
+        tqdm.write('Debug plot saved to %s' % filename)
+        plt.close(fig)
+
+        # Minibatch loss
+        fig, axs = plt.subplots(len(self.losses), sharex=True)
+        for ax,(method,data) in zip(axs,self.losses.items()):
+            y = data[-1]
+            x = range(len(y))
+            ax.scatter(x,y,label=method)
+            ax.grid()
+            ax.set_xlabel('Number of mini-batches')
+            ax.set_ylabel('%s Mini-batch Loss' % method)
+        fig.suptitle('DEBUG: Losses')
+
+        filename = os.path.join(self.output_directory,'debug-minibatch.png')
+        plt.savefig(filename)
+        tqdm.write('Debug plot saved to %s' % filename)
+
+        for ax in axs:
+            ax.set_yscale('log')
+        filename = os.path.join(self.output_directory,'debug-minibatch-log.png')
+        fig.savefig(filename)
+        tqdm.write('Debug plot saved to %s' % filename)
+        plt.close(fig)
 
     def state_dict(self):
         return {
+                'replay_buffer': self.replay_buffer.state_dict(),
                 'replay_buffer_current_size': len(self.replay_buffer),
                 'student_models': {
                     method: {
@@ -448,9 +526,18 @@ class DistillationExperiment(Experiment):
                     }
                     for method,models in self.student_models.items()
                 },
+                'optimizer': {
+                    method: {
+                        name: optimizer.state_dict()
+                        for name,optimizer in optimizers.items()
+                    }
+                    for method,optimizers in self.optimizer.items()
+                },
+                #'optimizer': self.optimizer.state_dict(),
                 'logger': self.logger.state_dict(),
                 'teacher_score': self.teacher_score,
                 'random_score': self.random_score,
+                'DEBUG-losses': self.losses
         }
     def load_state_dict(self, state):
         if 'replay_buffer' in state:
@@ -462,9 +549,14 @@ class DistillationExperiment(Experiment):
         for method,models in self.student_models.items():
             for name,model in models.items():
                 model.load_state_dict(state['student_models'][method][name])
+        for method,optimizers in self.optimizer.items():
+            for name,optimizer in optimizers.items():
+                optimizer.load_state_dict(state['optimizer'][method][name])
+        #self.optimizer.load_state_dict(state['optimizer'])
         self.logger.load_state_dict(state['logger'])
         self.teacher_score = state['teacher_score']
         self.random_score = state['random_score']
+        self.losses = state['DEBUG-losses']
 
 
 def make_app():
@@ -490,6 +582,7 @@ def make_app():
             'QNetworkCNN_3': dqn.QNetworkCNN_3,
     }
     PROJECT_ROOT = './rl'
+    #EXPERIMENT_GROUP_NAME = 'rusu2016-2'
     EXPERIMENT_GROUP_NAME = 'rusu2016'
     RESULTS_ROOT_DIRECTORY = rl.utils.get_results_root_directory()
     EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
@@ -621,15 +714,15 @@ def make_app():
 
     @app.command()
     def run_local(debug : bool = typer.Option(False, '--debug')):
-        results = {}
+        #results = {}
         for env_name in environment_names:
             train_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'train',env_name)
-            test_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'test')
+            #test_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'test')
             distill2_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'distill2',env_name)
-            teacher_test_filename = os.path.join(test_directory,'teacher','%s.pkl' % env_name)
-            random_test_filename = os.path.join(test_directory,'random','%s.pkl' % env_name)
+            #teacher_test_filename = os.path.join(test_directory,'teacher','%s.pkl' % env_name)
+            #random_test_filename = os.path.join(test_directory,'random','%s.pkl' % env_name)
             teacher_model_filename = os.path.join(train_directory,'output/deploy_state-best.pkl')
-            dataset_filename = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'dataset','%s.pkl'%env_name)
+            #dataset_filename = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'dataset','%s.pkl'%env_name)
             #train(
             #        env_name=env_name,
             #        results_directory=train_directory,

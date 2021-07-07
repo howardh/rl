@@ -678,6 +678,26 @@ def gridsearch(parameters, func, repetitions=1, shuffle=False):
     params = [dict(p) for p in params]
     return [lambda p=p: func(**p) for p in params]
 
+# Git
+
+def get_git_patch():
+    import git
+    repo = git.Repo('.')
+    untracked_files = repo.untracked_files
+
+    untracked_file_content = {}
+    for filename in untracked_files:
+        with open(filename,'rb') as f:
+            untracked_file_content[filename] = f.read()
+
+    breakpoint()
+
+    return {
+        'commit_id': repo.head.commit.hexsha,
+        'diff': repo.git.diff(),
+        'untracked_files': untracked_file_content
+    }
+
 # Debugging
 
 def compute_grad_mean(optim):
