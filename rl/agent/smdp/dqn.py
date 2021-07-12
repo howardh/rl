@@ -208,7 +208,7 @@ class DQNAgent(DeployableAgent):
     """
     def __init__(self,
             action_space : gym.spaces.Discrete,
-            observation_space : gym.spaces.Box,
+            observation_space : gym.spaces.Space,
             discount_factor : float = 0.99,
             learning_rate : float = 2.5e-4,
             update_frequency : int = 4,
@@ -220,6 +220,7 @@ class DQNAgent(DeployableAgent):
             device = torch.device('cpu'),
             behaviour_eps : float = 0.1,
             target_eps : float = 0,
+            eps_annealing_steps : int = 1_000_000,
             q_net : torch.nn.Module = None
             ):
         """
@@ -227,11 +228,14 @@ class DQNAgent(DeployableAgent):
             action_space: Gym action space.
             observation_space: Gym observation space.
             behaviour_eps (float): Minimum probability of taking a uniformly random action during on each training step. The actual probability is annealed over a number of steps. In Mnih 2015, "epsilon [is] annealed linearly from 1.0 to 0.1 over the first million frames, and fixed at 0.1 thereafter."
+            eps_annealing_steps (int): Number of steps over which the behaviour policy's epsilon randomness decreases from 1 to `behaviour_eps`.
             update_frequency (int): The number of actions selected by the agent between successive SGD updates. Using a value of 4 results in the agent selection 4 actions between each pair of successive updates.
             target_update_frequency (int): The frequency with which the target Q network is updated. This is measured in terms of number of training steps (i.e. it only starts counting after `warmup_steps` steps).
         """
         self.action_space = action_space
         self.observation_space = observation_space
+        if isinstance(observation_space,gym.spaces.Box):
+            self.obs_scale = observation_space.high.max()
 
         self.discount_factor = discount_factor
         self.update_frequency = update_frequency
@@ -241,6 +245,7 @@ class DQNAgent(DeployableAgent):
         self.polyak_rate = polyak_rate
         self.device = device
         self.eps = [behaviour_eps, target_eps]
+        self.eps_annealing_steps = eps_annealing_steps
 
         # State (training)
         self.obs_stack = defaultdict(lambda: ObservationStack())
@@ -271,7 +276,7 @@ class DQNAgent(DeployableAgent):
         if discount is None:
             discount = self.discount_factor
 
-        obs = torch.tensor(obs).float()/255
+        obs = torch.tensor(obs).float()/self.obs_scale
 
         self.obs_stack[env_key].append_obs(obs, reward, terminal)
 
@@ -281,8 +286,8 @@ class DQNAgent(DeployableAgent):
             self._steps += 1
             
             obs0, action0, reward1, obs1, terminal = x
-            obs0 = torch.Tensor(obs0)
-            obs1 = torch.Tensor(obs1)
+            obs0 = torch.tensor(obs0)
+            obs1 = torch.tensor(obs1)
             transition = (obs0, action0, reward1, obs1, terminal, time, discount)
             self.replay_buffer.add(transition)
 
@@ -304,30 +309,35 @@ class DQNAgent(DeployableAgent):
             # Fix data types
             s0 = s0.to(self.device)
             a0 = a0.to(self.device)
-            r1 = r1.float().to(self.device)
+            r1 = r1.float().to(self.device).unsqueeze(1)
             s1 = s1.to(self.device)
-            term = term.float().to(self.device)
-            time = time.to(self.device)
-            gamma = gamma.float().to(self.device)
+            term = term.float().to(self.device).unsqueeze(1)
+            time = time.to(self.device).unsqueeze(1)
+            gamma = gamma.float().to(self.device).unsqueeze(1)
             g_t = torch.pow(gamma,time)
+            if isinstance(self.observation_space,gym.spaces.Discrete):
+                s0 = s0.unsqueeze(1)
+                s1 = s1.unsqueeze(1)
+            if isinstance(self.action_space,gym.spaces.Discrete):
+                a0 = a0.unsqueeze(1)
 
             # Value estimate (target)
-            #action_values = self.q_net(s1)
             action_values_target = self.q_net_target(s1)
-            #optimal_actions = action_values.max(1)[1].unsqueeze(0)
-            #optimal_values = action_values_target.gather(1,optimal_actions)
-            optimal_values = action_values_target.max(1)[0].unsqueeze(0)
+            optimal_values = action_values_target.max(1)[0].unsqueeze(1)
             y = r1+g_t*optimal_values*(1-term)
             y = y.detach()
 
             # Value estimate (prediction)
-            y_pred = self.q_net(s0).gather(1,a0.unsqueeze(1))
+            y_pred = self.q_net(s0).gather(1,a0)
     
             self.train_action_values.append(y_pred.mean().item()) # XXX: DEBUG
             self.train_action_values_target.append(y.mean().item()) # XXX: DEBUG
 
             #if self._steps >= 200_000:
             #    breakpoint()
+
+            if y.shape != y_pred.shape: # XXX: DEBUG
+                raise Exception()
 
             # Update Q network
             optimizer.zero_grad()
@@ -338,7 +348,7 @@ class DQNAgent(DeployableAgent):
                 param.grad.data.clamp_(-1, 1)
             optimizer.step()
 
-            y_pred2 = self.q_net(s0).gather(1,a0.unsqueeze(0)) #XXX: DEBUG
+            y_pred2 = self.q_net(s0).gather(1,a0) #XXX: DEBUG
             self.train_action_value_diff.append((y_pred2-y_pred).mean().item())#XXX: DEBUG
             self.train_loss_diff.append((criterion(y_pred2,y)-loss).item()) #XXX: DEBUG
 
@@ -359,10 +369,15 @@ class DQNAgent(DeployableAgent):
         if testing:
             eps = self.eps[testing]
         else:
-            eps = self._compute_annealed_epsilon()
+            eps = self._compute_annealed_epsilon(self.eps_annealing_steps)
 
         obs = self.obs_stack[env_key].get_obs()
-        obs = torch.tensor(obs).unsqueeze(0).float().to(self.device)
+        if isinstance(self.observation_space,gym.spaces.Discrete):
+            obs = torch.tensor(obs).unsqueeze(0).unsqueeze(0).float().to(self.device)
+        elif isinstance(self.observation_space,gym.spaces.Box):
+            obs = torch.tensor(obs).unsqueeze(0).float().to(self.device)
+        else:
+            raise NotImplementedError()
         vals = self.q_net(obs)
         if torch.rand(1) >= eps:
             action = vals.max(dim=1)[1].item()

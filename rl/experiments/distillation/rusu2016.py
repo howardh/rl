@@ -55,9 +55,123 @@ import rl.agent.smdp.dqn as dqn
 import rl.agent.smdp.rand as rand
 from rl.agent import ReplayBuffer
 
+class QNetworkCNN(torch.nn.Module):
+    def __init__(self, num_actions):
+        super().__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=4,out_channels=32,kernel_size=8,stride=4),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=32,out_channels=64,kernel_size=4,stride=2),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=64,out_channels=64,kernel_size=3,stride=1),
+            torch.nn.LeakyReLU(),
+        )
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(in_features=64*7*7,out_features=512),
+            torch.nn.LeakyReLU(),
+            torch.nn.Linear(in_features=512,out_features=num_actions),
+        )
+    def forward(self, obs):
+        x = obs
+        x = self.conv(x)
+        x = x.view(-1,7*7*64)
+        x = self.fc(x)
+        return x
+class QNetworkCNN_1(torch.nn.Module):
+    def __init__(self, num_actions):
+        super().__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=4,out_channels=16,kernel_size=8,stride=4),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(
+                in_channels=16,out_channels=16,kernel_size=4,stride=2),
+            torch.nn.ReLU()
+        )
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(in_features=16*9*9,out_features=256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=256,out_features=num_actions),
+        )
+    def forward(self, obs):
+        x = obs
+        x = self.conv(x)
+        x = x.view(-1,9*9*16)
+        x = self.fc(x)
+        return x
+class QNetworkCNN_2(torch.nn.Module):
+    def __init__(self, num_actions):
+        super().__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=4,out_channels=16,kernel_size=8,stride=4),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(
+                in_channels=16,out_channels=16,kernel_size=4,stride=2),
+            torch.nn.ReLU()
+        )
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(in_features=16*9*9,out_features=256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=256,out_features=num_actions),
+        )
+    def forward(self, obs):
+        x = obs
+        x = self.conv(x)
+        x = x.view(-1,9*9*16)
+        x = self.fc(x)
+        return x
+class QNetworkCNN_3(torch.nn.Module):
+    def __init__(self, num_actions):
+        super().__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=4,out_channels=16,kernel_size=8,stride=4),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(
+                in_channels=16,out_channels=16,kernel_size=4,stride=2),
+            torch.nn.ReLU()
+        )
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(in_features=16*9*9,out_features=128),
+            torch.nn.ReLU(),
+            torch.nn.Linear(in_features=128,out_features=num_actions),
+        )
+    def forward(self, obs):
+        x = obs
+        x = self.conv(x)
+        x = x.view(-1,9*9*16)
+        x = self.fc(x)
+        return x
+
 def count_parameters(model):
     # https://discuss.pytorch.org/t/how-do-i-check-the-number-of-parameters-of-a-model/4325/9
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+class DiscreteToOnehotObs(gym.Wrapper):
+    def __init__(self, env):
+        self.env = env
+        obs_size = env.observation_space.n
+        self.observation_space = gym.spaces.Box(
+                low=np.array([0]*obs_size),
+                high=np.array([1]*obs_size),
+        )
+        self.action_space = env.action_space
+    def reset(self):
+        obs = self.env.reset()
+        obs = self._to_onehot(obs)
+        return obs
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        obs = self._to_onehot(obs)
+        return obs, reward, done, info
+    def _to_onehot(self, val : int):
+        output = np.zeros([self.env.observation_space.n])
+        output[val] = 1
+        return output
 
 def make_env(env_name):
     env = gym.make(env_name)
@@ -114,7 +228,7 @@ class TrainExperiment(Experiment):
         env = [make_env(env_name), make_env(env_name)]
         return env
     def _init_agents(self, env, device):
-        q_net = dqn.QNetworkCNN(num_actions=env.action_space.n).to(device)
+        q_net = QNetworkCNN(num_actions=env.action_space.n).to(device)
         agent = dqn.DQNAgent(
             action_space=env.action_space,
             observation_space=env.observation_space,
@@ -144,7 +258,7 @@ class TrainExperiment(Experiment):
                 # Q Network
                 filename = os.path.join(self.output_directory,'qnet-best.pkl')
                 self._save_model(filename)
-                tqdm.write('Q Network saved at %s' % (os.path.abspath(filename), score))
+                tqdm.write('Q Network saved at %s' % os.path.abspath(filename))
         # Train agent
         self._train()
     def _train(self):
@@ -191,6 +305,50 @@ class TrainExperiment(Experiment):
             dill.dump(data,f)
     def _save_model(self, filename):
         torch.save(self.agent.q_net, filename)
+
+    def state_dict(self):
+        return {
+            'best_score': self._best_score,
+            'logger': self.logger.state_dict()
+        }
+    def load_state_dict(self, state):
+        self.done = True # Environment needs to be reset. There's no general way of saving the environment state.
+        self._best_score = state['best_score']
+        self.logger.load_state_dict(state['logger'])
+
+class TrainExperimentDebug(TrainExperiment):
+    def _init_agents(self, env, device):
+        if isinstance(env.observation_space,gym.spaces.Discrete):
+            obs_size = 1
+        elif isinstance(env.observation_space,gym.spaces.Box):
+            obs_size = env.observation_space.shape[0]
+        else:
+            raise NotImplementedError()
+        #q_net = dqn.QNetworkFCNN([obs_size,5,5,env.action_space.n]).to(device)
+        q_net = dqn.QNetworkFCNN([obs_size,env.action_space.n]).to(device)
+        agent = dqn.DQNAgent(
+            action_space=env.action_space,
+            observation_space=env.observation_space,
+            q_net=q_net,
+            device=device,
+            warmup_steps=32,
+            batch_size=64,
+            target_eps=0,
+            eps_annealing_steps=50_000,
+            learning_rate=0.1,
+            replay_buffer_size=1_000
+        )
+        return agent
+    def _init_envs(self,env_name):
+        def make_env(env_name):
+            env = gym.make(env_name)
+            env = DiscreteToOnehotObs(env)
+            return env
+        env = [
+                make_env(env_name),
+                make_env(env_name),
+        ]
+        return env
 
 class DistillationDataPoint(NamedTuple):
     obs : torch.Tensor
@@ -259,28 +417,28 @@ class DistillationExperiment(Experiment):
         self.test_iterations = config.get('test_iterations',5)
 
         self.env_name = config['env_name']
-        self.env = make_env(self.env_name)
+        self.env = self._make_env(self.env_name)
         self.done = True
 
         # Students
         self.student_models = {
             'MSE': {
-                'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
-                #'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
-                #'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
-                #'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+                'QNetworkCNN': QNetworkCNN(self.env.action_space.n),
+                #'QNetworkCNN_1': QNetworkCNN_1(self.env.action_space.n),
+                #'QNetworkCNN_2': QNetworkCNN_2(self.env.action_space.n),
+                #'QNetworkCNN_3': QNetworkCNN_3(self.env.action_space.n),
             },
             'NLL': {
-                'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
-                #'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
-                #'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
-                #'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+                'QNetworkCNN': QNetworkCNN(self.env.action_space.n),
+                #'QNetworkCNN_1': QNetworkCNN_1(self.env.action_space.n),
+                #'QNetworkCNN_2': QNetworkCNN_2(self.env.action_space.n),
+                #'QNetworkCNN_3': QNetworkCNN_3(self.env.action_space.n),
             },
             'KL': {
-                'QNetworkCNN': dqn.QNetworkCNN(self.env.action_space.n),
-                #'QNetworkCNN_1': dqn.QNetworkCNN_1(self.env.action_space.n),
-                #'QNetworkCNN_2': dqn.QNetworkCNN_2(self.env.action_space.n),
-                #'QNetworkCNN_3': dqn.QNetworkCNN_3(self.env.action_space.n),
+                'QNetworkCNN': QNetworkCNN(self.env.action_space.n),
+                #'QNetworkCNN_1': QNetworkCNN_1(self.env.action_space.n),
+                #'QNetworkCNN_2': QNetworkCNN_2(self.env.action_space.n),
+                #'QNetworkCNN_3': QNetworkCNN_3(self.env.action_space.n),
             },
         }
         ## XXX: DEBUG (Copy parameters from teacher model)
@@ -306,8 +464,11 @@ class DistillationExperiment(Experiment):
         # Baselines
         self.teacher_score = None
         self.random_score = None
+        self.teacher_model_name = 'QNetworkCNN'
         # Logs
         self.logger = Logger(key_name='step')
+    def _make_env(self, env_name):
+        return make_env(env_name)
     def run_step(self, iteration):
         if iteration == 0:
             print('Testing teacher...')
@@ -334,7 +495,7 @@ class DistillationExperiment(Experiment):
         else:
             obs, reward, self.done, _ = env.step(self.agent.act(testing=False))
             self.agent.observe(obs, reward, self.done, testing=False)
-        obs = torch.tensor(obs)
+        obs = torch.tensor(obs)/255
         self.replay_buffer.add(
                 DistillationDataPoint(
                     obs=obs,
@@ -380,7 +541,7 @@ class DistillationExperiment(Experiment):
                 observation_space=self.env.observation_space,
                 q_net=q_net
         )
-        env = make_env(self.env_name)
+        env = self._make_env(self.env_name)
         for method,models in self.student_models.items():
             results[method] = {}
             for model_name,model in models.items():
@@ -390,10 +551,10 @@ class DistillationExperiment(Experiment):
         return results
     def _test_teacher(self):
         agent = self.agent
-        env = make_env(self.env_name)
+        env = self._make_env(self.env_name)
         return [test(env,agent) for _ in range(self.test_iterations)]
     def _test_random(self):
-        env = make_env(self.env_name)
+        env = self._make_env(self.env_name)
         agent = rand.RandomAgent(env.action_space)
         return [test(env,agent) for _ in range(self.test_iterations)]
     def _plot(self):
@@ -438,7 +599,7 @@ class DistillationExperiment(Experiment):
         plt.close()
 
         # Plot a line graph with performance versus relative number of parameters compared to the teacher model (student size / teacher size)
-        teacher_model_size = num_params['QNetworkCNN']
+        teacher_model_size = num_params[self.teacher_model_name]
         plt.figure()
         for i,method in enumerate(means.keys()):
             x = [num_params[l]/teacher_model_size for l in labels if l in means[method].keys()]
@@ -558,6 +719,107 @@ class DistillationExperiment(Experiment):
         self.random_score = state['random_score']
         self.losses = state['DEBUG-losses']
 
+class DistillationExperimentDebug(DistillationExperiment):
+    def setup(self, config, output_directory):
+        super().setup(config, output_directory)
+
+        #self.test_iterations = 100
+
+        # Students
+        if isinstance(self.env.observation_space,gym.spaces.Discrete):
+            obs_size = 1
+        elif isinstance(self.env.observation_space,gym.spaces.Box):
+            obs_size = self.env.observation_space.shape[0]
+        else:
+            raise NotImplementedError()
+        self.student_models = {
+            'MSE': {
+                'QNetworkFCNN': dqn.QNetworkFCNN([obs_size,self.env.action_space.n]),
+            },
+            'NLL': {
+                'QNetworkFCNN': dqn.QNetworkFCNN([obs_size,self.env.action_space.n]),
+            },
+            'KL': {
+                'QNetworkFCNN': dqn.QNetworkFCNN([obs_size,self.env.action_space.n]),
+            },
+        }
+        self.losses = {'MSE': [], 'NLL': [], 'KL': []} # XXX: Debug
+        # Optimizer
+        self.optimizer = {}
+        for method,models in self.student_models.items():
+            self.optimizer[method] = {}
+            for model_name,model in models.items():
+                self.optimizer[method][model_name] = torch.optim.SGD(
+                        model.parameters(),
+                        lr=1,
+                        momentum=0)
+                #self.optimizer[method][model_name] = torch.optim.RMSprop(
+                #        model.parameters(),
+                #        lr=1e-1)
+        # Parameter count
+        self.num_params = {}
+        for models in self.student_models.values():
+            for model_name,model in models.items():
+                if model_name in self.num_params:
+                    continue
+                self.num_params[model_name] = count_parameters(model)
+        # Baselines
+        self.teacher_score = None
+        self.random_score = None
+        self.teacher_model_name = 'QNetworkFCNN'
+        # Logs
+        self.logger = Logger(key_name='step')
+    def _make_env(self, env_name):
+        env = gym.make(env_name)
+        env = DiscreteToOnehotObs(env)
+        return env
+    def _train(self):
+        optimizer = self.optimizer
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
+        debug_loss = {'MSE': [], 'NLL': [], 'KL': []}
+        obs = torch.eye(16)
+        teacher_output = self.agent.q_net(obs).detach()
+        for _ in tqdm(zip(range(self.train_iterations),dataloader),desc='Training'):
+            #obs = x.obs.float()
+            for method,models in self.student_models.items():
+                for model_name,model in models.items():
+                    optimizer = self.optimizer[method][model_name]
+                    #y_target = x.output
+                    y_target = teacher_output
+                    y_pred = model(obs)
+                    if method == 'MSE':
+                        criterion = torch.nn.MSELoss(reduction='mean')
+                        loss = criterion(y_pred,y_target)
+                    elif method == 'NLL':
+                        criterion = torch.nn.NLLLoss(reduction='mean')
+                        log_softmax = torch.nn.LogSoftmax()
+                        loss = criterion(log_softmax(y_pred),y_target.max(1)[1])
+                    elif method == 'KL':
+                        criterion = torch.nn.KLDivLoss(reduction='mean',log_target=True)
+                        log_softmax = torch.nn.LogSoftmax()
+                        loss = criterion(log_softmax(y_pred),log_softmax(y_target))
+                    else:
+                        raise Exception('Invalid method: %s' % method)
+                    debug_loss[method].append(loss.detach().item())
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+        for k,v in debug_loss.items():
+            self.losses[k].append(v)
+    def _test(self):
+        self._compute_policy_diff()
+        return super()._test()
+    def _compute_policy_diff(self):
+        obs = torch.eye(16)
+        teacher_vals = self.agent.q_net(obs)
+        teacher_actions = teacher_vals.max(1)[1]
+        for method,models in self.student_models.items():
+            for model_name,model in models.items():
+                student_vals = model(obs)
+                student_actions = student_vals.max(1)[1]
+                diff = (teacher_actions==student_actions).sum()
+                print(method, model_name, diff)
 
 def make_app():
     import typer
@@ -576,14 +838,15 @@ def make_app():
             #'SpaceInvadersNoFrameskip-v0',
     ]
     models = {
-            'QNetworkCNN': dqn.QNetworkCNN,
-            'QNetworkCNN_1': dqn.QNetworkCNN_1,
-            'QNetworkCNN_2': dqn.QNetworkCNN_2,
-            'QNetworkCNN_3': dqn.QNetworkCNN_3,
+            'QNetworkCNN': QNetworkCNN,
+            'QNetworkCNN_1': QNetworkCNN_1,
+            'QNetworkCNN_2': QNetworkCNN_2,
+            'QNetworkCNN_3': QNetworkCNN_3,
     }
     PROJECT_ROOT = './rl'
     #EXPERIMENT_GROUP_NAME = 'rusu2016-2'
     EXPERIMENT_GROUP_NAME = 'rusu2016'
+    #EXPERIMENT_GROUP_NAME = 'rusu2016-debug'
     RESULTS_ROOT_DIRECTORY = rl.utils.get_results_root_directory()
     EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
 
@@ -593,14 +856,14 @@ def make_app():
             debug : bool = typer.Option(False, '--debug')):
         # Train
         exp_runner = make_experiment_runner(
-                TrainExperiment,
-                max_iterations=100 if debug else 50_000_000,
+                TrainExperimentDebug if debug else TrainExperiment,
+                max_iterations=100_000 if debug else 50_000_000,
                 verbose=True,
                 results_directory=results_directory,
                 config={
                     'env_name': env_name,
-                    'test_iterations': 1 if debug else 5,
-                    'test_frequency': 250_000,
+                    'test_iterations': 10 if debug else 5,
+                    'test_frequency': 100 if debug else 250_000,
                 }
         )
         exp_runner.run()
@@ -696,20 +959,54 @@ def make_app():
             teacher_filename : str,
             results_directory : Optional[str] = None,
             debug : bool = typer.Option(False, '--debug')):
-        exp_runner = make_experiment_runner(
-                DistillationExperiment,
-                max_iterations=100 if debug else 5_000_000,
-                verbose=True,
-                results_directory=results_directory,
-                checkpoint_frequency=50_000,
-                config={
-                    'env_name': env_name,
-                    'batch_size': 8 if debug else 32,
-                    'train_iterations': 1 if debug else 10_000,
-                    'train_frequency': 5 if debug else 50_000,
-                    'teacher_filename': teacher_filename
-                }
-        )
+        if debug:
+            if env_name == 'FrozenLake-v0':
+                exp_runner = make_experiment_runner(
+                        DistillationExperimentDebug,
+                        max_iterations=10_000,
+                        verbose=True,
+                        results_directory=results_directory,
+                        checkpoint_frequency=10_000,
+                        config={
+                            'env_name': env_name,
+                            'batch_size': 32,
+                            'train_iterations': 100,
+                            'train_frequency': 100,
+                            'teacher_filename': teacher_filename
+                        }
+                )
+            else:
+                exp_runner = make_experiment_runner(
+                        DistillationExperiment,
+                        max_iterations=100,
+                        verbose=True,
+                        results_directory=results_directory,
+                        checkpoint_frequency=50_000,
+                        num_checkpoints=0,
+                        config={
+                            'env_name': env_name,
+                            'batch_size': 8,
+                            'train_iterations': 1,
+                            'train_frequency': 5,
+                            'teacher_filename': teacher_filename
+                        }
+                )
+        else:
+            exp_runner = make_experiment_runner(
+                    DistillationExperiment,
+                    max_iterations=100 if debug else 5_000_000,
+                    verbose=True,
+                    results_directory=results_directory,
+                    checkpoint_frequency=50_000,
+                    num_checkpoints=0,
+                    config={
+                        'env_name': env_name,
+                        'batch_size': 8 if debug else 32,
+                        'train_iterations': 1 if debug else 10_000,
+                        'train_frequency': 5 if debug else 50_000,
+                        'teacher_filename': teacher_filename
+                    }
+            )
         exp_runner.run()
 
     @app.command()
@@ -903,6 +1200,27 @@ def make_app():
         # Plot?
         # TODO
 
+    @app.command()
+    def run_local_debug():
+        #results = {}
+        env_name = 'FrozenLake-v0'
+        train_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'train',env_name)
+        test_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'test')
+        distill2_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY,'distill2',env_name)
+        teacher_test_filename = os.path.join(test_directory,'teacher','%s.pkl' % env_name)
+        random_test_filename = os.path.join(test_directory,'random','%s.pkl' % env_name)
+        teacher_model_filename = os.path.join(train_directory,'output/deploy_state-best.pkl')
+        train(
+                env_name=env_name,
+                results_directory=train_directory,
+                debug=True
+        )
+        distill2(
+                env_name=env_name,
+                results_directory=distill2_directory,
+                teacher_filename=teacher_model_filename,
+                debug=True,
+        )
 
     commands = {
             'train': train,
