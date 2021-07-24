@@ -8,8 +8,9 @@ from simple_slurm import Slurm
 from matplotlib import pyplot as plt
 
 import rl.utils
-from rl.experiments.hrl2.disjoint import make_app as make_app_disjoint
+from rl.experiments.hrl2.decoupled_sync import make_app as make_app_disjoint
 from rl.experiments.hrl2.dropout import make_app as make_app_dropout
+from rl.experiments.hrl2.distillation import make_app as make_app_distillation
 
 PROJECT_ROOT = './rl'
 EXPERIMENT_GROUP_NAME = 'disjoint-dqn-sac-hopper'
@@ -82,12 +83,20 @@ def run_slurm(debug=False):
     slurm.sbatch(command)
 
 def run_local(debug=False):
-    # Run training with an experiment group
-    train(n=5, debug=debug)
-    # Run a dropout experiment on completed training runs
-    dropout(debug=debug)
-    # Plot the results from all dropout experiments in this group
-    plot_dropout()
+    ## Run training with an experiment group
+    #train(n=5, debug=debug)
+
+    ## Run a dropout experiment on completed training runs
+    #dropout(debug=debug)
+    ## Plot the results from all dropout experiments in this group
+    #plot_dropout()
+
+    # Run distillation experiments on completed training runs
+    distillation(debug=debug)
+
+##################################################
+# Training
+##################################################
 
 def train(n=1, debug=False):
     _,commands = make_app_disjoint()
@@ -105,12 +114,18 @@ def find_all_train_directories(root_directory):
         if d.startswith('train-'):
             yield os.path.join(root_directory,d)
 
+##################################################
+# Dropout
+##################################################
+
 def dropout(debug=False):
     _,commands = make_app_dropout()
     # Run a dropout experiment on all found training runs
     pattern = r'/train-(\d+)'
     for train_dir in find_all_train_directories(EXPERIMENT_GROUP_DIRECTORY):
         match = re.search(pattern,train_dir)
+        if match is None:
+            continue
         train_id = match.group(1)
         commands['run'](
                 os.path.join(train_dir,'output','deploy_state.pkl'),
@@ -123,6 +138,29 @@ def find_all_dropout_directories(root_directory):
     for d in dirs:
         if d.startswith('dropout-'):
             yield os.path.join(root_directory,d)
+
+##################################################
+# Distillation
+##################################################
+
+def distillation(debug=False):
+    _,commands = make_app_distillation()
+    # Run a dropout experiment on all found training runs
+    pattern = r'/train-(\d+)'
+    for train_dir in find_all_train_directories(EXPERIMENT_GROUP_DIRECTORY):
+        match = re.search(pattern,train_dir)
+        if match is None:
+            continue
+        train_id = match.group(1)
+        commands['run'](
+                os.path.join(train_dir,'output','deploy_state.pkl'),
+                results_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'distillation-%s'%train_id),
+                debug=debug,
+        )
+
+##################################################
+# Visualization
+##################################################
 
 def plot_train():
     pass # TODO: Plot performance over time with smoothing

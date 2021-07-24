@@ -1,10 +1,11 @@
 language: python
 python:
   - "3.7"
+  - "3.9"
 dist: xenial
 # command to install dependencies
 install:
   - pip install --progress-bar off -r requirements.txt
 # command to run tests
 script:
-  - pytest --cov=.
+  - pytest --cov=. tests/unit

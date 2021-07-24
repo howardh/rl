@@ -26,8 +26,6 @@ Experiment details in appendix A
 
 import os
 import itertools
-from rl.agent.agent import Agent
-from experiment.experiment import make_experiment_runner
 from typing import Optional, NamedTuple, List
 from pprint import pprint
 
@@ -49,6 +47,8 @@ from matplotlib import pyplot as plt
 from simple_slurm import Slurm
 
 import rl.utils
+from rl.agent.agent import Agent
+from experiment.experiment import make_experiment_runner
 from experiment import Experiment
 from experiment.logger import Logger
 import rl.agent.smdp.dqn as dqn
@@ -406,9 +406,12 @@ def distil_model(student_model : torch.nn.Module,
 
 class DistillationExperiment(Experiment):
     def setup(self, config, output_directory):
+        self.device = self._init_device()
+
         self.output_directory = output_directory
 
-        self.agent = dqn.make_agent_from_deploy_state(config['teacher_filename'])
+        self.agent = dqn.make_agent_from_deploy_state(
+                config['teacher_filename'], device=self.device)
         self.replay_buffer = ReplayBuffer(
                 max_size=config.get('replay_buffer_size',500_000))
         self.batch_size = config.get('batch_size',32)
@@ -441,10 +444,10 @@ class DistillationExperiment(Experiment):
                 #'QNetworkCNN_3': QNetworkCNN_3(self.env.action_space.n),
             },
         }
-        ## XXX: DEBUG (Copy parameters from teacher model)
-        #for models in self.student_models.values():
-        #    for model in models.values():
-        #        model.load_state_dict(self.agent.q_net.state_dict())
+        for models in self.student_models.values():
+            for model in models.values():
+                model.to(self.device)
+                #model.load_state_dict(self.agent.q_net.state_dict()) # XXX: DEBUG (Copy parameters from teacher model)
         self.losses = {'MSE': [], 'NLL': [], 'KL': []} # XXX: Debug
         # Optimizer
         self.optimizer = {}
@@ -467,6 +470,13 @@ class DistillationExperiment(Experiment):
         self.teacher_model_name = 'QNetworkCNN'
         # Logs
         self.logger = Logger(key_name='step')
+    def _init_device(self):
+        if torch.cuda.is_available():
+            print('GPU found')
+            return torch.device('cuda')
+        else:
+            print('No GPU found. Running on CPU.')
+            return torch.device('cpu')
     def _make_env(self, env_name):
         return make_env(env_name)
     def run_step(self, iteration):
@@ -495,11 +505,11 @@ class DistillationExperiment(Experiment):
         else:
             obs, reward, self.done, _ = env.step(self.agent.act(testing=False))
             self.agent.observe(obs, reward, self.done, testing=False)
-        obs = torch.tensor(obs)/255
+        obs = torch.tensor(obs)
         self.replay_buffer.add(
                 DistillationDataPoint(
                     obs=obs,
-                    output=self.agent.q_net(obs.unsqueeze(0).float()).squeeze().detach()
+                    output=self.agent.q_net(obs.to(self.device).unsqueeze(0).float()/255).squeeze().detach()
                 )
         )
     def _train(self):
@@ -508,7 +518,8 @@ class DistillationExperiment(Experiment):
                 self.replay_buffer, batch_size=self.batch_size, shuffle=True)
         debug_loss = {'MSE': [], 'NLL': [], 'KL': []}
         for _,x in tqdm(zip(range(self.train_iterations),dataloader),desc='Training'):
-            obs = x.obs.float()
+            obs = x.obs/255
+            obs = obs.to(self.device)
             for method,models in self.student_models.items():
                 for model_name,model in models.items():
                     optimizer = self.optimizer[method][model_name]
@@ -539,7 +550,8 @@ class DistillationExperiment(Experiment):
         agent = dqn.DQNAgent(
                 action_space=self.env.action_space,
                 observation_space=self.env.observation_space,
-                q_net=q_net
+                q_net=q_net,
+                device=self.device,
         )
         env = self._make_env(self.env_name)
         for method,models in self.student_models.items():
@@ -982,7 +994,7 @@ def make_app():
                         verbose=True,
                         results_directory=results_directory,
                         checkpoint_frequency=50_000,
-                        num_checkpoints=0,
+                        num_checkpoints=2,
                         config={
                             'env_name': env_name,
                             'batch_size': 8,
@@ -994,16 +1006,16 @@ def make_app():
         else:
             exp_runner = make_experiment_runner(
                     DistillationExperiment,
-                    max_iterations=100 if debug else 5_000_000,
+                    max_iterations=5_000_000,
                     verbose=True,
                     results_directory=results_directory,
                     checkpoint_frequency=50_000,
-                    num_checkpoints=0,
+                    num_checkpoints=2,
                     config={
                         'env_name': env_name,
-                        'batch_size': 8 if debug else 32,
-                        'train_iterations': 1 if debug else 10_000,
-                        'train_frequency': 5 if debug else 50_000,
+                        'batch_size': 32,
+                        'train_iterations': 10_000,
+                        'train_frequency': 50_000,
                         'teacher_filename': teacher_filename
                     }
             )

@@ -2,8 +2,6 @@ import os
 from collections import defaultdict
 from typing import Optional
 
-import numpy as np
-import matplotlib
 from matplotlib import pyplot as plt
 import dill
 import gym.spaces
@@ -12,7 +10,7 @@ import gym.envs
 
 from experiment import Experiment, make_experiment_runner
 from rl.agent.smdp import hrl
-from rl.experiments.hrl2 import disjoint
+import rl.experiments.hrl2.decoupled_sync as disjoint
 
 class DropoutExperiment(Experiment):
     def setup(self, config, output_directory):

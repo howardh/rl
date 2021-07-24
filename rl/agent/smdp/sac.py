@@ -199,6 +199,15 @@ class SACAgent(DeployableAgent):
         self._training_steps = 0 # Number of training steps experienced
 
         self.replay_buffer = ReplayBuffer(replay_buffer_size)
+
+        if q_net_1 is None:
+            raise Exception('Models must all be provided. `q_net_1` is missing.')
+        if q_net_2 is None:
+            raise Exception('Models must all be provided. `q_net_2` is missing.')
+        if v_net is None:
+            raise Exception('Models must all be provided. `v_net` is missing.')
+        if pi_net is None:
+            raise Exception('Models must all be provided. `pi_net` is missing.')
         self.q_net_1 = q_net_1
         self.q_net_2 = q_net_2
         self.v_net = v_net
@@ -428,7 +437,7 @@ class SACAgent(DeployableAgent):
         self.v_net_target.load_state_dict(state['v_net_target'])
         self.pi_net.load_state_dict(state['pi_net'])
 
-def make_agent_from_deploy_state(state : Union[str,Mapping]):
+def make_agent_from_deploy_state(state : Union[str,Mapping], device : torch.device = torch.device('cpu')):
     if isinstance(state, str): # If it's a string, then it's the filename to the dilled state
         filename = state
         if not os.path.isfile(filename):
@@ -443,22 +452,22 @@ def make_agent_from_deploy_state(state : Union[str,Mapping]):
         raise NotImplementedError('The two Q networks use different models. Unable to handle this case.')
     q_net_cls = state['q_net_1_class']
     if q_net_cls is QNetwork:
-        q_net_1 = QNetwork(num_features=state['q_net_1']['num_features'],num_actions=state['q_net_1']['num_actions'])
-        q_net_2 = QNetwork(num_features=state['q_net_2']['num_features'],num_actions=state['q_net_2']['num_actions'])
+        q_net_1 = QNetwork(num_features=state['q_net_1']['num_features'],num_actions=state['q_net_1']['num_actions']).to(device)
+        q_net_2 = QNetwork(num_features=state['q_net_2']['num_features'],num_actions=state['q_net_2']['num_actions']).to(device)
     else:
         raise Exception('Unable to initialize policy network of type %s' % q_net_cls)
 
     # Value Network
     v_net_cls = state['v_net_class']
     if v_net_cls is VNetwork:
-        v_net = VNetwork(num_features=state['v_net']['num_features'])
+        v_net = VNetwork(num_features=state['v_net']['num_features']).to(device)
     else:
         raise Exception('Unable to initialize policy network of type %s' % v_net_cls)
 
     # Policy Network
     pi_net_cls = state['pi_net_class']
     if pi_net_cls is PolicyNetwork:
-        pi_net = PolicyNetwork(num_features=state['pi_net']['num_features'],num_actions=state['pi_net']['num_actions'],structure=state['pi_net']['structure'])
+        pi_net = PolicyNetwork(num_features=state['pi_net']['num_features'],num_actions=state['pi_net']['num_actions'],structure=state['pi_net']['structure']).to(device)
     else:
         raise Exception('Unable to initialize policy network of type %s' % pi_net_cls)
 
@@ -469,6 +478,7 @@ def make_agent_from_deploy_state(state : Union[str,Mapping]):
             q_net_2=q_net_2,
             v_net=v_net,
             pi_net=pi_net,
+            device=device,
     )
     agent.load_state_dict_deploy(state)
     return agent

@@ -1,6 +1,8 @@
+import os
 from typing import Any, DefaultDict, TypeVar, Sequence, Union, NamedTuple, Mapping, Optional
 from copy import copy
 
+import torch
 import dill
 import gym.spaces
 import numpy as np
@@ -262,7 +264,7 @@ def make_agent(
         children_discount = [p['discount_factor'] for p in children_params],
     )
 
-def make_agent_from_deploy_state(state : Union[str,Mapping]):
+def make_agent_from_deploy_state(state : Union[str,Mapping], device : torch.device = torch.device('cpu')):
     if isinstance(state, str): # If it's a string, then it's the filename to the dilled state
         filename = state
         if not os.path.isfile(filename):
@@ -271,8 +273,8 @@ def make_agent_from_deploy_state(state : Union[str,Mapping]):
             state = dill.load(f)
     if not isinstance(state, Mapping):
         raise Exception('Invalid state')
-    parent_agent = dqn.make_agent_from_deploy_state(state['agent'])
-    children_agents = [sac.make_agent_from_deploy_state(s) for s in state['children']]
+    parent_agent = dqn.make_agent_from_deploy_state(state['agent'], device)
+    children_agents = [sac.make_agent_from_deploy_state(s,device) for s in state['children']]
     return HRLAgent(
         action_space=state['action_space'],
         observation_space=state['observation_space'],
