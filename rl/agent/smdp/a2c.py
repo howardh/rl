@@ -11,6 +11,7 @@ import torch.utils.data
 import torch.distributions
 import torch.optim
 import gym.spaces
+from torchtyping import TensorType
 
 import rl.debug_tools.frozenlake
 from rl.agent.agent import DeployableAgent
@@ -169,7 +170,7 @@ class ObservationStack(Generic[ObsType,ActionType]):
 
 def compute_mc_state_value_loss(
         state_values : List[torch.Tensor],
-        target_state_values : List[torch.Tensor],
+        last_state_target_value: float,
         rewards : List[Optional[float]],
         terminals : List[bool],
         discounts : List[float],
@@ -198,7 +199,7 @@ def compute_mc_state_value_loss(
                 break
             # Bootstrap on the final iteration
             if i == num_transitions:
-                v_target += discount*target_state_values[i]
+                v_target += discount*last_state_target_value
                 break
         v_target.detach()
         # Loss
@@ -206,19 +207,50 @@ def compute_mc_state_value_loss(
         losses.append(loss)
     return torch.stack(losses)
 
-#def compute_mc_state_value_loss_tensor(
-#        state_values : List[torch.Tensor],
-#        rewards : List[Optional[float]],
-#        terminals : List[bool],
-#        discounts : List[float],
-#    ) -> torch.Tensor:
-#    """ Monte-Carlo loss for a state-value function.
-#    """
-#    reward = [0 if r is None else r for r in rewards[1:]] + [float(state_values[-1].item())]
-#    mask = (~torch.tensor(terminals)).cumprod(dim=0)
-#    discount = torch.tensor([1.]+discounts[:-1]).cumprod(dim=0)
-#    state_value = torch.stack(state_values)
-#    breakpoint()
+def compute_mc_state_value_loss_tensor(
+        state_values : List[torch.Tensor],
+        last_state_target_value: float,
+        rewards : List[Optional[float]],
+        terminals : List[bool],
+        discounts : List[float],
+    ) -> torch.Tensor:
+    """ Monte-Carlo loss for a state-value function.
+    """
+    n = len(state_values)
+    reward = torch.tensor([0 if r is None else r for r in rewards[1:]] + [last_state_target_value])
+    discount = torch.tensor(discounts)
+    discount_mat = torch.eye(n)[:-1,:]
+    for i in range(n-1):
+        discount_mat[i,i+1:] = discount[i:-1]
+    for i in range(n-1):
+        discount_mat[:i+1,i+1] *= discount_mat[:i+1,i]
+        if terminals[i]:
+            discount_mat[:i+1,i+1:] = 0
+    state_value = torch.stack(state_values[:-1])
+    loss = torch.tensor(terminals[:-1]).logical_not()*(state_value-discount_mat@reward)**2
+    return loss
+
+def compute_mc_state_value_loss_tensor_batch(
+        state_values : TensorType['batch_size','num_steps', float],
+        last_state_target_value: TensorType['batch_size', float],
+        rewards : TensorType['batch_size','num_steps', float],
+        terminals : TensorType['batch_size','num_steps', bool],
+        discounts : TensorType['batch_size','num_steps', float],
+    ) -> TensorType['batch_size','num_steps']:
+    n = state_values.shape[0]
+    reward = torch.tensor([0 if r is None else r for r in rewards[1:]] + [last_state_target_value])
+    discount = torch.tensor(discounts)
+    discount_mat = torch.eye(n)[:-1,:]
+    for i in range(n-1):
+        discount_mat[i,i+1:] = discount[i:-1]
+    for i in range(n-1):
+        discount_mat[:i+1,i+1] *= discount_mat[:i+1,i]
+        if terminals[i]:
+            discount_mat[:i+1,i+1:] = 0
+    state_value = torch.stack(state_values[:-1])
+    loss = torch.tensor(terminals[:-1]).logical_not()*(state_value-discount_mat@reward)**2
+    breakpoint()
+    return loss
 
 def compute_discrete_advantage_policy_gradient(
         log_action_probs : List[torch.Tensor],
@@ -274,11 +306,12 @@ class A2CAgent(DeployableAgent):
             action_space : gym.spaces.Box,
             observation_space : gym.spaces.Box,
             discount_factor : float = 0.99,
-            learning_rate : float = 1e-3,
+            learning_rate : float = 1e-4,
             target_update_frequency : int = 40_000, # Mnih 2016 - section 8
             polyak_rate : float = 1.0,              # Mnih 2016 - section 8
             max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
             training_env_keys : List = [],
+            obs_scale : float = 1/255,
             device : torch.device = torch.device('cpu'),
             net : PolicyValueNetwork = None):
         self.action_space = action_space
@@ -288,6 +321,7 @@ class A2CAgent(DeployableAgent):
         self.target_update_frequency = target_update_frequency
         self.polyak_rate = polyak_rate
         self.max_rollout_length = max_rollout_length
+        self.obs_scale = obs_scale
         self.device = device
         self.training_env_keys = training_env_keys
 
@@ -311,6 +345,8 @@ class A2CAgent(DeployableAgent):
         # Logging
         self.state_values_current = []
         self.state_values = []
+        self.state_values_std = []
+        self.state_values_std_ra = []
 
     def observe(self, obs, reward=None, terminal=False, testing=False, time=1, discount=None, env_key=None):
         if env_key is None:
@@ -318,12 +354,14 @@ class A2CAgent(DeployableAgent):
         if discount is None:
             discount = self.discount_factor
 
+        obs = torch.tensor(obs)*self.obs_scale
+
         self.obs_stack[env_key].append_obs(obs, reward, terminal)
 
         # Choose next action
         softmax = torch.nn.Softmax(dim=1)
         net_output = self.net(
-                torch.tensor(obs).unsqueeze(0).float().to(self.device)
+                obs.unsqueeze(0).float().to(self.device)
         )
         action_probs_unnormalized = net_output['action']
         action_probs = softmax(action_probs_unnormalized).squeeze()
@@ -357,18 +395,22 @@ class A2CAgent(DeployableAgent):
         if min(num_points) >= t_max:
             if max(num_points) != min(num_points):
                 raise Exception('This should not happen')
-            state_values = {ek: [
-                self.net(torch.tensor(o).unsqueeze(0).float().to(self.device))['value'].squeeze()
+            net_output = {ek: [
+                self.net(o.unsqueeze(0).float().to(self.device))
                 for o in self.obs_history[ek]
             ] for ek in self.training_env_keys}
+            state_values = {ek: [
+                output['value'].squeeze()
+                for output in outputs
+            ] for ek,outputs in net_output.items()}
             target_state_values = {ek: [
-                self.target_net(torch.tensor(o).unsqueeze(0).float().to(self.device))['value'].squeeze()
+                self.target_net(o.unsqueeze(0).float().to(self.device))['value'].squeeze()
                 for o in self.obs_history[ek]
             ] for ek in self.training_env_keys}
             log_action_probs = {ek: [
-                log_softmax(self.net(torch.tensor(o).unsqueeze(0).float().to(self.device))['action']).squeeze()
-                for o in self.obs_history[ek]
-            ] for ek in self.training_env_keys}
+                log_softmax(output['action']).squeeze()
+                for output in outputs
+            ] for ek,outputs in net_output.items()}
             # Train policy
             loss_pi = [compute_discrete_advantage_policy_gradient(
                         log_action_probs = [
@@ -384,7 +426,7 @@ class A2CAgent(DeployableAgent):
             # Train value network
             loss_v = [compute_mc_state_value_loss(
                         state_values = state_values[ek],
-                        target_state_values = target_state_values[ek],
+                        last_state_target_value = float(target_state_values[ek][-1].item()),
                         rewards = self.reward_history[ek],
                         terminals = self.terminal_history[ek],
                         discounts = self.discount_history[ek],
@@ -414,6 +456,8 @@ class A2CAgent(DeployableAgent):
             # Log
             self._training_steps += 1
             self.state_values.append(np.mean(self.state_values_current))
+            self.state_values_std.append(np.std(self.state_values_current))
+            self.state_values_std_ra.append(np.mean(self.state_values_std) if self._training_steps < 100 else np.mean(self.state_values_std[-100:]))
             self.state_values_current = []
     def _update_target(self):
         if self._steps % self.target_update_frequency != 0:
@@ -504,7 +548,7 @@ if __name__ == "__main__":
 
         return test_results
 
-    def train_onpolicy(train_envs, agent, training_steps : int = 1_000_000):
+    def train_onpolicy(train_envs, agent, training_steps : int = 1_000_000, plot_frequency : int = 10):
         test_results = {}
 
         rewards = []
@@ -529,7 +573,7 @@ if __name__ == "__main__":
                     running_averages.append(running_average)
                     tqdm.write('Step %d\t Episode Length: %d\t Reward: %f\t Running avg reward: %f' % (i,ep_len,rewards[-1],running_average))
                     # Plot
-                    if len(running_averages) % 100 == 0:
+                    if len(running_averages) % plot_frequency == 0:
                         # Reward Running Average
                         plt.plot(range(len(running_averages)),running_averages)
                         plt.grid()
@@ -545,6 +589,15 @@ if __name__ == "__main__":
                         plt.xlabel('Steps')
                         plt.ylabel('State Values')
                         filename = './plot-state-value.png'
+                        plt.savefig(filename)
+                        tqdm.write('Saved plot to %s' % os.path.abspath(filename))
+                        plt.close()
+                        # State values std
+                        plt.plot(range(len(agent.state_values_std_ra)),agent.state_values_std_ra)
+                        plt.grid()
+                        plt.xlabel('Steps')
+                        plt.ylabel('State Values std running average (100 episodes)')
+                        filename = './plot-state-value-std.png'
                         plt.savefig(filename)
                         tqdm.write('Saved plot to %s' % os.path.abspath(filename))
                         plt.close()
@@ -590,11 +643,11 @@ if __name__ == "__main__":
         device = torch.device('cpu')
 
     num_actors = 16
-    #env_name = 'PongNoFrameskip-v4'
-    #train_envs = [make_env(env_name) for _ in range(num_actors)]
-    #test_env = make_env(env_name)
-    train_envs = [make_env('FrozenLake-v0',one_hot_obs=True) for _ in range(num_actors)]
-    test_env = make_env('FrozenLake-v0',one_hot_obs=True)
+    env_name = 'PongNoFrameskip-v4'
+    train_envs = [make_env(env_name,atari=True) for _ in range(num_actors)]
+    test_env = make_env(env_name,atari=True)
+    #train_envs = [make_env('FrozenLake-v0',one_hot_obs=True) for _ in range(num_actors)]
+    #test_env = make_env('FrozenLake-v0',one_hot_obs=True)
 
     action_space = test_env.action_space
     observation_space = test_env.observation_space
@@ -602,14 +655,15 @@ if __name__ == "__main__":
         action_space=action_space,
         observation_space=observation_space,
         training_env_keys=[i for i in range(num_actors)],
-        #net  = PolicyValueNetworkCNN(observation_space.shape[0], action_space.n).to(device),
-        net  = PolicyValueNetworkLinear(observation_space.shape[0], action_space.n).to(device),
-        discount_factor=1,
-        learning_rate=0.01,
-        target_update_frequency=1,
+        net  = PolicyValueNetworkCNN(observation_space.shape[0], action_space.n).to(device),
+        #net  = PolicyValueNetworkLinear(observation_space.shape[0], action_space.n).to(device),
+        #discount_factor=1,
+        #learning_rate=0.01,
+        #obs_scale=1,
+        #target_update_frequency=1,
         device=device,
     )
 
-    results = train_onpolicy(train_envs,agent)
+    results = train_onpolicy(train_envs,agent,plot_frequency=10)
     test(test_env, agent)
 
