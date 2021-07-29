@@ -12,15 +12,28 @@ from rl.experiments.hrl2.decoupled_sync import make_app as make_app_disjoint
 from rl.experiments.hrl2.dropout import make_app as make_app_dropout
 from rl.experiments.hrl2.distillation import make_app as make_app_distillation
 
-PROJECT_ROOT = './rl'
-EXPERIMENT_GROUP_NAME = 'disjoint-dqn-sac-hopper'
-RESULTS_ROOT_DIRECTORY = rl.utils.get_results_root_directory()
-EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
-TRAIN_ID_RANGE = range(1,3)
+EXPERIMENT_SET = 0
+
+if EXPERIMENT_SET == 0:
+    # No delay, and full capacity children
+    PROJECT_ROOT = './rl'
+    EXPERIMENT_GROUP_NAME = 'disjoint-dqn-sac-hopper'
+    RESULTS_ROOT_DIRECTORY = rl.utils.get_results_root_directory()
+    EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
+    TRAIN_ID_RANGE = range(1,3)
+    TRAIN_EXP_NAME = 'hrl-001'
+elif EXPERIMENT_SET == 1:
+    # No delay, and [128,128] children
+    PROJECT_ROOT = './rl'
+    EXPERIMENT_GROUP_NAME = 'disjoint-dqn-sac-hopper-1'
+    RESULTS_ROOT_DIRECTORY = rl.utils.get_results_root_directory()
+    EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
+    TRAIN_ID_RANGE = range(1,3)
+    TRAIN_EXP_NAME = 'hrl-002'
 
 def run_slurm(debug=False):
     """
-    Exp 1: hrl-001
+    Exp 1: train TRAIN_EXP_NAME
     Exp 2.1: distil
     Exp 2.2: dropout
     """
@@ -35,13 +48,14 @@ def run_slurm(debug=False):
             output='/miniscratch/huanghow/slurm/%A_%a.out',
             time='24:00:00',
     )
-    #command = './sbatch37.sh {script} run hrl-001 --experiment-group {group}'
-    command = './sbatch37.sh {script} run hrl-001 --results-directory {results_directory} {debug}'
+    #command = './sbatch37.sh {script} run {exp_name} --experiment-group {group}'
+    command = './sbatch37.sh {script} run {exp_name} --results-directory {results_directory} {debug}'
     command = command.format(
             script = os.path.join(PROJECT_ROOT, 'rl/experiments/hrl2/disjoint.py'),
             group = EXPERIMENT_GROUP_NAME,
             results_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'train-$SLURM_ARRAY_TASK_ID'), # Note: The environment variable substitution is done by bash when this command is run
-            debug = '--debug' if debug else ''
+            debug = '--debug' if debug else '',
+            exp_name = TRAIN_EXP_NAME,
     )
     print(command)
     train_job_id = slurm.sbatch(command)
@@ -83,13 +97,13 @@ def run_slurm(debug=False):
     slurm.sbatch(command)
 
 def run_local(debug=False):
-    ## Run training with an experiment group
-    #train(n=5, debug=debug)
+    # Run training with an experiment group
+    train(n=5, debug=debug)
 
-    ## Run a dropout experiment on completed training runs
-    #dropout(debug=debug)
-    ## Plot the results from all dropout experiments in this group
-    #plot_dropout()
+    # Run a dropout experiment on completed training runs
+    dropout(debug=debug)
+    # Plot the results from all dropout experiments in this group
+    plot_dropout()
 
     # Run distillation experiments on completed training runs
     distillation(debug=debug)
@@ -102,7 +116,7 @@ def train(n=1, debug=False):
     _,commands = make_app_disjoint()
     for i in range(n):
         commands['run'](
-                'hrl-001',
+                TRAIN_EXP_NAME,
                 #trial_id = 'train-%d' % i,
                 results_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'train-%d'%i),
                 debug=debug,

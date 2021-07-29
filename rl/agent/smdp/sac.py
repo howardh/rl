@@ -493,6 +493,9 @@ if __name__ == "__main__":
     import gym.envs
     #import pybullet_envs
     import cv2
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
 
     def make_env(env_name):
         env = gym.make(env_name)
@@ -504,6 +507,8 @@ if __name__ == "__main__":
         test_results = {}
         env = envs[0]
         env_test = envs[1]
+        plot_x = []
+        plot_y = []
 
         done = True
         for i in tqdm(range(training_steps), desc='training'):
@@ -513,6 +518,39 @@ if __name__ == "__main__":
                 avg = np.mean([x['total_reward'] for x in test_results[i]])
                 tqdm.write('Iteration {i}\t Average reward: {avg}'.format(i=i,avg=avg))
                 tqdm.write(pprint.pformat(test_results[i], indent=4))
+                # Plot (rewards)
+                plot_file_name = os.path.join('output','plot.png')
+                plot_x.append(i)
+                plot_y.append(avg)
+                plt.plot(plot_x,plot_y)
+                plt.xlabel('Training Steps')
+                plt.ylabel('Average Reward')
+                plt.grid()
+                plt.savefig(plot_file_name)
+                plt.close()
+                tqdm.write('Plot saved at %s' % os.path.abspath(plot_file_name))
+                ## Plot (state value)
+                #plot_file_name = os.path.join('output','plot-state-value.png')
+                #x,y = agent.debug_logger['state_value']
+                #plt.plot(x,[np.mean(v) for v in y])
+                #plt.xlabel('Training Steps')
+                #plt.ylabel('Average State Values')
+                #plt.grid()
+                #plt.savefig(plot_file_name)
+                #plt.close()
+                #tqdm.write('Plot saved at %s' % os.path.abspath(plot_file_name))
+                ## Plot (state-action value)
+                #plot_file_name = os.path.join('output','plot-state-action-value.png')
+                #x,y = agent.debug_logger['state_action_value_1']
+                #plt.plot(x,[np.mean(v) for v in y])
+                #x,y = agent.debug_logger['state_action_value_2']
+                #plt.plot(x,[np.mean(v) for v in y])
+                #plt.xlabel('Training Steps')
+                #plt.ylabel('Average State Action Values')
+                #plt.grid()
+                #plt.savefig(plot_file_name)
+                #plt.close()
+                #tqdm.write('Plot saved at %s' % os.path.abspath(plot_file_name))
 
             if done:
                 obs = env.reset()
