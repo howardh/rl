@@ -373,19 +373,21 @@ def make_app():
             'test_iterations': 5,
             'test_frequency': 1000,
             'parent_params': base_dqn_params,
+            'delay': 0,
             'children_params': [
                 base_sac_params,
                 base_sac_params,
             ],
         }
+        sac_params = {
+            **base_sac_params,
+            'pi_net_structure': [128,128],
+        }
         params['hrl-002'] = {
-            'test_iterations': 5,
-            'test_frequency': 1000,
-            'delay': 2,
-            'parent_params': base_dqn_params,
+            **params['hrl-001'],
             'children_params': [
-                base_sac_params,
-                base_sac_params,
+                sac_params,
+                sac_params,
             ],
         }
 

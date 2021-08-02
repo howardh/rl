@@ -97,13 +97,13 @@ def run_slurm(debug=False):
     slurm.sbatch(command)
 
 def run_local(debug=False):
-    # Run training with an experiment group
-    train(n=5, debug=debug)
+    ## Run training with an experiment group
+    #train(n=5, debug=debug)
 
-    # Run a dropout experiment on completed training runs
-    dropout(debug=debug)
-    # Plot the results from all dropout experiments in this group
-    plot_dropout()
+    ## Run a dropout experiment on completed training runs
+    #dropout(debug=debug)
+    ## Plot the results from all dropout experiments in this group
+    #plot_dropout()
 
     # Run distillation experiments on completed training runs
     distillation(debug=debug)
@@ -142,7 +142,7 @@ def dropout(debug=False):
             continue
         train_id = match.group(1)
         commands['run'](
-                os.path.join(train_dir,'output','deploy_state.pkl'),
+                os.path.join(train_dir,'output','deploy_state-best.pkl'),
                 results_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'dropout-%s'%train_id),
                 debug=debug,
         )
@@ -167,7 +167,7 @@ def distillation(debug=False):
             continue
         train_id = match.group(1)
         commands['run'](
-                os.path.join(train_dir,'output','deploy_state.pkl'),
+                os.path.join(train_dir,'output','deploy_state-best.pkl'),
                 results_directory = os.path.join(EXPERIMENT_GROUP_DIRECTORY, 'distillation-%s'%train_id),
                 debug=debug,
         )

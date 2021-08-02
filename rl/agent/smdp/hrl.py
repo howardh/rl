@@ -192,16 +192,17 @@ class HRLAgent(Agent[np.ndarray,ActionType]):
                 'delay': self.delay,
                 'logger': self.logger.state_dict(),
         }
-
     def load_state_dict(self, state):
-        self.agent.load_state_dict(state['agent'])
-        for child,child_state in zip(self.children,state['children']):
-            child.load_state_dict(child_state)
         for k,v in state['obs_stack'].items():
             self.obs_stack[k].load_state_dict(v)
         for k,v in state['children_rewards'].items():
             self.children_rewards[k] = v
         self._steps = state['steps']
+        self.agent.load_state_dict(state['agent'])
+        for child,child_state in zip(self.children,state['children']):
+            child.load_state_dict(child_state)
+        self.delay = state['delay']
+        self.logger.load_state_dict(state['logger'])
 
     def state_dict_deploy(self):
         return {
