@@ -1,13 +1,17 @@
+from typing import List, Optional
+from collections import deque
+import warnings
+
 import torch
 import torch.utils.data
-from collections import deque
+
+from gym.wrappers.frame_stack import LazyFrames
 
 class FIFOBuffer(torch.utils.data.Dataset):
     def __init__(self, max_size):
         self.buffer = []
         self.max_size = max_size
         self.index = 0
-        self.prev_transition = None
 
     def add(self,value):
         if len(self.buffer) < self.max_size:
@@ -35,8 +39,15 @@ class FIFOBuffer(torch.utils.data.Dataset):
         self.prev_transition = state['prev_transition']
 
 class ReplayBuffer(FIFOBuffer):
-    def add_transition(self, obs0, action0, reward, obs, terminal=False):
-        transition = (obs0, action0, reward, obs, terminal)
+    def __init__(self, max_size):
+        super().__init__(max_size)
+        self.prev_transition = None
+
+    def add_transition(self, obs0, action0, reward, obs, terminal=False, misc=None):
+        if misc is None:
+            transition = (obs0, action0, reward, obs, terminal)
+        else:
+            transition = (obs0, action0, reward, obs, terminal, *misc)
         self.add(transition)
 
     def step(self, obs, reward, action, terminal=False):
@@ -47,6 +58,77 @@ class ReplayBuffer(FIFOBuffer):
             self.prev_transition = None
         else:
             self.prev_transition = (obs, reward, action)
+
+    def state_dict(self):
+        return {
+                **super().state_dict(),
+                'prev_transition': self.prev_transition
+        }
+
+    def load_state_dict(self, state):
+        super().load_state_dict(state)
+        self.prev_transition = state['prev_transition']
+
+class AtariReplayBuffer(ReplayBuffer):
+    """ A replay buffer designed to minimize memory usage in Atari environments. """
+    def __init__(self, max_size, framestack=4):
+        super().__init__(max_size)
+        self._boundary_frames = {}
+        self._new_episode = True
+        self._framestack = framestack
+
+    def __getitem__(self, index):
+        obs_stack = []
+        for i in range(self._framestack+1):
+            index2 = (index-i+self.max_size)%self.max_size
+            obs_stack.insert(0,self.buffer[index2][2])
+            if index2 in self._boundary_frames:
+                obs_stack = self._boundary_frames[index2] + obs_stack
+                break
+        obs0 = torch.stack([torch.tensor(o) for o in obs_stack[-self._framestack-1:-1]])
+        obs1 = torch.stack([torch.tensor(o) for o in obs_stack[-self._framestack:]])
+        action0, reward, _, terminal, *misc = self.buffer[index]
+        return (obs0, action0, reward, obs1, terminal, *misc)
+
+    def add_transition(self, obs0 : LazyFrames, action0, reward : float, obs : LazyFrames, terminal : bool = False, misc : Optional[List] = None):
+        if misc is None:
+            data = (action0, reward, obs._frames[-1], terminal)
+        else:
+            data = (action0, reward, obs._frames[-1], terminal, *misc)
+
+        if self._new_episode:
+            self._boundary_frames[self.index] = obs0._frames[:]
+            self._new_episode = False
+
+        if terminal:
+            self._new_episode = True
+
+        if len(self.buffer) < self.max_size:
+            self.buffer.append(data)
+            self.index = (self.index+1)%self.max_size
+        else:
+            next_index = (self.index+1)%self.max_size
+            if self.index in self._boundary_frames:
+                if next_index in self._boundary_frames:
+                    del self._boundary_frames[self.index]
+                else:
+                    self._boundary_frames[next_index] = self._boundary_frames[self.index][1:]+[self.buffer[self.index][2]]
+                    del self._boundary_frames[self.index]
+            self.buffer[self.index] = data
+            self.index = next_index
+
+    def state_dict(self):
+        return {
+                **super().state_dict(),
+                'boundary_frames': self._boundary_frames,
+                'new_episode': self._new_episode,
+        }
+
+    def load_state_dict(self, state):
+        super().load_state_dict(state)
+        self._boundary_frames = state['boundary_frames']
+        self._new_episode = True # XXX: I don't know how to restore an Atari environment state, so we're just going to start a new episode.
+        warnings.warn('The replay buffer written with the assumption that the Atari environment is reset when reloading from a checkpoint.')
 
 class ReplayBufferStackedObs(ReplayBuffer):
     def __init__(self, max_size, num_obs):

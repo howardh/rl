@@ -1,5 +1,8 @@
 import os
 from typing import Optional, Tuple, Generic, TypeVar, Sequence, Union, Mapping
+import copy
+import itertools
+from collections import defaultdict
 
 import dill
 import gym
@@ -9,14 +12,12 @@ import torch.nn
 import torch.utils.data
 import torch.distributions
 import torch.optim
-import copy
-import itertools
-from collections import defaultdict
+import numpy as np
 
 from experiment.logger import Logger
 
 from rl.agent.agent import DeployableAgent
-from rl.agent import ReplayBuffer
+from rl.agent.replay_buffer import AtariReplayBuffer, ReplayBuffer
 
 class QNetworkCNN(torch.nn.Module):
     def __init__(self, num_actions):
@@ -221,7 +222,8 @@ class DQNAgent(DeployableAgent):
             behaviour_eps : float = 0.1,
             target_eps : float = 0,
             eps_annealing_steps : int = 1_000_000,
-            q_net : torch.nn.Module = None
+            q_net : torch.nn.Module = None,
+            atari : bool = True
             ):
         """
         Args:
@@ -252,7 +254,11 @@ class DQNAgent(DeployableAgent):
         self._steps = 0 # Number of steps experienced
         self._training_steps = 0 # Number of training steps experienced
 
-        self.replay_buffer = ReplayBuffer(replay_buffer_size)
+        if atari:
+            self.replay_buffer = AtariReplayBuffer(replay_buffer_size)
+        else:
+            self.replay_buffer = ReplayBuffer(replay_buffer_size)
+
         if q_net is None:
             self.q_net = QNetworkCNN(action_space.n).to(device)
         else:
@@ -276,20 +282,19 @@ class DQNAgent(DeployableAgent):
         if discount is None:
             discount = self.discount_factor
 
-        obs = torch.tensor(obs).float()/self.obs_scale
+        # Reward clipping
+        if reward is not None:
+            reward = np.clip(reward, -1, 1)
 
         self.obs_stack[env_key].append_obs(obs, reward, terminal)
 
         # Add to replay buffer
-        x = self.obs_stack[env_key].get_transition()
-        if x is not None and not testing:
+        transition = self.obs_stack[env_key].get_transition()
+        if transition is not None and not testing:
             self._steps += 1
             
-            obs0, action0, reward1, obs1, terminal = x
-            obs0 = torch.tensor(obs0)
-            obs1 = torch.tensor(obs1)
-            transition = (obs0, action0, reward1, obs1, terminal, time, discount)
-            self.replay_buffer.add(transition)
+            self.replay_buffer.add_transition(
+                    *transition, [time, discount])
 
             # Train each time something is added to the buffer
             self._train()
@@ -301,16 +306,17 @@ class DQNAgent(DeployableAgent):
         if self._steps % self.update_frequency != 0:
             return
         dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
+                self.replay_buffer, batch_size=self.batch_size, shuffle=True,
+                pin_memory=self.device.type == 'cuda')
         optimizer = self.optimizer
         #criterion = torch.nn.SmoothL1Loss(reduction='mean')
         criterion = torch.nn.MSELoss(reduction='mean')
         for _,(s0,a0,r1,s1,term,time,gamma) in zip(range(iterations),dataloader):
             # Fix data types
-            s0 = s0.to(self.device)
+            s0 = s0.to(self.device).float()/self.obs_scale
             a0 = a0.to(self.device)
             r1 = r1.float().to(self.device).unsqueeze(1)
-            s1 = s1.to(self.device)
+            s1 = s1.to(self.device).float()/self.obs_scale
             term = term.float().to(self.device).unsqueeze(1)
             time = time.to(self.device).unsqueeze(1)
             gamma = gamma.float().to(self.device).unsqueeze(1)
@@ -345,6 +351,7 @@ class DQNAgent(DeployableAgent):
             loss = criterion(y_pred.squeeze(),y.squeeze())
             loss.backward()
             for param in self.q_net.parameters():
+                assert param.grad is not None
                 param.grad.data.clamp_(-1, 1)
             optimizer.step()
 
@@ -372,10 +379,11 @@ class DQNAgent(DeployableAgent):
             eps = self._compute_annealed_epsilon(self.eps_annealing_steps)
 
         obs = self.obs_stack[env_key].get_obs()
+        obs = torch.tensor(obs).to(self.device).float()/self.obs_scale
         if isinstance(self.observation_space,gym.spaces.Discrete):
-            obs = torch.tensor(obs).unsqueeze(0).unsqueeze(0).float().to(self.device)
+            obs = obs.unsqueeze(0).unsqueeze(0)
         elif isinstance(self.observation_space,gym.spaces.Box):
-            obs = torch.tensor(obs).unsqueeze(0).float().to(self.device)
+            obs = obs.unsqueeze(0)
         else:
             raise NotImplementedError()
         vals = self.q_net(obs)
@@ -409,6 +417,7 @@ class DQNAgent(DeployableAgent):
                 'steps': self._steps,
                 'training_steps': self._training_steps,
                 'logger': self.logger.state_dict(),
+                'replay_buffer': self.replay_buffer.state_dict()
         }
     def load_state_dict(self, state):
         self.q_net.load_state_dict(state['q_net'])
@@ -419,6 +428,7 @@ class DQNAgent(DeployableAgent):
         self._steps = state['steps']
         self._training_steps = state['training_steps']
         self.logger.load_state_dict(state['logger'])
+        self.replay_buffer.load_state_dict(state['replay_buffer'])
 
     def state_dict_deploy(self):
         return {
@@ -557,18 +567,17 @@ if __name__ == "__main__":
     agent = DQNAgent(
         action_space=env[0].action_space,
         observation_space=env[0].observation_space,
-        #discount_factor=0.99,
-        #behaviour_eps=0.02,
-        #learning_rate=1e-4,
-        #update_frequency=1,
-        #target_update_frequency=1_000,
-        #polyak_rate=1,
-        #warmup_steps=10_000,
-        ##warmup_steps=100,
-        #replay_buffer_size=100_000,
+        discount_factor=0.99,
+        behaviour_eps=0.02,
+        learning_rate=1e-4,
+        update_frequency=1,
+        target_update_frequency=1_000,
+        polyak_rate=1,
+        warmup_steps=10_000,
+        replay_buffer_size=100_000,
         q_net=QNetworkCNN(env[0].action_space.n).to(device),
         device=device,
     )
 
-    results = train(env,agent)
-    #results = train(env,agent,test_frequency=10_000)
+    #results = train(env,agent)
+    results = train(env,agent,test_frequency=10_000)
