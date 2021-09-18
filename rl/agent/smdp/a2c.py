@@ -1,8 +1,9 @@
 import copy
 import itertools
 from collections import defaultdict
-from typing import Generic, TypeVar, Optional, Tuple, List
+from typing import Dict, Generic, TypeVar, Optional, Tuple, List, Any
 from typing_extensions import TypedDict
+from experiment.logger import Logger
 
 import numpy as np
 import torch
@@ -16,9 +17,16 @@ from torchtyping import TensorType
 import rl.debug_tools.frozenlake
 from rl.agent.agent import DeployableAgent
 
-class PolicyValueNetworkOutput(TypedDict):
+class PolicyValueNetworkOutput(TypedDict, total=False):
+    """ Discrete action space """
     value: torch.Tensor
+    # Discrete action spaces
     action: torch.Tensor
+    # Continuous action spaces
+    action_mean: torch.Tensor
+    action_std: torch.Tensor
+    # Recurrent networks
+    hidden: Tuple[torch.Tensor,torch.Tensor]
 class QNetworkCNN(torch.nn.Module):
     def __init__(self, num_actions):
         super().__init__()
@@ -53,6 +61,18 @@ class PolicyValueNetwork(torch.nn.Module):
     def forward(self, x) -> PolicyValueNetworkOutput:
         x = x
         raise NotImplementedError()
+class PolicyValueNetworkRecurrent(PolicyValueNetwork):
+    def __init__(self):
+        super().__init__()
+    def __call__(self, *args, **kwargs) -> PolicyValueNetworkOutput:
+        return super().__call__(*args, **kwargs)
+    def forward(self, x, hidden) -> PolicyValueNetworkOutput:
+        x = x
+        hidden = hidden
+        raise NotImplementedError()
+    def init_hidden(self, batch_size=1) -> Tuple[torch.Tensor,torch.Tensor]:
+        batch_size=batch_size
+        raise NotImplementedError()
 
 class PolicyValueNetworkCNN(PolicyValueNetwork):
     """ A model which acts both as a policy network and a state-value estimator. """
@@ -77,8 +97,6 @@ class PolicyValueNetworkCNN(PolicyValueNetwork):
         )
         self.v = torch.nn.Linear(in_features=512,out_features=1)
         self.pi = torch.nn.Linear(in_features=512,out_features=num_actions)
-    def __call__(self, *args, **kwargs) -> PolicyValueNetworkOutput:
-        return super().__call__(*args, **kwargs)
     def forward(self, x) -> PolicyValueNetworkOutput:
         x = self.conv(x)
         x = x.view(-1,64*7*7)
@@ -87,7 +105,7 @@ class PolicyValueNetworkCNN(PolicyValueNetwork):
         pi = self.pi(x)
         return {
                 'value': v,
-                'action': pi # Unnormalized action probabilities
+                'action': pi, # Unnormalized action probabilities
         }
 class PolicyValueNetworkLinear(PolicyValueNetwork):
     """ A model which acts both as a policy network and a state-value estimator. """
@@ -104,6 +122,88 @@ class PolicyValueNetworkLinear(PolicyValueNetwork):
                 'value': v,
                 'action': pi # Unnormalized action probabilities
         }
+class PolicyValueNetworkFCNN(PolicyValueNetwork):
+    """ A model which acts both as a policy network and a state-value estimator. """
+    def __init__(self, num_features : int,
+            num_actions : int,
+            structure : List[int] = [256,256],
+            hidden_size : int = 128,
+            shared_std : bool = True):
+        super().__init__()
+        self.num_actions = num_actions
+        self.num_features = num_features
+        self.hidden_size = hidden_size
+
+        layers = []
+        for in_size, out_size in zip([num_features,*structure],structure):
+            layers.append(torch.nn.Linear(in_features=in_size,out_features=out_size))
+            layers.append(torch.nn.ReLU())
+        self.fc = torch.nn.Sequential(*layers)
+        fc_output_size = structure[-1] if len(structure) > 0 else num_features
+        self.v = torch.nn.Linear(in_features=fc_output_size,out_features=1)
+        self.pi_mean = torch.nn.Linear(in_features=fc_output_size,out_features=num_actions)
+        if shared_std:
+            self.pi_std = torch.nn.Parameter(torch.zeros(num_actions))
+        else:
+            self.pi_std = torch.nn.Linear(in_features=fc_output_size,out_features=num_actions)
+    def forward(self, x) -> PolicyValueNetworkOutput:
+        x = self.fc(x)
+        v = self.v(x)
+        pi_mean = self.pi_mean(x)
+        if isinstance(self.pi_std, torch.nn.Parameter):
+            pi_std = torch.log(1+self.pi_std.exp())
+        else:
+            pi_std = torch.log(1+self.pi_std(x).exp())
+        pi_std += 1e-6 # For numerical stability
+        return {
+                'value': v,
+                'action_mean': pi_mean,
+                'action_std': pi_std,
+        }
+class PolicyValueNetworkRecurrentFCNN(PolicyValueNetworkRecurrent):
+    """ A model which acts both as a policy network and a state-value estimator. """
+    def __init__(self, num_features : int,
+            num_actions : int,
+            structure : List[int] = [256,256],
+            hidden_size : int = 128,
+            shared_std : bool = True):
+        super().__init__()
+        self.num_actions = num_actions
+        self.num_features = num_features
+        self.hidden_size = hidden_size
+
+        layers = []
+        for in_size, out_size in zip([num_features,*structure],structure):
+            layers.append(torch.nn.Linear(in_features=in_size,out_features=out_size))
+            layers.append(torch.nn.ReLU())
+        self.fc = torch.nn.Sequential(*layers)
+        self.lstm = torch.nn.LSTMCell(input_size=structure[-1],hidden_size=hidden_size)
+        self.v = torch.nn.Linear(in_features=hidden_size,out_features=1)
+        self.pi_mean = torch.nn.Linear(in_features=hidden_size,out_features=num_actions)
+        if shared_std:
+            self.pi_std = torch.nn.Parameter(torch.zeros(num_actions))
+        else:
+            self.pi_std = torch.nn.Linear(in_features=hidden_size,out_features=num_actions)
+    def forward(self, x, hidden) -> PolicyValueNetworkOutput:
+        x = self.fc(x)
+        h,x = self.lstm(x,hidden)
+        v = self.v(x)
+        pi_mean = self.pi_mean(x)
+        if isinstance(self.pi_std, torch.nn.Parameter):
+            pi_std = torch.log(1+self.pi_std.exp())
+        else:
+            pi_std = torch.log(1+self.pi_std(x).exp())
+        return {
+                'value': v,
+                'action_mean': pi_mean,
+                'action_std': pi_std,
+                'hidden': (h,x)
+        }
+    def init_hidden(self, batch_size=1):
+        return (
+                torch.zeros([batch_size,self.hidden_size]),
+                torch.zeros([batch_size,self.hidden_size]),
+        )
 
 ObsType = TypeVar('ObsType')
 ActionType = TypeVar('ActionType')
@@ -206,7 +306,6 @@ def compute_mc_state_value_loss(
         loss = (v_pred-v_target)**2
         losses.append(loss)
     return torch.stack(losses)
-
 def compute_mc_state_value_loss_tensor(
         state_values : List[torch.Tensor],
         last_state_target_value: float,
@@ -229,7 +328,6 @@ def compute_mc_state_value_loss_tensor(
     state_value = torch.stack(state_values[:-1])
     loss = torch.tensor(terminals[:-1]).logical_not()*(state_value-discount_mat@reward)**2
     return loss
-
 def compute_mc_state_value_loss_tensor_batch(
         state_values : TensorType['batch_size','num_steps', float],
         last_state_target_value: TensorType['batch_size', float],
@@ -251,8 +349,7 @@ def compute_mc_state_value_loss_tensor_batch(
     loss = torch.tensor(terminals[:-1]).logical_not()*(state_value-discount_mat@reward)**2
     breakpoint()
     return loss
-
-def compute_discrete_advantage_policy_gradient(
+def compute_advantage_policy_gradient(
         log_action_probs : List[torch.Tensor],
         target_state_values : List[torch.Tensor],
         rewards : List[Optional[float]],
@@ -294,6 +391,13 @@ def compute_entropy(
     ) -> torch.Tensor:
     return -(log_probs.exp()*log_probs).sum()
 
+def compute_normal_log_prob(mean,std,sample):
+    dist = torch.distributions.normal.Normal(mean,std)
+    return dist.log_prob(torch.tensor(sample)).sum()
+def compute_normal_entropy(mean,std):
+    dist = torch.distributions.normal.Normal(mean,std)
+    return dist.entropy().sum()
+
 class A2CAgent(DeployableAgent):
     """
     Implementation of A2C.
@@ -312,6 +416,7 @@ class A2CAgent(DeployableAgent):
             max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
             training_env_keys : List = [],
             obs_scale : float = 1/255,
+            reward_scale : float = 1,
             device : torch.device = torch.device('cpu'),
             net : PolicyValueNetwork = None):
         self.action_space = action_space
@@ -322,6 +427,7 @@ class A2CAgent(DeployableAgent):
         self.polyak_rate = polyak_rate
         self.max_rollout_length = max_rollout_length
         self.obs_scale = obs_scale
+        self.reward_scale = reward_scale
         self.device = device
         self.training_env_keys = training_env_keys
 
@@ -343,7 +449,8 @@ class A2CAgent(DeployableAgent):
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
 
         # Logging
-        self.state_values_current = []
+        self.logger = Logger(key_name='step', allow_implicit_key=True)
+        self.state_values_current = [] # State values of current training loop
         self.state_values = []
         self.state_values_std = []
         self.state_values_std_ra = []
@@ -355,19 +462,31 @@ class A2CAgent(DeployableAgent):
             discount = self.discount_factor
 
         obs = torch.tensor(obs)*self.obs_scale
+        if reward is not None:
+            reward *= self.reward_scale
 
         self.obs_stack[env_key].append_obs(obs, reward, terminal)
 
         # Choose next action
-        softmax = torch.nn.Softmax(dim=1)
         net_output = self.net(
                 obs.unsqueeze(0).float().to(self.device)
         )
-        action_probs_unnormalized = net_output['action']
-        action_probs = softmax(action_probs_unnormalized).squeeze()
-        action_dist = torch.distributions.Categorical(action_probs)
-        action = action_dist.sample().item()
+        if isinstance(self.action_space, gym.spaces.Discrete):
+            softmax = torch.nn.Softmax(dim=1)
+            assert 'action' in net_output
+            action_probs_unnormalized = net_output['action']
+            action_probs = softmax(action_probs_unnormalized).squeeze()
+            action_dist = torch.distributions.Categorical(action_probs)
+            action = action_dist.sample().item()
+        if isinstance(self.action_space, gym.spaces.Box):
+            assert 'action_mean' in net_output
+            assert 'action_std' in net_output
+            action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
+            action = action_dist.sample().cpu().numpy()
+        else:
+            raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
 
+        assert 'value' in net_output
         state_value = net_output['value']
         self.state_values_current.append(state_value.item())
 
@@ -377,6 +496,9 @@ class A2CAgent(DeployableAgent):
         # Save training data and train
         if not testing:
             self._steps += 1
+            self.logger.log(step=self._steps)
+
+            self.logger.append(debug_state_value=state_value.item())
 
             self.obs_history[env_key].append(obs)
             self.reward_history[env_key].append(reward)
@@ -395,28 +517,42 @@ class A2CAgent(DeployableAgent):
         if min(num_points) >= t_max:
             if max(num_points) != min(num_points):
                 raise Exception('This should not happen')
-            net_output = {ek: [
-                self.net(o.unsqueeze(0).float().to(self.device))
-                for o in self.obs_history[ek]
-            ] for ek in self.training_env_keys}
-            state_values = {ek: [
-                output['value'].squeeze()
-                for output in outputs
-            ] for ek,outputs in net_output.items()}
-            target_state_values = {ek: [
-                self.target_net(o.unsqueeze(0).float().to(self.device))['value'].squeeze()
-                for o in self.obs_history[ek]
-            ] for ek in self.training_env_keys}
-            log_action_probs = {ek: [
-                log_softmax(output['action']).squeeze()
-                for output in outputs
-            ] for ek,outputs in net_output.items()}
+            try:
+                net_output = {ek: [
+                    self.net(o.unsqueeze(0).float().to(self.device))
+                    for o in self.obs_history[ek]
+                ] for ek in self.training_env_keys}
+                state_values = {ek: [
+                    output['value'].squeeze()
+                    for output in outputs
+                ] for ek,outputs in net_output.items()}
+                target_state_values = {ek: [
+                    self.target_net(o.unsqueeze(0).float().to(self.device))['value'].squeeze()
+                    for o in self.obs_history[ek]
+                ] for ek in self.training_env_keys}
+                if isinstance(self.action_space,gym.spaces.Discrete):
+                    log_action_probs = {ek: [
+                        log_softmax(o['action']).squeeze()[a]
+                        for o,a in zip(outputs,self.action_history[ek])
+                    ] for ek,outputs in net_output.items()}
+                    entropy = {ek: [
+                        compute_entropy(log_softmax(o['action']).squeeze())
+                        for o in outputs
+                    ] for ek,outputs in net_output.items()}
+                else:
+                    log_action_probs = {ek: [
+                        compute_normal_log_prob(o['action_mean'],o['action_std'],a)
+                        for o,a in zip(outputs,self.action_history[ek])
+                    ] for ek,outputs in net_output.items()}
+                    entropy = {ek: [
+                        compute_normal_entropy(o['action_mean'],o['action_std'])
+                        for o in outputs
+                    ] for ek,outputs in net_output.items()}
+            except:
+                raise
             # Train policy
-            loss_pi = [compute_discrete_advantage_policy_gradient(
-                        log_action_probs = [
-                            x[a] if a is not None else torch.tensor(0)
-                            for x,a in zip(log_action_probs[ek],self.action_history[ek])
-                        ],
+            loss_pi = [compute_advantage_policy_gradient(
+                        log_action_probs = log_action_probs[ek],
                         target_state_values = target_state_values[ek],
                         rewards = self.reward_history[ek],
                         terminals = self.terminal_history[ek],
@@ -434,18 +570,20 @@ class A2CAgent(DeployableAgent):
             loss_v = torch.stack(loss_v).mean()
             # Entropy
             loss_entropy = [
-                    torch.stack([
-                        -compute_entropy(log_probs)
-                        for log_probs in log_probs_history
-                    ]).mean()
-                    for log_probs_history in log_action_probs.values()
+                    torch.stack(e).mean()
+                    for e in entropy.values()
             ]
-            loss_entropy = torch.stack(loss_entropy).mean()
+            loss_entropy = -torch.stack(loss_entropy).mean()
             # Take a gradient step
             loss = loss_pi+loss_v+0.01*loss_entropy
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            # Check weights
+            if __debug__:
+                for p in self.net.parameters():
+                    if not p.mean().isfinite():
+                        breakpoint()
             # Clear data
             for ek in self.training_env_keys:
                 self.obs_history[ek] = self.obs_history[ek][-1:]
@@ -468,8 +606,21 @@ class A2CAgent(DeployableAgent):
 
     def act(self, testing=False, env_key=None):
         """ Return a random action according to an epsilon-greedy policy. """
-        testing=testing
-        return self.next_action[env_key]
+        if env_key is None:
+            env_key = testing
+        action = self.next_action[env_key]
+        if action is None:
+            raise Exception('No action found. Agent must observe the environment before taking an action.')
+
+        high = self.action_space.high
+        low = self.action_space.low
+        d = high-low
+        assert isinstance(d,np.ndarray) # XXX: Workaround for https://github.com/microsoft/pylance-release/issues/1619. Remove when this gets fixed.
+        scale = d/2
+        bias = (high+low)/2
+        scaled_action = np.tanh(action)*scale+bias
+
+        return scaled_action
 
     def state_dict(self):
         return {
@@ -497,6 +648,164 @@ class A2CAgent(DeployableAgent):
     def load_state_dict_deploy(self, state):
         state = state
         pass # TODO
+
+class A2CAgentRecurrent(A2CAgent):
+    def __init__(self, episodes_per_batch=16, reward_scale=1, net : PolicyValueNetworkRecurrent = None, **kwargs):
+        super().__init__(net=net, **kwargs)
+        self.episodes_per_batch = episodes_per_batch
+        self.reward_scale = reward_scale
+
+        self._training_data = []
+
+        if net is None:
+            raise Exception('Models must be provided. `net` is missing.')
+        self.net = net
+
+        self.last_hidden : Dict[Any,Any] = defaultdict(lambda: None)
+    def observe(self, obs, reward=None, terminal=False, testing=False, time=1, discount=None, env_key=None):
+        if env_key is None:
+            env_key = testing
+        if discount is None:
+            discount = self.discount_factor
+
+        if reward is not None:
+            reward *= self.reward_scale
+        obs = torch.tensor(obs)*self.obs_scale
+
+        self.obs_stack[env_key].append_obs(obs, reward, terminal)
+
+        # Choose next action
+        last_hidden = self.last_hidden[env_key]
+        if last_hidden is None:
+            last_hidden = self.net.init_hidden()
+        net_output = self.net(
+                obs.unsqueeze(0).float().to(self.device),
+                last_hidden
+        )
+        assert 'action_mean' in net_output
+        assert 'action_std' in net_output
+        assert 'value' in net_output
+        assert 'hidden' in net_output
+        assert net_output['hidden'] is not None
+        action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
+        action = action_dist.sample().cpu().numpy()
+        self.last_hidden[env_key] = net_output['hidden']
+
+        state_value = net_output['value']
+        self.state_values_current.append(state_value.item())
+
+        self.next_action[env_key] = action
+        self.obs_stack[env_key].append_action(action)
+
+        # Save training data and train
+        if not testing:
+            self._steps += 1
+            self.logger.log(step=self._steps)
+
+            self.obs_history[env_key].append(obs)
+            self.reward_history[env_key].append(reward)
+            self.discount_history[env_key].append(discount**time)
+            self.action_history[env_key].append(action)
+
+            if terminal:
+                # Add this episode to the training data set
+                self._training_data.append({
+                    'obs': self.obs_history[env_key],
+                    'reward': self.reward_history[env_key],
+                    'action': self.action_history[env_key],
+                    'discount': self.discount_history[env_key],
+                })
+                # Reset current episode data
+                self.obs_history[env_key] = []
+                self.reward_history[env_key] = []
+                self.action_history[env_key] = []
+                self.discount_history[env_key] = []
+
+            self._train()
+            self._update_target()
+    def _train(self):
+        if len(self._training_data) < self.episodes_per_batch:
+            return
+
+        total_loss = torch.tensor(0., device=self.device)
+        for episode in self._training_data:
+            episode_length = len(episode['obs'])
+            try:
+                net_output = []
+                hidden = self.net.init_hidden()
+                for obs in episode['obs']:
+                    obs = obs.unsqueeze(0).float().to(self.device)
+                    output = self.net(obs,hidden)
+                    net_output.append(output)
+                    hidden = output['hidden']
+                target_net_output = []
+                hidden = self.net.init_hidden()
+                for obs in episode['obs']:
+                    obs = obs.unsqueeze(0).float().to(self.device)
+                    output = self.target_net(obs,hidden)
+                    target_net_output.append(output)
+                    hidden = output['hidden']
+                state_values = [
+                        o['value'].squeeze()
+                        for o in net_output
+                ]
+                target_state_values = [
+                        o['value'].squeeze()
+                        for o in target_net_output
+                ]
+                log_action_probs = [
+                        compute_normal_log_prob(o['action_mean'],o['action_std'],a)
+                        for o,a in zip(net_output,episode['action'])
+                ]
+                entropy = [
+                    -compute_normal_entropy(o['action_mean'],o['action_std'])
+                    for o in net_output
+                ]
+            except:
+                raise
+
+            # Train policy
+            loss_pi = compute_advantage_policy_gradient(
+                    log_action_probs = log_action_probs,
+                    target_state_values = target_state_values,
+                    rewards = episode['reward'],
+                    terminals = [False]*(episode_length-1)+[True],
+                    discounts = episode['discount'],
+            ).mean(0)
+            # Train value network
+            loss_v = compute_mc_state_value_loss(
+                    state_values = state_values,
+                    last_state_target_value = 0,
+                    rewards = episode['reward'],
+                    terminals = [False]*(episode_length-1)+[True],
+                    discounts = episode['discount'],
+            ).mean(0)
+            # Entropy
+            loss_entropy = torch.stack(entropy).mean(0)
+            # Take a gradient step
+            total_loss += loss_pi+loss_v+0.01*loss_entropy
+
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        self.optimizer.step()
+        # Clear data
+        self._training_data.clear()
+        # Log
+        self._training_steps += 1
+        self.logger.log(
+                debug_loss = total_loss.item()
+        )
+        self.state_values.append(np.mean(self.state_values_current))
+        self.state_values_std.append(np.std(self.state_values_current))
+        self.state_values_std_ra.append(np.mean(self.state_values_std) if self._training_steps < 100 else np.mean(self.state_values_std[-100:]))
+        self.state_values_current = []
+        # Log weights
+        param_vals = torch.cat([param.flatten() for param in self.net.parameters()])
+        self.logger.log(
+                debug_net_param_mean = torch.mean(param_vals).item(),
+                debug_net_param_min = torch.min(param_vals).item(),
+                debug_net_param_max = torch.max(param_vals).item(),
+        )
 
 if __name__ == "__main__":
     import os
@@ -607,6 +916,76 @@ if __name__ == "__main__":
 
         return test_results
 
+    def train_recurrent(env, agent, training_steps : int = 1_000_000, plot_frequency : int = 10):
+        test_results = {}
+
+        rewards = []
+        running_averages = []
+        episode_rewards = []
+        done = True
+        for i in tqdm(range(training_steps), desc='training'):
+            if done: # Start of an episode
+                obs = env.reset()
+                agent.observe(obs, testing=False)
+                done = False
+                episode_rewards = []
+            else:
+                obs, reward, done, _ = env.step(agent.act(testing=False))
+                agent.observe(obs, reward, done, testing=False)
+                episode_rewards.append(reward)
+            if done: # End of an episode
+                rewards.append(np.sum(episode_rewards))
+                ep_len = len(episode_rewards)
+                running_average = np.mean(rewards) if len(rewards) < 100 else np.mean(rewards[-100:])
+                running_averages.append(running_average)
+                tqdm.write('Step %d\t Episode Length: %d\t Reward: %f\t Running avg reward: %f' % (i,ep_len,rewards[-1],running_average))
+                # Plot
+                if len(running_averages) % plot_frequency == 0:
+                    # Reward Running Average
+                    plt.plot(range(len(running_averages)),running_averages)
+                    plt.grid()
+                    plt.xlabel('Episodes')
+                    plt.ylabel('Running Average Reward (last 100 episodes)')
+                    filename = './plot-reward.png'
+                    plt.savefig(filename)
+                    tqdm.write('Saved plot to %s' % os.path.abspath(filename))
+                    plt.close()
+                    # State values
+                    plt.plot(range(len(agent.state_values)),agent.state_values)
+                    plt.grid()
+                    plt.xlabel('Steps')
+                    plt.ylabel('State Values')
+                    filename = './plot-state-value.png'
+                    plt.savefig(filename)
+                    tqdm.write('Saved plot to %s' % os.path.abspath(filename))
+                    plt.close()
+                    # State values std
+                    plt.plot(range(len(agent.state_values_std_ra)),agent.state_values_std_ra)
+                    plt.grid()
+                    plt.xlabel('Steps')
+                    plt.ylabel('State Values std running average (100 episodes)')
+                    filename = './plot-state-value-std.png'
+                    plt.savefig(filename)
+                    tqdm.write('Saved plot to %s' % os.path.abspath(filename))
+                    plt.close()
+                    # XXX: DEBUG: Neural net parameters
+                    if len(agent.state_values) > 0:
+                        plt.plot(*agent.logger['debug_net_param_mean'], label='mean')
+                        plt.plot(*agent.logger['debug_net_param_min'], label='min')
+                        plt.plot(*agent.logger['debug_net_param_max'], label='max')
+                        plt.grid()
+                        plt.xlabel('Steps')
+                        plt.ylabel('Parameter Weights')
+                        plt.title('Neural Net Parameter Weights')
+                        filename = './plot-params.png'
+                        plt.savefig(filename)
+                        tqdm.write('Saved plot to %s' % os.path.abspath(filename))
+                        plt.close()
+
+        env.close()
+
+        return test_results
+
     def test(env, agent, render=False, video_file_name='output.avi'):
         total_reward = 0
         total_steps = 0
@@ -642,28 +1021,90 @@ if __name__ == "__main__":
         print('No GPU found. Running on CPU.')
         device = torch.device('cpu')
 
-    num_actors = 16
-    env_name = 'PongNoFrameskip-v4'
-    train_envs = [make_env(env_name,atari=True) for _ in range(num_actors)]
-    test_env = make_env(env_name,atari=True)
-    #train_envs = [make_env('FrozenLake-v0',one_hot_obs=True) for _ in range(num_actors)]
-    #test_env = make_env('FrozenLake-v0',one_hot_obs=True)
+    def run_atari():
+        num_actors = 16
+        env_name = 'PongNoFrameskip-v4'
+        train_envs = [make_env(env_name,atari=True) for _ in range(num_actors)]
+        test_env = make_env(env_name,atari=True)
 
-    action_space = test_env.action_space
-    observation_space = test_env.observation_space
-    agent = A2CAgent(
-        action_space=action_space,
-        observation_space=observation_space,
-        training_env_keys=[i for i in range(num_actors)],
-        net  = PolicyValueNetworkCNN(observation_space.shape[0], action_space.n).to(device),
-        #net  = PolicyValueNetworkLinear(observation_space.shape[0], action_space.n).to(device),
-        #discount_factor=1,
-        #learning_rate=0.01,
-        #obs_scale=1,
-        #target_update_frequency=1,
-        device=device,
-    )
+        action_space = test_env.action_space
+        observation_space = test_env.observation_space
+        agent = A2CAgent(
+            action_space=action_space,
+            observation_space=observation_space,
+            training_env_keys=[i for i in range(num_actors)],
+            net  = PolicyValueNetworkCNN(observation_space.shape[0], action_space.n).to(device),
+            device=device,
+        )
 
-    results = train_onpolicy(train_envs,agent,plot_frequency=10)
-    test(test_env, agent)
+        results = train_onpolicy(train_envs,agent,plot_frequency=10)
+        test(test_env, agent)
+        return results
 
+    def run_discrete():
+        num_actors = 16
+        train_envs = [make_env('FrozenLake-v0',one_hot_obs=True) for _ in range(num_actors)]
+        test_env = make_env('FrozenLake-v0',one_hot_obs=True)
+
+        action_space = test_env.action_space
+        observation_space = test_env.observation_space
+        agent = A2CAgent(
+            action_space=action_space,
+            observation_space=observation_space,
+            training_env_keys=[i for i in range(num_actors)],
+            net  = PolicyValueNetworkLinear(observation_space.shape[0], action_space.n).to(device),
+            discount_factor=1,
+            learning_rate=0.01,
+            obs_scale=1,
+            target_update_frequency=1,
+            device=device,
+        )
+
+        results = train_onpolicy(train_envs,agent,plot_frequency=10)
+        test(test_env, agent)
+        return results
+
+    def run_mujoco_recurrent():
+        env_name = 'Hopper-v3'
+        env = make_env(env_name)
+
+        action_space = env.action_space
+        observation_space = env.observation_space
+        agent = A2CAgentRecurrent(
+            action_space=action_space,
+            observation_space=observation_space,
+            #learning_rate = 3e-4,
+            net = PolicyValueNetworkRecurrentFCNN(observation_space.shape[0], action_space.shape[0]).to(device),
+            device=device,
+        )
+
+        results = train_recurrent(env,agent,plot_frequency=10, training_steps=50_000_000)
+        test(env, agent)
+        return results
+
+    def run_mujoco():
+        num_actors = 16
+        env_name = 'Hopper-v3'
+        train_envs = [make_env(env_name) for _ in range(num_actors)]
+        test_env = make_env(env_name)
+
+        action_space = test_env.action_space
+        observation_space = test_env.observation_space
+        agent = A2CAgent(
+            action_space=action_space,
+            observation_space=observation_space,
+            training_env_keys=[i for i in range(num_actors)],
+            #learning_rate = 3e-4,
+            max_rollout_length=128,
+            reward_scale=5,
+            obs_scale=1,
+            net = PolicyValueNetworkFCNN(observation_space.shape[0], action_space.shape[0], shared_std=False).to(device),
+            device=device,
+        )
+
+        results = train_onpolicy(train_envs, agent, plot_frequency=10, training_steps=50_000_000)
+        test(test_env, agent)
+        return results
+
+    run_mujoco()
+    #run_atari()

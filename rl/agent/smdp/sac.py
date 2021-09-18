@@ -73,8 +73,11 @@ class PolicyNetwork(torch.nn.Module):
             layers.append(torch.nn.Linear(in_features=in_size,out_features=out_size))
             layers.append(torch.nn.ReLU())
         self.fc = torch.nn.Sequential(*layers)
-        self.fc_mean = torch.nn.Linear(in_features=structure[-1],out_features=num_actions)
-        self.fc_log_std = torch.nn.Linear(in_features=structure[-1],out_features=num_actions)
+
+        final_layer_input_size = structure[-1] if len(structure) > 0 else num_features
+
+        self.fc_mean = torch.nn.Linear(in_features=final_layer_input_size,out_features=num_actions)
+        self.fc_log_std = torch.nn.Linear(in_features=final_layer_input_size,out_features=num_actions)
     def forward(self, obs):
         x = obs
         x = self.fc(x)
@@ -259,7 +262,9 @@ class SACAgent(DeployableAgent):
 
         high = self.action_space.high
         low = self.action_space.low
-        scale = torch.tensor((high-low)/2, device=self.device)
+        d = high-low
+        assert isinstance(d,np.ndarray) # XXX: Workaround for https://github.com/microsoft/pylance-release/issues/1619. Remove when this gets fixed.
+        scale = torch.tensor(d/2, device=self.device)
         bias = torch.tensor((high+low)/2, device=self.device)
         scaled_action = torch.tanh(action)*scale+bias
         output['action'] = scaled_action.float() # `float()` converts it to the float32 (or whatever the default float precision is)
@@ -339,7 +344,7 @@ class SACAgent(DeployableAgent):
 
             ### Update policy (equation 12/13) ###
             self.optimizer_pi.zero_grad()
-            loss = sampled_a0['log_prob'] - q # This is equation 12, but OpenAI's pseudocode uses the negative of this.
+            loss = sampled_a0['log_prob'] - q # This is equation 12, but OpenAI's pseudocode uses the negative of this. I'm guessing they're doing gradient ascent instead of descent?
             loss = loss.mean()
             loss.backward()
             self.optimizer_pi.step()
@@ -499,11 +504,13 @@ if __name__ == "__main__":
 
     def make_env(env_name):
         env = gym.make(env_name)
-        if isinstance(env,gym.wrappers.TimeLimit):
-            env = env.env
+        #if isinstance(env,gym.wrappers.TimeLimit):
+        #    env = env.env
         return env
     
-    def train(envs, agent, training_steps=1_000_000, test_frequency=1000, render=False):
+    def train(envs, agent, training_steps=1_000_000, test_frequency=1000, render=False, env_name=None):
+        if env_name is None:
+            env_name = str(envs[0])
         test_results = {}
         env = envs[0]
         env_test = envs[1]
@@ -516,6 +523,8 @@ if __name__ == "__main__":
                 video_file_name = os.path.join('output','video-%d.avi'%i)
                 test_results[i] = [test(env_test, agent, render=(i==0 and render), video_file_name=video_file_name) for i in tqdm(range(5), desc='testing')]
                 avg = np.mean([x['total_reward'] for x in test_results[i]])
+                if render:
+                    tqdm.write('Video saved to %s' % os.path.abspath(video_file_name))
                 tqdm.write('Iteration {i}\t Average reward: {avg}'.format(i=i,avg=avg))
                 tqdm.write(pprint.pformat(test_results[i], indent=4))
                 # Plot (rewards)
@@ -525,6 +534,7 @@ if __name__ == "__main__":
                 plt.plot(plot_x,plot_y)
                 plt.xlabel('Training Steps')
                 plt.ylabel('Average Reward')
+                plt.title(env_name)
                 plt.grid()
                 plt.savefig(plot_file_name)
                 plt.close()
@@ -596,18 +606,51 @@ if __name__ == "__main__":
         print('No GPU found. Running on CPU.')
         device = torch.device('cpu')
 
+    env_configs = {
+            'Hopper-v1': {
+                'steps': 1_000_000,
+                'reward_scale': 5,
+            },
+            'Hopper-v2': {
+                'steps': 1_000_000,
+                'reward_scale': 5,
+            },
+            'Hopper-v3': {
+                'steps': 1_000_000,
+                'reward_scale': 5,
+            },
+            'HalfCheetah-v1': {
+                'steps': 3_000_000,
+                'reward_scale': 5,
+            },
+            'Ant-v1': {
+                'steps': 3_000_000,
+                'reward_scale': 5,
+            },
+            'Ant-v2': {
+                'steps': 3_000_000,
+                'reward_scale': 5,
+            },
+            'Humanoid-v1': {
+                'steps': 10_000_000,
+                'reward_scale': 20,
+            },
+    }
+
     available_envs = [env_spec.id for env_spec in gym.envs.registry.all()]
     if 'Hopper-v1' in available_envs:
         env_name = 'Hopper-v1'
     else:
         env_name = 'Hopper-v2'
     #env_name = 'HopperBulletEnv-v0'
+    env_name = 'HalfCheetah-v2'
+    env_name = 'Ant-v1'
     env = [make_env(env_name), make_env(env_name)]
 
     agent = SACAgent(
         action_space=env[0].action_space,
         observation_space=env[0].observation_space,
-        reward_scale=5,
+        reward_scale=env_configs[env_name]['reward_scale'],
         q_net_1 = QNetwork(env[0].observation_space.shape[0], env[0].action_space.shape[0]).to(device),
         q_net_2 = QNetwork(env[0].observation_space.shape[0], env[0].action_space.shape[0]).to(device),
         v_net   = VNetwork(env[0].observation_space.shape[0]).to(device),
@@ -615,6 +658,12 @@ if __name__ == "__main__":
         device=device,
     )
 
-    results = train(env,agent)
+    results = train(
+            env,
+            agent,
+            env_name=env_name,
+            test_frequency=10_000,
+            training_steps=env_configs[env_name]['steps']
+    )
     test(env[1], agent)
 

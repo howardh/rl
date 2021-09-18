@@ -347,6 +347,7 @@ def make_app():
     def get_params():
         params = {}
 
+        # hrl-001
         base_dqn_params = {
             'discount_factor': 0.99,
             'q_net_structure': [256,256],
@@ -379,11 +380,24 @@ def make_app():
                 base_sac_params,
             ],
         }
+        # hrl-002
         sac_params = {
             **base_sac_params,
             'pi_net_structure': [128,128],
         }
         params['hrl-002'] = {
+            **params['hrl-001'],
+            'children_params': [
+                sac_params,
+                sac_params,
+            ],
+        }
+        # hrl-003
+        sac_params = {
+            **base_sac_params,
+            'pi_net_structure': [32,32],
+        }
+        params['hrl-003'] = {
             **params['hrl-001'],
             'children_params': [
                 sac_params,

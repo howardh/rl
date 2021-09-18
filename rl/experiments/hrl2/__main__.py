@@ -12,7 +12,7 @@ from rl.experiments.hrl2.decoupled_sync import make_app as make_app_disjoint
 from rl.experiments.hrl2.dropout import make_app as make_app_dropout
 from rl.experiments.hrl2.distillation import make_app as make_app_distillation
 
-EXPERIMENT_SET = 0
+EXPERIMENT_SET = 2
 
 if EXPERIMENT_SET == 0:
     # No delay, and full capacity children
@@ -30,6 +30,14 @@ elif EXPERIMENT_SET == 1:
     EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
     TRAIN_ID_RANGE = range(1,3)
     TRAIN_EXP_NAME = 'hrl-002'
+elif EXPERIMENT_SET == 2:
+    # No delay, and [32,32] children
+    PROJECT_ROOT = './rl'
+    EXPERIMENT_GROUP_NAME = 'disjoint-dqn-sac-hopper-2'
+    RESULTS_ROOT_DIRECTORY = rl.utils.get_results_root_directory()
+    EXPERIMENT_GROUP_DIRECTORY = os.path.join(RESULTS_ROOT_DIRECTORY, EXPERIMENT_GROUP_NAME)
+    TRAIN_ID_RANGE = range(1,3)
+    TRAIN_EXP_NAME = 'hrl-003'
 
 def run_slurm(debug=False):
     """
@@ -97,13 +105,13 @@ def run_slurm(debug=False):
     slurm.sbatch(command)
 
 def run_local(debug=False):
-    ## Run training with an experiment group
-    #train(n=5, debug=debug)
+    # Run training with an experiment group
+    train(n=1, debug=debug)
 
-    ## Run a dropout experiment on completed training runs
-    #dropout(debug=debug)
-    ## Plot the results from all dropout experiments in this group
-    #plot_dropout()
+    # Run a dropout experiment on completed training runs
+    dropout(debug=debug)
+    # Plot the results from all dropout experiments in this group
+    plot_dropout()
 
     # Run distillation experiments on completed training runs
     distillation(debug=debug)

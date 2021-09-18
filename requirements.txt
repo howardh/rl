@@ -1,8 +1,10 @@
 absl-py==0.11.0
+astor==0.8.1
 astunparse==1.6.3
 atari-py==0.2.6
 attrs==20.3.0
--e git+git@github.com:howardh/rl.git@f898315844ccb0af6e03f664d66d318cf626c503#egg=bsuite
+-e git+git@github.com:howardh/rl.git@3894b2d4ce4bcc41810d4f26d4c833aacbce2c70#egg=bsuite
+cached-property==1.5.2
 cachetools==4.2.1
 certifi==2020.12.5
 cffi==1.14.5
@@ -18,25 +20,25 @@ dill==0.3.3
 dm-env==1.3
 dm-haiku==0.0.3
 dm-tree==0.1.5
--e git+git@github.com:howardh/experiment.git@cb619a933da9e02036f1ab615034c188150f65af#egg=experiment
+-e git+git@github.com:howardh/experiment.git@44c92e376ec2cfaabdf27a4ab78e57bfbc7c6121#egg=experiment
 fabulous==0.3.0
 fasteners==0.16
 flatbuffers==1.12
 frozendict==1.2
 future==0.18.2
-gast==0.3.3
+gast==0.2.2
 gitdb==4.0.7
 GitPython==3.1.18
 glfw==2.1.0
 google-auth==1.28.1
 google-auth-oauthlib==0.4.4
 google-pasta==0.2.0
-grpcio==1.32.0
+grpcio==1.34.1
 gym==0.17.3
 # Editable install with no version control (gym-classification==0.0.1)
 -e /home/howard/Code/gym-classification
 -e git+ssh://git@github.com/howardh/gym-fourrooms.git@4576383f830a7d80e75a83dc8efc25b0ffee4280#egg=gym_fourrooms
-h5py==2.10.0
+h5py==3.1.0
 idna==2.10
 imageio==2.9.0
 importlib-metadata==3.4.0
@@ -44,6 +46,8 @@ iniconfig==1.1.1
 jax==0.2.9
 jaxlib==0.1.60
 joblib==1.0.1
+Keras-Applications==1.0.8
+keras-nightly==2.5.0.dev2021032900
 Keras-Preprocessing==1.1.2
 kiwisolver==1.3.1
 levenshtein==0.12.0
@@ -54,7 +58,7 @@ matplotlib==3.3.4
 mizani==0.7.2
 mujoco-py==2.0.2.13
 networkx==2.5
-numpy==1.20.2
+numpy==1.19.5
 oauthlib==3.1.0
 opencv-python==4.5.1.48
 opt-einsum==3.3.0
@@ -84,7 +88,7 @@ PyWavelets==1.1.1
 PyYAML==5.4.1
 requests==2.25.1
 requests-oauthlib==1.3.0
--e git+git@github.com:howardh/rl.git@f898315844ccb0af6e03f664d66d318cf626c503#egg=rl
+-e git+git@github.com:howardh/rl.git@3894b2d4ce4bcc41810d4f26d4c833aacbce2c70#egg=rl
 rlax==0.0.3
 rsa==4.7.2
 scikit-image==0.18.1
@@ -95,19 +99,24 @@ simple-slurm==0.1.7
 six==1.15.0
 sklearn==0.0
 smmap==4.0.0
+stable-baselines==2.10.2
 stable-baselines3==1.0
 statsmodels==0.12.2
-tensorboard==2.4.1
+tensorboard==1.15.0
+tensorboard-data-server==0.6.1
 tensorboard-plugin-wit==1.8.0
-tensorflow-estimator==2.4.0
+tensorflow==1.15.0
+tensorflow-estimator==1.15.1
 termcolor==1.1.0
 threadpoolctl==2.1.0
 tifffile==2021.2.1
 toml==0.10.2
 toolz==0.11.1
 torch==1.9.0
+torchtyping==0.1.4
 torchvision==0.10.0
 tqdm==4.56.0
+typeguard==2.12.1
 typer==0.3.2
 typing-extensions==3.7.4.3
 urllib3==1.26.4
