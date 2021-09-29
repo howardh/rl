@@ -1,9 +1,10 @@
 absl-py==0.11.0
+ale-py==0.7
+appdirs==1.4.4
 astor==0.8.1
 astunparse==1.6.3
-atari-py==0.2.6
 attrs==20.3.0
--e git+git@github.com:howardh/rl.git@3894b2d4ce4bcc41810d4f26d4c833aacbce2c70#egg=bsuite
+-e git+ssh://git@github.com/howardh/rl.git@529baeaba19b49ea55838997e696c0e9567e0a61#egg=bsuite
 cached-property==1.5.2
 cachetools==4.2.1
 certifi==2020.12.5
@@ -12,6 +13,7 @@ chardet==4.0.0
 chex==0.0.3
 click==7.1.2
 cloudpickle==1.6.0
+configparser==5.0.2
 cycler==0.10.0
 Cython==0.29.23
 decorator==4.4.2
@@ -20,7 +22,8 @@ dill==0.3.3
 dm-env==1.3
 dm-haiku==0.0.3
 dm-tree==0.1.5
--e git+git@github.com:howardh/experiment.git@44c92e376ec2cfaabdf27a4ab78e57bfbc7c6121#egg=experiment
+docker-pycreds==0.4.0
+-e git+ssh://git@github.com/howardh/experiment.git@cb04411bd5849e1bcf985fed272cfb7455d26689#egg=experiment
 fabulous==0.3.0
 fasteners==0.16
 flatbuffers==1.12
@@ -34,7 +37,7 @@ google-auth==1.28.1
 google-auth-oauthlib==0.4.4
 google-pasta==0.2.0
 grpcio==1.34.1
-gym==0.17.3
+gym==0.20.0
 # Editable install with no version control (gym-classification==0.0.1)
 -e /home/howard/Code/gym-classification
 -e git+ssh://git@github.com/howardh/gym-fourrooms.git@4576383f830a7d80e75a83dc8efc25b0ffee4280#egg=gym_fourrooms
@@ -42,9 +45,9 @@ h5py==3.1.0
 idna==2.10
 imageio==2.9.0
 importlib-metadata==3.4.0
+importlib-resources==5.2.2
 iniconfig==1.1.1
 jax==0.2.9
-jaxlib==0.1.60
 joblib==1.0.1
 Keras-Applications==1.0.8
 keras-nightly==2.5.0.dev2021032900
@@ -55,10 +58,11 @@ Mako==1.1.4
 Markdown==3.3.4
 MarkupSafe==1.1.1
 matplotlib==3.3.4
+memory-profiler==0.58.0
 mizani==0.7.2
 mujoco-py==2.0.2.13
 networkx==2.5
-numpy==1.19.5
+numpy==1.21.1
 oauthlib==3.1.0
 opencv-python==4.5.1.48
 opt-einsum==3.3.0
@@ -66,12 +70,15 @@ optax==0.0.2
 packaging==20.9
 palettable==3.3.0
 pandas==1.2.1
+pathtools==0.1.2
 patsy==0.5.1
 pdoc3==0.9.2
 Pillow==7.2.0
 plotnine==0.7.1
 pluggy==0.13.1
+promise==2.3
 protobuf==3.15.8
+psutil==5.8.0
 py==1.10.0
 pyaml==20.4.0
 pyasn1==0.4.8
@@ -88,13 +95,15 @@ PyWavelets==1.1.1
 PyYAML==5.4.1
 requests==2.25.1
 requests-oauthlib==1.3.0
--e git+git@github.com:howardh/rl.git@3894b2d4ce4bcc41810d4f26d4c833aacbce2c70#egg=rl
+-e git+ssh://git@github.com/howardh/rl.git@529baeaba19b49ea55838997e696c0e9567e0a61#egg=rl
 rlax==0.0.3
 rsa==4.7.2
 scikit-image==0.18.1
 scikit-learn==0.24.1
 scikit-optimize==0.8.1
 scipy==1.6.0
+sentry-sdk==1.3.1
+shortuuid==1.0.1
 simple-slurm==0.1.7
 six==1.15.0
 sklearn==0.0
@@ -102,6 +111,7 @@ smmap==4.0.0
 stable-baselines==2.10.2
 stable-baselines3==1.0
 statsmodels==0.12.2
+subprocess32==3.5.4
 tensorboard==1.15.0
 tensorboard-data-server==0.6.1
 tensorboard-plugin-wit==1.8.0
@@ -120,6 +130,7 @@ typeguard==2.12.1
 typer==0.3.2
 typing-extensions==3.7.4.3
 urllib3==1.26.4
+wandb==0.12.1
 Werkzeug==1.0.1
 wrapt==1.12.1
 zipp==3.4.0
