@@ -223,6 +223,7 @@ class DQNAgent(DeployableAgent):
             target_eps : float = 0,
             eps_annealing_steps : int = 1_000_000,
             q_net : torch.nn.Module = None,
+            logger : Logger = None,
             atari : bool = True
             ):
         """
@@ -270,7 +271,11 @@ class DQNAgent(DeployableAgent):
         self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
         #self.optimizer = torch.optim.RMSprop(self.q_net.parameters(), lr=learning_rate, momentum=0.95)
 
-        self.logger = Logger(key_name='step')
+        if logger is None:
+            self.logger = Logger(key_name='step', allow_implicit_key=True)
+            self.logger.log(step=0)
+        else:
+            self.logger = logger
         self.train_action_values = []
         self.train_action_values_target = []
         self.train_action_value_diff = []

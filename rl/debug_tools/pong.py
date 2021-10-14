@@ -55,7 +55,7 @@ def get_pretained_model():
     download_directory = appdirs.user_cache_dir('rl_debug_tools')
     os.makedirs(download_directory, exist_ok=True)
     model_filename = os.path.join(download_directory,'dqn-pong-v4.pt')
-    _download_model(MODEL_WEIGHTS_URL, model_filename, overwrite=True)
+    _download_model(MODEL_WEIGHTS_URL, model_filename, overwrite=False)
     state_dict = torch.load(model_filename)
     net = QNetworkCNN(num_actions = len(state_dict['fc.2.bias']))
     net.load_state_dict(state_dict)
@@ -66,6 +66,7 @@ if __name__ == '__main__':
     import gym
     from gym.wrappers import FrameStack, AtariPreprocessing
     from tqdm import tqdm
+    import numpy as np
 
     model = get_pretained_model()
 
@@ -75,12 +76,17 @@ if __name__ == '__main__':
 
     total_reward = 0
     steps = 0
+    all_values = []
 
     obs = env.reset()
     for steps in tqdm(itertools.count(), desc='Running Episode'):
         obs = torch.tensor(obs).unsqueeze(0).float()/255.
         values = model(obs)[0]
-        action = values.argmax()
+        if np.random.rand() < 1:
+            action = env.action_space.sample()
+        else:
+            action = values.argmax()
+        all_values.append(values[action].item())
         obs,reward,done,_ = env.step(action)
         total_reward += reward
         if done:
@@ -89,4 +95,5 @@ if __name__ == '__main__':
     print('-'*50)
     print(f'Total steps: {steps}')
     print(f'Total reward: {total_reward}')
+    print(f'Mean val: {np.mean(all_values)}')
     print('-'*50)

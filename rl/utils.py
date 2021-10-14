@@ -1,18 +1,21 @@
 import os
 import time
 import threading
-import re
+import traceback
+import itertools
+import timeit
+import csv
+from typing import Mapping
+
 from tqdm import tqdm 
 import scipy.sparse
 import scipy.sparse.linalg
-import timeit
-import csv
 import numpy as np
 import torch
 import dill
-import operator
-import traceback
-import itertools
+import gym
+import ale_py
+import ale_py.gym.environment
 
 try:
     import pandas
@@ -81,7 +84,7 @@ def find_next_free_file(prefix, suffix, directory):
             try:
                 f = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.close(f)
-            except FileExistsError as e:
+            except FileExistsError:
                 # Trying to create a file that already exists.
                 # Try a new file name
                 continue
@@ -187,6 +190,58 @@ def recursive_frozenset(d):
             return tuple(x)
         return x
     return frozenset([(k,to_hashable(v)) for k,v in d.items()])
+
+# State persistence
+
+def default_state_dict(obj, keys):
+    def foo(o):
+        if hasattr(o, 'state_dict'):
+            return o.state_dict()
+        if isinstance(o, Mapping):
+            return {k:foo(v) for k,v in o.items()}
+        if isinstance(o,gym.Env):
+            return get_env_state(o)
+        return o
+    return {k:foo(getattr(obj,k)) for k in keys}
+
+def default_load_state_dict(obj, state):
+    for k,v in state.items():
+        if isinstance(obj,Mapping):
+            attr = obj[k]
+        else:
+            attr = getattr(obj,k)
+
+        if hasattr(attr,'load_state_dict'):
+            attr.load_state_dict(v)
+        elif isinstance(attr,dict):
+            default_load_state_dict(attr,v)
+        elif isinstance(attr,gym.Env):
+            set_env_state(env=attr,state=v)
+        else:
+            if isinstance(v,dict):
+                raise Exception(f'Unable to load a dictionary ({v}) into a non-dictionary object ({attr}).')
+            if isinstance(obj,dict):
+                obj[k] = v
+            else:
+                if hasattr(obj,k):
+                    setattr(obj,k,v)
+                else:
+                    raise Exception(f'Object {obj} does not have attribute {k}')
+
+def get_env_state(env):
+    if isinstance(env.unwrapped,ale_py.gym.environment.ALGymEnv):
+        # https://github.com/openai/gym/issues/402#issuecomment-260744758
+        return env.unwrapped.ale.cloneSystemState()
+    env_type = type(env.unwrapped)
+    raise NotImplementedError(f'Unable to handle environment of type {env_type}')
+
+def set_env_state(env, state):
+    if isinstance(env.unwrapped,ale_py.gym.environment.ALGymEnv):
+        # https://github.com/openai/gym/issues/402#issuecomment-260744758
+        env.unwrapped.ale.restoreSystemState(state)
+        return
+    env_type = type(env.unwrapped)
+    raise NotImplementedError(f'Unable to handle environment of type {env_type}')
 
 # Data processing
 

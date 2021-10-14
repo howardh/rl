@@ -356,7 +356,17 @@ def compute_advantage_policy_gradient(
         terminals : List[bool],
         discounts : List[float],
     ) -> torch.Tensor:
-    """ Advantage policy gradient for discrete action spaces. """
+    """
+    Advantage policy gradient for discrete action spaces.
+    Given a sequence of length n, we observe states/actions/rewards r_0,s_0,a_0,r_1,s_1,a_1,r_2,s_2,...,r_{n-1},s_{n-1},a_{n-1}.
+
+    Args:
+        log_action_probs: A list of length n (last element is ignored). The element at index i is a 0-dimensional tensor containing the log probability of selection action a_i at state s_i.
+        target_state_values: A list of length n. The element at index i is the state value of state s_i as predicted by the target Q network.
+        rewards: A list of length n (first element is ignored). The element at index i is r_{i+1}. The value can be None if state s_{i} was terminal and s_{i+1} is the initial state of a new episode.
+        terminals: A list of length n. The element at index i is True if s_i is a terminal state, and False otherwise.
+        discounts: ???
+    """
     device = log_action_probs[0].device
     losses = []
     for j in range(len(target_state_values)-1):
@@ -478,7 +488,7 @@ class A2CAgent(DeployableAgent):
             action_probs = softmax(action_probs_unnormalized).squeeze()
             action_dist = torch.distributions.Categorical(action_probs)
             action = action_dist.sample().item()
-        if isinstance(self.action_space, gym.spaces.Box):
+        elif isinstance(self.action_space, gym.spaces.Box):
             assert 'action_mean' in net_output
             assert 'action_std' in net_output
             action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
@@ -612,15 +622,19 @@ class A2CAgent(DeployableAgent):
         if action is None:
             raise Exception('No action found. Agent must observe the environment before taking an action.')
 
-        high = self.action_space.high
-        low = self.action_space.low
-        d = high-low
-        assert isinstance(d,np.ndarray) # XXX: Workaround for https://github.com/microsoft/pylance-release/issues/1619. Remove when this gets fixed.
-        scale = d/2
-        bias = (high+low)/2
-        scaled_action = np.tanh(action)*scale+bias
-
-        return scaled_action
+        if isinstance(self.action_space, gym.spaces.Discrete):
+            return action
+        elif isinstance(self.action_space, gym.spaces.Box):
+            high = self.action_space.high
+            low = self.action_space.low
+            d = high-low
+            assert isinstance(d,np.ndarray) # XXX: Workaround for https://github.com/microsoft/pylance-release/issues/1619. Remove when this gets fixed.
+            scale = d/2
+            bias = (high+low)/2
+            scaled_action = np.tanh(action)*scale+bias
+            return scaled_action
+        else:
+            raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
 
     def state_dict(self):
         return {
@@ -1029,6 +1043,7 @@ if __name__ == "__main__":
 
         action_space = test_env.action_space
         observation_space = test_env.observation_space
+        assert observation_space.shape is not None
         agent = A2CAgent(
             action_space=action_space,
             observation_space=observation_space,
@@ -1039,6 +1054,7 @@ if __name__ == "__main__":
 
         results = train_onpolicy(train_envs,agent,plot_frequency=10)
         test(test_env, agent)
+        breakpoint()
         return results
 
     def run_discrete():
@@ -1048,6 +1064,7 @@ if __name__ == "__main__":
 
         action_space = test_env.action_space
         observation_space = test_env.observation_space
+        assert observation_space.shape is not None
         agent = A2CAgent(
             action_space=action_space,
             observation_space=observation_space,
@@ -1106,5 +1123,5 @@ if __name__ == "__main__":
         test(test_env, agent)
         return results
 
-    run_mujoco()
-    #run_atari()
+    #run_mujoco()
+    run_atari()

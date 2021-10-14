@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from rl.agent.smdp.a2c import compute_discrete_advantage_policy_gradient as loss
+from rl.agent.smdp.a2c import compute_advantage_policy_gradient as loss
 
 def test_single_transition():
     log_action_probs = [torch.tensor(1., requires_grad=True),torch.tensor(2., requires_grad=True)]
