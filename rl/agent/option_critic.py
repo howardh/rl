@@ -17,7 +17,7 @@ from experiment.logger import Logger, SubLogger
 from rl.agent.agent import DeployableAgent
 from rl.agent.replay_buffer import ReplayBuffer, AtariReplayBuffer
 import rl.debug_tools.pong
-from rl.agent.smdp.a2c import compute_advantage_policy_gradient
+from rl.agent.smdp.a2c import PolicyValueNetworkOutput, compute_advantage_policy_gradient, PolicyValueNetwork, compute_mc_state_value_loss
 
 class QNetworkCNN(torch.nn.Module):
     def __init__(self, num_actions):
@@ -101,6 +101,10 @@ class OptionCriticNetworkCNN(torch.nn.Module):
         self.poo = torch.nn.Sequential(
             torch.nn.Linear(in_features=512,out_features=num_options),
         )
+        # Option-value
+        self.q = torch.nn.Sequential(
+            torch.nn.Linear(in_features=512,out_features=num_options),
+        )
     def forward(self, obs):
         x = obs
         x = self.head(x)
@@ -108,8 +112,93 @@ class OptionCriticNetworkCNN(torch.nn.Module):
             'beta': self.beta(x),
             'iop': self.iop(x),
             'poo': self.poo(x),
+            'q': self.q(x),
         }
         return x
+
+class DebugA2CNetwork(PolicyValueNetwork):
+    def __init__(self, num_actions):
+        super().__init__()
+        self.q_net = QNetworkCNN(num_actions=1)
+        self.oc_net = OptionCriticNetworkCNN(num_actions=num_actions,num_options=1)
+    def forward(self,obs) -> PolicyValueNetworkOutput:
+        q_output = self.q_net(obs)
+        oc_output = self.oc_net(obs)
+        return {
+            'value': q_output,
+            'action': oc_output['iop'][:,0,:]
+        }
+class DebugA2CNetwork2(PolicyValueNetwork):
+    """ A model which acts both as a policy network and a state-value estimator. """
+    def __init__(self, num_actions):
+        super().__init__()
+        self.num_actions = num_actions
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=4,out_channels=32,kernel_size=8,stride=4),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=32,out_channels=64,kernel_size=4,stride=2),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=64,out_channels=64,kernel_size=3,stride=1),
+            torch.nn.LeakyReLU(),
+        )
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(in_features=64*7*7,out_features=512),
+            torch.nn.LeakyReLU(),
+        )
+        self.conv2 = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=4,out_channels=32,kernel_size=8,stride=4),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=32,out_channels=64,kernel_size=4,stride=2),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=64,out_channels=64,kernel_size=3,stride=1),
+            torch.nn.LeakyReLU(),
+        )
+        self.fc2 = torch.nn.Sequential(
+            torch.nn.Linear(in_features=64*7*7,out_features=512),
+            torch.nn.LeakyReLU(),
+        )
+        self.v = torch.nn.Linear(in_features=512,out_features=1)
+        self.pi = torch.nn.Linear(in_features=512,out_features=num_actions)
+    def forward(self, x) -> PolicyValueNetworkOutput:
+        x1 = self.conv(x)
+        x1 = x1.view(-1,64*7*7)
+        x1 = self.fc(x1)
+        v = self.v(x1)
+
+        x2 = self.conv2(x)
+        x2 = x2.view(-1,64*7*7)
+        x2 = self.fc2(x2)
+        pi = self.pi(x2)
+        return {
+                'value': v,
+                'action': pi, # Unnormalized action probabilities
+        }
+class DebugA2CNetwork3(PolicyValueNetwork):
+    def __init__(self, num_actions):
+        super().__init__()
+        self.oc_net = OptionCriticNetworkCNN(num_actions=num_actions,num_options=1)
+    def forward(self,obs) -> PolicyValueNetworkOutput:
+        oc_output = self.oc_net(obs)
+        return {
+            'value': oc_output['q'],
+            'action': oc_output['iop'][:,0,:]
+        }
+class DebugA2CNetwork4(PolicyValueNetwork):
+    def __init__(self, num_actions):
+        super().__init__()
+        self.net = OptionCriticNetworkCNN(num_actions=num_actions,num_options=1)
+    def forward(self,obs) -> PolicyValueNetworkOutput:
+        output = self.net(obs)
+        return {
+            'value': output['q'],
+            'action': output['iop'][:,0,:]
+        }
 
 ObsType = TypeVar('ObsType')
 ActionType = TypeVar('ActionType')
@@ -250,9 +339,18 @@ class OptionCriticAgent(DeployableAgent):
                 num_actions=self.action_space.n,
                 num_options=num_options
         ).to(self.device)
+        self.net = OptionCriticNetworkCNN( # Termination, intra-option policy, and policy over options
+                num_actions=self.action_space.n,
+                num_options=num_options
+        ).to(self.device)
+        self.net_target = copy.deepcopy(self.net)
+        self.policy_losses = []
+        self.entropy_losses = []
+        self.critic_losses = []
 
         self.optimizer_q = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
         self.optimizer_policy = torch.optim.Adam(self.policy_net.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
         self.optimizer_policy_distillation = torch.optim.Adam(self.policy_net.parameters(), lr=1e-4)
         #self.optimizer = torch.optim.RMSprop(self.q_net.parameters(), lr=learning_rate, momentum=0.95)
 
@@ -286,7 +384,7 @@ class OptionCriticAgent(DeployableAgent):
             self.replay_buffer.add_transition(*transition)
 
             # Train each time something is added to the buffer
-            self._train()
+            self._train(env_key)
     def _train_old(self, iterations=1):
         if __debug__:
             raise Exception('THIS FUNCTION IS DEPRECATED. DELETE ONCE EVERYTHING ELSE IS WORKING')
@@ -386,15 +484,27 @@ class OptionCriticAgent(DeployableAgent):
         self._training_steps += 1
 
         self._update_target()
-    def _train(self):
+    def _train(self, env_key):
+        self._train_2(env_key)
+    def _train_1(self):
         if len(self.replay_buffer) < self.warmup_steps:
             return
         self._train_actor()
         if self._steps % self.update_frequency == 0:
             self._train_critic()
             self._training_steps += 1
+    def _train_2(self, env_key):
+        if len(self.replay_buffer) < self.warmup_steps:
+            return
+        self._train_actor_acc_loss(env_key)
+        self._train_critic_acc_loss_2(env_key)
+        if len(self.policy_losses) < self.batch_size:
+            return
+        #self._train_critic_acc_loss()
+        self._train_actor_critic()
+        self._training_steps += 1
     def _train_critic(self, iterations=1):
-        self._train_critic_1(iterations)
+        self._train_critic_3(iterations)
     def _train_critic_1(self, iterations=1):
         if len(self.replay_buffer) < self.batch_size*iterations:
             return
@@ -453,6 +563,7 @@ class OptionCriticAgent(DeployableAgent):
 
         self._update_target()
     def _train_critic_2(self, iterations=1):
+        """ Train on the pretrained Q network. """
         if len(self.replay_buffer) < self.batch_size*iterations:
             return
         dataloader = torch.utils.data.DataLoader(
@@ -501,12 +612,159 @@ class OptionCriticAgent(DeployableAgent):
             )
 
         self._update_target()
+    def _train_critic_3(self, iterations=1):
+        """ Same as _train_critic_1, but with the same optimizer as the actor. """
+        if len(self.replay_buffer) < self.batch_size*iterations:
+            return
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
+        criterion = torch.nn.MSELoss(reduction='mean')
+        for _,(s0,(o0,a0),r1,s1,term) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0 = s0.to(self.device).float()/self.obs_scale
+            o0 = o0.to(self.device).unsqueeze(1)
+            a0 = a0.to(self.device)
+            r1 = r1.float().to(self.device).unsqueeze(1)
+            s1 = s1.to(self.device).float()/self.obs_scale
+            term = term.float().to(self.device).unsqueeze(1)
+            gamma = self.discount_factor
+            if isinstance(self.observation_space,gym.spaces.Discrete):
+                s0 = s0.unsqueeze(1)
+                s1 = s1.unsqueeze(1)
+            if isinstance(self.action_space,gym.spaces.Discrete):
+                a0 = a0.unsqueeze(1)
+
+            net_output_0 = self.net(s0)
+            net_output_1 = self.net(s1)
+            net_output_target_1 = self.net_target(s1)
+            q_target = net_output_target_1['q']
+            #beta0 = policy0['beta'].gather(1,o0)
+            beta1 = net_output_1['beta'].gather(1,o0) # We use the same option on the next step
+
+            # Value estimate (target)
+            optimal_option_values = q_target.max(1)[0].unsqueeze(1)
+            current_option_values = q_target.gather(1,o0)
+            y = r1+(1-term)*gamma*(
+                    (1-beta1)*current_option_values+
+                    beta1*optimal_option_values
+            )
+            y = y.detach()
+
+            # Value estimate (prediction)
+            y_pred = net_output_0['q'].gather(1,o0)
+    
+            assert y.shape == y_pred.shape
+
+            # Update Q_U network
+            self.optimizer.zero_grad()
+            loss_q = criterion(y_pred,y)
+            loss_q.backward()
+            #for param in self.qu_net.parameters():
+            #    assert param.grad is not None
+            #    param.grad.data.clamp_(-1, 1)
+            self.optimizer.step()
+
+            # Logging
+            self.logger.log(
+                    training_batch_option_value_target=current_option_values.mean().item(),
+                    training_batch_option_value=y_pred.mean().item(),
+                    q_loss=loss_q.item(),
+            )
+
+        self._update_target()
+    def _train_critic_acc_loss(self, iterations=1):
+        """ Same as _train_critic_1, but with the same optimizer as the actor. """
+        if len(self.replay_buffer) < self.batch_size*iterations:
+            return
+        dataloader = torch.utils.data.DataLoader(
+                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
+        criterion = torch.nn.MSELoss(reduction='mean')
+        for _,(s0,(o0,a0),r1,s1,term) in zip(range(iterations),dataloader):
+            # Fix data types
+            s0 = s0.to(self.device).float()/self.obs_scale
+            o0 = o0.to(self.device).unsqueeze(1)
+            a0 = a0.to(self.device)
+            r1 = r1.float().to(self.device).unsqueeze(1)
+            s1 = s1.to(self.device).float()/self.obs_scale
+            term = term.float().to(self.device).unsqueeze(1)
+            gamma = self.discount_factor
+            if isinstance(self.observation_space,gym.spaces.Discrete):
+                s0 = s0.unsqueeze(1)
+                s1 = s1.unsqueeze(1)
+            if isinstance(self.action_space,gym.spaces.Discrete):
+                a0 = a0.unsqueeze(1)
+
+            net_output_0 = self.net(s0)
+            net_output_1 = self.net(s1)
+            net_output_target_1 = self.net_target(s1)
+            q_target = net_output_target_1['q']
+            #beta0 = policy0['beta'].gather(1,o0)
+            beta1 = net_output_1['beta'].gather(1,o0) # We use the same option on the next step
+
+            # Value estimate (target)
+            optimal_option_values = q_target.max(1)[0].unsqueeze(1)
+            current_option_values = q_target.gather(1,o0)
+            y = r1+(1-term)*gamma*(
+                    (1-beta1)*current_option_values+
+                    beta1*optimal_option_values
+            )
+            y = y.detach()
+
+            # Value estimate (prediction)
+            y_pred = net_output_0['q'].gather(1,o0)
+    
+            assert y.shape == y_pred.shape
+
+            # Update Q_U network
+            loss_q = criterion(y_pred,y)
+            self.critic_losses.append(loss_q)
+
+            # Logging
+            self.logger.log(
+                    training_batch_option_value_target=current_option_values.mean().item(),
+                    training_batch_option_value=y_pred.mean().item(),
+                    q_loss=loss_q.item(),
+            )
+    def _train_critic_acc_loss_2(self, env_key):
+        """ Using A2C state value implementation. Accumulate loss without updating. """
+        transition = self.obs_stack[env_key].get_transition()
+        if transition is None:
+            return
+        s0,(o0,a0),r1,s1,term = transition
+        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
+        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
+        a0 = a0
+
+        net_output_0 = self.net(s0)
+        #net_output_1 = self.net(s1)
+        #net_output_target_0 = self.net_target(s0)
+        net_output_target_1 = self.net_target(s1)
+        #policy0 = net_output_0
+        #policy1 = self.policy_net(s1)
+        #q0_target = net_output_target_0['q'].squeeze(0)
+        q1_target = net_output_target_1['q'].squeeze(0)
+
+        # State value loss
+        loss_q = compute_mc_state_value_loss(
+                state_values = [net_output_0['q'][0,o0],net_output_0['q'][0,o0]],
+                last_state_target_value=q1_target.max(),
+                rewards=[None,r1],
+                terminals=[False,term],
+                discounts=[self.discount_factor,self.discount_factor]
+        )
+        self.critic_losses.append(loss_q)
+
+        # Logging
+        self.logger.append(
+                state_option_value=net_output_0['q'][0,o0].item(),
+        )
+
     def _train_actor(self):
-        #self._train_actor_6()
-        if self._steps <= 300_000:
-            self._train_actor_5()
-        else:
-            self._train_actor_6()
+        self._train_actor_6()
+        #if self._steps <= 300_000:
+        #    self._train_actor_5()
+        #else:
+        #    self._train_actor_6()
     def _train_actor_1(self):
         transition = self.obs_stack[False].get_transition() # FIXME: The environment key is hard-coded.
         if transition is None:
@@ -792,21 +1050,90 @@ class OptionCriticAgent(DeployableAgent):
                 policy_loss=loss_policy.item(),
                 entropy_loss=loss_entropy.item(),
         )
+    def _train_actor_acc_loss(self, env_key):
+        """ Using A2C policy gradient implementation. Termination is ignored. Accumulate loss without updating. """
+        transition = self.obs_stack[env_key].get_transition()
+        if transition is None:
+            return
+        s0,(o0,a0),r1,s1,term = transition
+        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
+        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
+
+        net_output_0 = self.net(s0)
+        #net_output_1 = self.net(s1)
+        net_output_target_0 = self.net_target(s0)
+        net_output_target_1 = self.net_target(s1)
+        policy0 = net_output_0
+        #policy1 = self.policy_net(s1)
+        q0_target = net_output_target_0['q'].squeeze(0)
+        q1_target = net_output_target_1['q'].squeeze(0)
+
+        # Policy
+        log_action_probs = [net_output_0['iop'].squeeze(0)[o0,:].log_softmax(0)[a0],None]
+        target_state_values = [q0_target.max(),q1_target.max()]
+        rewards = [None,r1]
+        terminals = [False,term]
+        discounts = [self.discount_factor, self.discount_factor]
+        loss_policy = compute_advantage_policy_gradient(
+                log_action_probs=log_action_probs,
+                target_state_values=target_state_values,
+                rewards=rewards,
+                terminals=terminals,
+                discounts=discounts
+        )
+        loss_policy = loss_policy.squeeze() # Should be a 0D tensor
+        # Entropy
+        action_probs = policy0['iop'].squeeze(0)[o0,:].softmax(0)
+        entropy = -action_probs*torch.log(action_probs)
+        loss_entropy = -0.01*entropy.sum(0) # Factor of 0.01 works in A2C
+
+        # Accumulate loss
+        self.policy_losses.append(loss_policy)
+        self.entropy_losses.append(loss_entropy)
+    def _train_actor_critic(self):
+        """ Update actor using accumulated losses. """
+        # Update policy network
+        p_loss = torch.stack(self.policy_losses).mean(0)
+        e_loss = torch.stack(self.entropy_losses).mean(0)
+        q_loss = torch.stack(self.critic_losses).mean(0)
+        loss = p_loss+e_loss+q_loss
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self._update_target()
+
+        # Clear lists
+        self.policy_losses.clear()
+        self.entropy_losses.clear()
+        self.critic_losses.clear()
+
+        # Logging
+        self.logger.log(
+                policy_term_ent_loss=loss.item(),
+                #termination_loss=loss_term.item(),
+                policy_loss=p_loss.item(),
+                entropy_loss=e_loss.item(),
+                critic_loss=q_loss.item(),
+        )
     def _update_target(self):
         if self._training_steps % self.target_update_frequency != 0:
             return
         tau = self.polyak_rate
-        for p1,p2 in zip(self.q_net_target.parameters(), self.q_net.parameters()):
+        #for p1,p2 in zip(self.q_net_target.parameters(), self.q_net.parameters()):
+        #    p1.data = (1-tau)*p1+tau*p2
+        for p1,p2 in zip(self.net_target.parameters(), self.net.parameters()):
             p1.data = (1-tau)*p1+tau*p2
     def act(self, testing=False, env_key=None):
-        if testing:
-            return self._act_1(testing=testing,env_key=env_key)
-        else:
-            #return self._act_2(testing=testing,env_key=env_key)
-            if self._steps <= 300_000:
-                return self._act_2(testing=testing,env_key=env_key)
-            else:
-                return self._act_1(testing=testing,env_key=env_key)
+        return self._act_1(testing=testing,env_key=env_key)
+        #if testing:
+        #    return self._act_1(testing=testing,env_key=env_key)
+        #else:
+        #    if self._steps <= 300_000:
+        #        return self._act_2(testing=testing,env_key=env_key)
+        #    else:
+        #        return self._act_1(testing=testing,env_key=env_key)
     def _act_1(self, testing=False, env_key=None):
         """ Return a random action according to an epsilon-greedy policy. """
         if env_key is None:
@@ -827,11 +1154,11 @@ class OptionCriticAgent(DeployableAgent):
             raise NotImplementedError()
 
         curr_option = self._current_option.get(env_key)
-        pi = self.policy_net(obs)
+        pi = self.net(obs)
         # Choose an option
         terminate_option = pi['beta'][0,curr_option].item() > torch.rand(1).item() if curr_option is not None else False
         if curr_option is None or terminate_option:
-            vals = self.q_net(obs)
+            vals = pi['q']
             if torch.rand(1) >= eps:
                 option = vals.max(dim=1)[1].item()
             else:
@@ -854,7 +1181,7 @@ class OptionCriticAgent(DeployableAgent):
                             testing_option_choice=option
                     )
                 else:
-                    self.logger.log(
+                    self.logger.append(
                             training_option_duration=self._current_option_duration[env_key],
                             training_option_choice=option
                     )
@@ -864,20 +1191,20 @@ class OptionCriticAgent(DeployableAgent):
             self._current_option_duration[env_key] += 1
 
         if testing:
-            vals = self.q_net(obs)
+            vals = pi['q']
             self.logger.append(
                     #step=self._steps,
                     #testing_action_value=vals[0,option,action].item(),
                     testing_option_value=vals[0,option].item(),
             )
-        else:
-            pq = self._pretrained_q_net(obs)
-            self.logger.log(
-                    #step=self._steps,
-                    #action_value=self.q_net(obs)[0,option,action].item(),
-                    entropy=dist.entropy().item(),
-                    action_value_diff=(pq.max()-(action_probs.squeeze() * pq.squeeze()).sum()).item()
-            )
+        #else:
+        #    pq = self._pretrained_q_net(obs)
+        #    self.logger.log(
+        #            #step=self._steps,
+        #            #action_value=self.q_net(obs)[0,option,action].item(),
+        #            entropy=dist.entropy().item(),
+        #            action_value_diff=(pq.max()-(action_probs.squeeze() * pq.squeeze()).sum()).item()
+        #    )
 
         return action
     def _act_2(self, testing=False, env_key=None):
@@ -950,8 +1277,6 @@ class OptionCriticAgent(DeployableAgent):
         warnings.warn('The replay buffer is not saved. Training the agent from this point may yield unexpected results.')
 
     def state_dict_deploy(self):
-        if self._steps <= 500_000:
-            breakpoint()
         return {
                 'action_space': self.action_space,
                 'observation_space': self.observation_space,
@@ -1073,10 +1398,50 @@ class OptionCriticAgentDebug1(OptionCriticAgent):
 
         self._update_target()
 
-if __name__ == "__main__":
-    import torch.cuda
-    import gym
+def run_a2c_debug_exp():
+    from rl.experiments.training.basic import TrainExperiment
+    from experiment import make_experiment_runner
+    from rl.agent.smdp.a2c import A2CAgent, PolicyValueNetworkCNN
 
+    num_actors = 16
+    env_name = 'PongNoFrameskip-v4'
+    train_env_keys = list(range(num_actors))
+
+    exp_runner = make_experiment_runner(
+            TrainExperiment,
+            config={
+                'agent': {
+                    'type': A2CAgent,
+                    'parameters': {
+                        'training_env_keys': train_env_keys,
+                        #'net': DebugA2CNetwork(6),
+                        'net': DebugA2CNetwork4(6),
+                        #'net': PolicyValueNetworkCNN(6),
+                        'max_rollout_length': 2,
+                    },
+                },
+                'env_test': {'env_name': env_name, 'atari': True},
+                'env_train': {'env_name': env_name, 'atari': True},
+                'train_env_keys': train_env_keys,
+                'test_frequency': None,
+                'save_model_frequency': 250_000,
+                'verbose': True,
+            },
+            #trial_id='checkpointtest',
+            #checkpoint_frequency=250_000,
+            checkpoint_frequency=None,
+            max_iterations=50_000_000,
+            verbose=True,
+    )
+    exp_runner.exp.logger.init_wandb({
+        'project': 'A2C-%s' % env_name
+    })
+    exp_runner.exp.agent.net.net.load_state_dict(torch.load('./oc-net-pong.pt'))
+    exp_runner.run()
+    torch.save(exp_runner.exp.agent.net.net.state_dict(), './oc-net.pt')
+    breakpoint()
+
+def run_oc_debug_exp():
     from rl.agent.option_critic import OptionCriticAgent # XXX: Doesn't work unless I import it? Why?
     #from rl.agent.option_critic import OptionCriticAgentDebug1 as OptionCriticAgent
     from rl.experiments.training.basic import TrainExperiment
@@ -1085,16 +1450,19 @@ if __name__ == "__main__":
     params_pong = {
         'discount_factor': 0.99,
         'behaviour_eps': 0.02,
-        'learning_rate': 1e-7,
+        'learning_rate': 1e-4,
         'update_frequency': 1,
-        'target_update_frequency': 1_000,
+        #'target_update_frequency': 1_000,
+        'target_update_frequency': 200,
         'polyak_rate': 1,
-        'warmup_steps': 10_000,
-        'replay_buffer_size': 100_000,
+        #'warmup_steps': 10_000,
+        'warmup_steps': 0,
+        #'replay_buffer_size': 100_000,
+        'replay_buffer_size': 1,
         'atari': True,
         #'num_options': 6, # XXX: DEBUG
         'num_options': 1, # XXX: DEBUG
-        'entropy_reg': 0, # XXX: DEBUG
+        'entropy_reg': 0.01, # XXX: DEBUG
     }
 
     params_dqn = {
@@ -1131,6 +1499,8 @@ if __name__ == "__main__":
     env_name = 'PongNoFrameskip-v4'
     #env_name = 'SeaquestNoFrameskip-v4'
     #env_name = 'MsPacmanNoFrameskip-v4'
+    num_actors = 16
+    train_env_keys = list(range(num_actors))
     debug = False
 
     if debug:
@@ -1143,6 +1513,7 @@ if __name__ == "__main__":
                     },
                     'env_test': {'env_name': env_name, 'atari': True},
                     'env_train': {'env_name': env_name, 'atari': True},
+                    'train_env_keys': train_env_keys,
                     'verbose': True,
                     'test_frequency': None,
                     'save_model_frequency': None,
@@ -1164,14 +1535,14 @@ if __name__ == "__main__":
                     },
                     'env_test': {'env_name': env_name, 'atari': True},
                     'env_train': {'env_name': env_name, 'atari': True},
+                    'train_env_keys': train_env_keys,
                     #'test_frequency': 50_000,
                     #'save_model_frequency': 250_000,
-                    'test_frequency': 10_000,
+                    #'test_frequency': 10_000,
                     #'save_model_frequency': 50_000,
                     'verbose': True,
-                    #'test_frequency': None,
-                    #'save_model_frequency': None,
-                    'save_model_frequency': 300_000,
+                    'test_frequency': None,
+                    'save_model_frequency': None,
                 },
                 #trial_id='checkpointtest',
                 checkpoint_frequency=250_000,
@@ -1183,4 +1554,12 @@ if __name__ == "__main__":
         exp_runner.exp.logger.init_wandb({
             'project': 'OptionCritic-%s' % env_name
         })
+        #exp_runner.exp.agent.net.load_state_dict(torch.load('./oc-net-pong.pt'))
+        #exp_runner.exp.agent.net_target.load_state_dict(torch.load('./oc-net-pong.pt'))
+        #exp_runner.exp.agent.q_net.load_state_dict(torch.load('./oc-qnet.pt')) # XXX: DEBUG
+        #exp_runner.exp.agent.policy_net.load_state_dict(torch.load('./oc-polnet.pt')) # XXX: DEBUG
     exp_runner.run()
+
+if __name__ == "__main__":
+    #run_a2c_debug_exp()
+    run_oc_debug_exp()

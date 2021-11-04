@@ -3,7 +3,6 @@ import itertools
 from collections import defaultdict
 from typing import Dict, Generic, TypeVar, Optional, Tuple, List, Any
 from typing_extensions import TypedDict
-from experiment.logger import Logger
 
 import numpy as np
 import torch
@@ -14,6 +13,7 @@ import torch.optim
 import gym.spaces
 from torchtyping import TensorType
 
+from experiment.logger import Logger, SubLogger
 import rl.debug_tools.frozenlake
 from rl.agent.agent import DeployableAgent
 
@@ -76,10 +76,9 @@ class PolicyValueNetworkRecurrent(PolicyValueNetwork):
 
 class PolicyValueNetworkCNN(PolicyValueNetwork):
     """ A model which acts both as a policy network and a state-value estimator. """
-    def __init__(self, num_features, num_actions):
+    def __init__(self, num_actions):
         super().__init__()
         self.num_actions = num_actions
-        self.num_features = num_features
         self.conv = torch.nn.Sequential(
             torch.nn.Conv2d(
                 in_channels=4,out_channels=32,kernel_size=8,stride=4),
@@ -428,7 +427,9 @@ class A2CAgent(DeployableAgent):
             obs_scale : float = 1/255,
             reward_scale : float = 1,
             device : torch.device = torch.device('cpu'),
-            net : PolicyValueNetwork = None):
+            net : PolicyValueNetwork = None,
+            logger : Logger = None,
+        ):
         self.action_space = action_space
         self.observation_space = observation_space
 
@@ -440,6 +441,10 @@ class A2CAgent(DeployableAgent):
         self.reward_scale = reward_scale
         self.device = device
         self.training_env_keys = training_env_keys
+
+        # Validate input
+        if max_rollout_length < 2:
+            raise ValueError(f'Rollout length must be >= 2. Received {max_rollout_length}. Note that a rollout length of n consists of n-1 transitions.')
 
         # State (training)
         self.obs_stack = defaultdict(lambda: ObservationStack())
@@ -453,17 +458,37 @@ class A2CAgent(DeployableAgent):
         self._training_steps = 0 # Number of training steps experienced
 
         if net is None:
-            raise Exception('Models must be provided. `net` is missing.')
-        self.net = net
-        self.target_net = copy.deepcopy(net)
+            self.net = self._init_default_net(observation_space,action_space,device)
+        else:
+            self.net = net
+            self.net.to(device)
+        self.target_net = copy.deepcopy(self.net)
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
 
         # Logging
-        self.logger = Logger(key_name='step', allow_implicit_key=True)
+        if logger is None:
+            self.logger = Logger(key_name='step', allow_implicit_key=True)
+            self.logger.log(step=0)
+        else:
+            self.logger = logger
         self.state_values_current = [] # State values of current training loop
         self.state_values = []
         self.state_values_std = []
         self.state_values_std_ra = []
+    def _init_default_net(self, observation_space, action_space,device):
+        if isinstance(observation_space, gym.spaces.Box):
+            assert observation_space.shape is not None
+            if len(observation_space.shape) == 1: # Mujoco
+                return PolicyValueNetworkFCNN(
+                        observation_space.shape[0],
+                        action_space.shape[0],
+                        shared_std=False
+                ).to(device)
+            if len(observation_space.shape) == 3: # Atari
+                return PolicyValueNetworkCNN(
+                        action_space.n
+                ).to(device)
+        raise Exception('Unsupported observation space or action space.')
 
     def observe(self, obs, reward=None, terminal=False, testing=False, time=1, discount=None, env_key=None):
         if env_key is None:
@@ -506,7 +531,8 @@ class A2CAgent(DeployableAgent):
         # Save training data and train
         if not testing:
             self._steps += 1
-            self.logger.log(step=self._steps)
+            if not isinstance(self.logger, SubLogger):
+                self.logger.log(step=self._steps)
 
             self.logger.append(debug_state_value=state_value.item())
 
@@ -591,9 +617,10 @@ class A2CAgent(DeployableAgent):
             self.optimizer.step()
             # Check weights
             if __debug__:
+                psum = 0
                 for p in self.net.parameters():
-                    if not p.mean().isfinite():
-                        breakpoint()
+                    psum += p.mean()
+                #breakpoint()
             # Clear data
             for ek in self.training_env_keys:
                 self.obs_history[ek] = self.obs_history[ek][-1:]
@@ -836,6 +863,9 @@ if __name__ == "__main__":
     matplotlib.use('Agg')
     from matplotlib import pyplot as plt
 
+    from rl.experiments.training.basic import TrainExperiment
+    from experiment import make_experiment_runner
+
     def make_env(env_name, atari=False, one_hot_obs=False):
         env = gym.make(env_name)
         if atari:
@@ -1035,6 +1065,38 @@ if __name__ == "__main__":
         print('No GPU found. Running on CPU.')
         device = torch.device('cpu')
 
+    def run_atari_2():
+        num_actors = 16
+        env_name = 'PongNoFrameskip-v4'
+        train_env_keys = list(range(num_actors))
+
+        exp_runner = make_experiment_runner(
+                TrainExperiment,
+                config={
+                    'agent': {
+                        'type': A2CAgent,
+                        'parameters': {
+                            'training_env_keys': train_env_keys,
+                        },
+                    },
+                    'env_test': {'env_name': env_name, 'atari': True},
+                    'env_train': {'env_name': env_name, 'atari': True},
+                    'train_env_keys': train_env_keys,
+                    'test_frequency': None,
+                    'save_model_frequency': 250_000,
+                    'verbose': True,
+                },
+                #trial_id='checkpointtest',
+                #checkpoint_frequency=250_000,
+                checkpoint_frequency=None,
+                max_iterations=1_000_000,
+                verbose=True,
+        )
+        exp_runner.exp.logger.init_wandb({
+            'project': 'A2C-%s' % env_name
+        })
+        exp_runner.run()
+
     def run_atari():
         num_actors = 16
         env_name = 'PongNoFrameskip-v4'
@@ -1048,7 +1110,7 @@ if __name__ == "__main__":
             action_space=action_space,
             observation_space=observation_space,
             training_env_keys=[i for i in range(num_actors)],
-            net  = PolicyValueNetworkCNN(observation_space.shape[0], action_space.n).to(device),
+            net  = PolicyValueNetworkCNN(action_space.n).to(device),
             device=device,
         )
 
@@ -1087,6 +1149,7 @@ if __name__ == "__main__":
 
         action_space = env.action_space
         observation_space = env.observation_space
+        assert observation_space.shape is not None
         agent = A2CAgentRecurrent(
             action_space=action_space,
             observation_space=observation_space,
@@ -1107,6 +1170,7 @@ if __name__ == "__main__":
 
         action_space = test_env.action_space
         observation_space = test_env.observation_space
+        assert observation_space.shape is not None
         agent = A2CAgent(
             action_space=action_space,
             observation_space=observation_space,
@@ -1124,4 +1188,5 @@ if __name__ == "__main__":
         return results
 
     #run_mujoco()
-    run_atari()
+    #run_atari()
+    run_atari_2()

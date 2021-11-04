@@ -1,6 +1,5 @@
 import os
 import itertools
-import inspect
 #from typing import Mapping
 
 import gym
@@ -57,13 +56,18 @@ class TrainExperiment(Experiment):
 
         self.device = self._init_device()
 
+        self._train_env_keys = config.get('train_env_keys',[0])
+        self._test_env_keys = config.get('test_env_keys',['test'])
         self.env_test = make_env(**config['env_test'])
-        self.env_train = make_env(**config['env_train'])
+        self.env_train = {
+                k:make_env(**config['env_train'])
+                for k in self._train_env_keys
+        }
 
         self.agent = config.get('agent')
         self.agent = self._init_agent(
                 agent_config=config.get('agent'),
-                env = self.env_train,
+                env = self.env_test,
                 device = self.device,
         )
 
@@ -72,8 +76,9 @@ class TrainExperiment(Experiment):
         self.save_model_frequency = config.get('save_model_frequency')
         self.verbose = config.get('verbose',False)
 
-        self.done = True
-        self._ep_len = 0
+        self.done = {k:True for k in self._train_env_keys}
+        self._ep_len = {k:0 for k in self._train_env_keys}
+        self._ep_rewards = {k:[] for k in self._train_env_keys}
     def _init_device(self):
         if torch.cuda.is_available():
             print('GPU found')
@@ -116,26 +121,32 @@ class TrainExperiment(Experiment):
             tqdm.write(f'Iteration {i}\t Average testing reward: {mean_reward}')
             tqdm.write('Plot saved to %s' % os.path.abspath(plot_filename))
     def _train(self,i):
+        env_key = self._train_env_keys[i%len(self._train_env_keys)]
+        env = self.env_train[env_key]
+        self._train_one_env(i,env,env_key)
+    def _train_one_env(self,i,env,env_key):
         agent = self.agent
-        env = self.env_train
 
-        if self.done:
+        if self.done[env_key]:
             # TODO: Episode end callback?
-            if self.verbose and self._ep_len > 0:
-                total_reward = sum(self.logger['train_reward'][1][-self._ep_len:])
+            if self.verbose and self._ep_len[env_key] > 0:
+                total_reward = sum(self._ep_rewards[env_key])
                 tqdm.write(f'Iteration {i}\t Training reward: {total_reward}')
-                self.logger.log(train_reward_by_episode=total_reward)
+                self.logger.append(train_reward_by_episode=total_reward)
             # Reset
+            self.done[env_key] = False
             obs = env.reset()
-            agent.observe(obs, testing=False)
-            self._ep_len = 0
-
-        # Transition
-        obs, reward, self.done, _ = env.step(agent.act(testing=False))
-        agent.observe(obs, reward, self.done, testing=False)
-        # Logging
-        self.logger.log(train_reward=reward)
-        self._ep_len += 1
+            agent.observe(obs, testing=False, env_key=env_key)
+            self._ep_len[env_key] = 0
+            self._ep_rewards[env_key].clear()
+        else:
+            action = agent.act(testing=False,env_key=env_key)
+            obs, reward, self.done[env_key], _ = env.step(action)
+            agent.observe(obs, reward, self.done[env_key], testing=False, env_key=env_key)
+            # Logging
+            self.logger.append(train_reward=reward)
+            self._ep_len[env_key] += 1
+            self._ep_rewards[env_key].append(reward)
     def _save_model(self,i):
         """ Save the model parameters """
         models_path = os.path.join(self.output_directory, 'models')
@@ -164,8 +175,8 @@ class TrainExperiment(Experiment):
         ])
     def load_state_dict(self, state):
         default_load_state_dict(self, state)
-        self.done = True
-        self._ep_len = 0
+        self.done = {k:True for k in self._train_env_keys}
+        self._ep_len = {k:0 for k in self._train_env_keys}
 
 if __name__=='__main__':
     from experiment import make_experiment_runner
