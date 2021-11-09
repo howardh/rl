@@ -16,8 +16,7 @@ from experiment.logger import Logger, SubLogger
 
 from rl.agent.agent import DeployableAgent
 from rl.agent.replay_buffer import ReplayBuffer, AtariReplayBuffer
-import rl.debug_tools.pong
-from rl.agent.smdp.a2c import PolicyValueNetworkOutput, compute_advantage_policy_gradient, PolicyValueNetwork, compute_mc_state_value_loss
+from rl.agent.smdp.a2c import compute_advantage_policy_gradient, compute_mc_state_value_loss
 
 class QNetworkCNN(torch.nn.Module):
     def __init__(self, num_actions):
@@ -115,90 +114,6 @@ class OptionCriticNetworkCNN(torch.nn.Module):
             'q': self.q(x),
         }
         return x
-
-class DebugA2CNetwork(PolicyValueNetwork):
-    def __init__(self, num_actions):
-        super().__init__()
-        self.q_net = QNetworkCNN(num_actions=1)
-        self.oc_net = OptionCriticNetworkCNN(num_actions=num_actions,num_options=1)
-    def forward(self,obs) -> PolicyValueNetworkOutput:
-        q_output = self.q_net(obs)
-        oc_output = self.oc_net(obs)
-        return {
-            'value': q_output,
-            'action': oc_output['iop'][:,0,:]
-        }
-class DebugA2CNetwork2(PolicyValueNetwork):
-    """ A model which acts both as a policy network and a state-value estimator. """
-    def __init__(self, num_actions):
-        super().__init__()
-        self.num_actions = num_actions
-        self.conv = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                in_channels=4,out_channels=32,kernel_size=8,stride=4),
-            torch.nn.LeakyReLU(),
-            torch.nn.Conv2d(
-                in_channels=32,out_channels=64,kernel_size=4,stride=2),
-            torch.nn.LeakyReLU(),
-            torch.nn.Conv2d(
-                in_channels=64,out_channels=64,kernel_size=3,stride=1),
-            torch.nn.LeakyReLU(),
-        )
-        self.fc = torch.nn.Sequential(
-            torch.nn.Linear(in_features=64*7*7,out_features=512),
-            torch.nn.LeakyReLU(),
-        )
-        self.conv2 = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                in_channels=4,out_channels=32,kernel_size=8,stride=4),
-            torch.nn.LeakyReLU(),
-            torch.nn.Conv2d(
-                in_channels=32,out_channels=64,kernel_size=4,stride=2),
-            torch.nn.LeakyReLU(),
-            torch.nn.Conv2d(
-                in_channels=64,out_channels=64,kernel_size=3,stride=1),
-            torch.nn.LeakyReLU(),
-        )
-        self.fc2 = torch.nn.Sequential(
-            torch.nn.Linear(in_features=64*7*7,out_features=512),
-            torch.nn.LeakyReLU(),
-        )
-        self.v = torch.nn.Linear(in_features=512,out_features=1)
-        self.pi = torch.nn.Linear(in_features=512,out_features=num_actions)
-    def forward(self, x) -> PolicyValueNetworkOutput:
-        x1 = self.conv(x)
-        x1 = x1.view(-1,64*7*7)
-        x1 = self.fc(x1)
-        v = self.v(x1)
-
-        x2 = self.conv2(x)
-        x2 = x2.view(-1,64*7*7)
-        x2 = self.fc2(x2)
-        pi = self.pi(x2)
-        return {
-                'value': v,
-                'action': pi, # Unnormalized action probabilities
-        }
-class DebugA2CNetwork3(PolicyValueNetwork):
-    def __init__(self, num_actions):
-        super().__init__()
-        self.oc_net = OptionCriticNetworkCNN(num_actions=num_actions,num_options=1)
-    def forward(self,obs) -> PolicyValueNetworkOutput:
-        oc_output = self.oc_net(obs)
-        return {
-            'value': oc_output['q'],
-            'action': oc_output['iop'][:,0,:]
-        }
-class DebugA2CNetwork4(PolicyValueNetwork):
-    def __init__(self, num_actions):
-        super().__init__()
-        self.net = OptionCriticNetworkCNN(num_actions=num_actions,num_options=1)
-    def forward(self,obs) -> PolicyValueNetworkOutput:
-        output = self.net(obs)
-        return {
-            'value': output['q'],
-            'action': output['iop'][:,0,:]
-        }
 
 ObsType = TypeVar('ObsType')
 ActionType = TypeVar('ActionType')
@@ -328,17 +243,6 @@ class OptionCriticAgent(DeployableAgent):
         else:
             self.replay_buffer = ReplayBuffer(replay_buffer_size)
 
-        self.q_net = QNetworkCNN(
-                num_actions=num_options
-        ).to(self.device)
-        self.q_net_target = copy.deepcopy(self.q_net)
-        #self.q_net_target = QNetworkCNN(
-        #        num_actions=num_options
-        #).to(self.device)
-        self.policy_net = OptionCriticNetworkCNN( # Termination, intra-option policy, and policy over options
-                num_actions=self.action_space.n,
-                num_options=num_options
-        ).to(self.device)
         self.net = OptionCriticNetworkCNN( # Termination, intra-option policy, and policy over options
                 num_actions=self.action_space.n,
                 num_options=num_options
@@ -349,21 +253,14 @@ class OptionCriticAgent(DeployableAgent):
         self.termination_losses = []
         self.critic_losses = []
 
-        self.optimizer_q = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
-        self.optimizer_policy = torch.optim.Adam(self.policy_net.parameters(), lr=learning_rate)
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
-        self.optimizer_policy_distillation = torch.optim.Adam(self.policy_net.parameters(), lr=1e-4)
-        #self.optimizer = torch.optim.RMSprop(self.q_net.parameters(), lr=learning_rate, momentum=0.95)
 
+        # Logging
         if logger is None:
             self.logger = Logger(key_name='step', allow_implicit_key=True)
             self.logger.log(step=0)
         else:
             self.logger = logger
-
-        # XXX: DEBUG
-        self._pretrained_q_net = rl.debug_tools.pong.get_pretained_model()
-        self._pretrained_q_net.to(self.device)
         self._option_choice_count = defaultdict(lambda: [0]*num_options)
 
     def observe(self, obs, reward=None, terminal=False, testing=False, env_key=None):
@@ -398,347 +295,17 @@ class OptionCriticAgent(DeployableAgent):
             self._option_choice_count[env_key] = [0]*self.num_options # Reset count
             # Reset
             self._current_option[env_key] = None
-    def _train_old(self, iterations=1):
-        if __debug__:
-            raise Exception('THIS FUNCTION IS DEPRECATED. DELETE ONCE EVERYTHING ELSE IS WORKING')
-        if len(self.replay_buffer) < self.batch_size*iterations:
-            return
-        if len(self.replay_buffer) < self.warmup_steps:
-            return
-        if self._steps % self.update_frequency != 0:
-            return
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
-        criterion = torch.nn.MSELoss(reduction='mean')
-        for _,(s0,(o0,a0),r1,s1,term,time,gamma) in zip(range(iterations),dataloader):
-            # Fix data types
-            batch_size = s0.shape[0]
-            s0 = s0.to(self.device).float()/self.obs_scale
-            o0 = o0.to(self.device).unsqueeze(1)
-            a0 = a0.to(self.device)
-            r1 = r1.float().to(self.device).unsqueeze(1)
-            s1 = s1.to(self.device).float()/self.obs_scale
-            term = term.float().to(self.device).unsqueeze(1)
-            time = time.to(self.device).unsqueeze(1)
-            gamma = gamma.float().to(self.device).unsqueeze(1)
-            g_t = torch.pow(gamma,time)
-            if isinstance(self.observation_space,gym.spaces.Discrete):
-                s0 = s0.unsqueeze(1)
-                s1 = s1.unsqueeze(1)
-            if isinstance(self.action_space,gym.spaces.Discrete):
-                a0 = a0.unsqueeze(1)
-
-            termination_reg = 0.01 # From paper
-            entropy_reg = 1e-3 # XXX: arbitrary value
-
-            policy0 = self.policy_net(s0)
-            policy1 = self.policy_net(s1)
-            q_target = self.q_net_target(s1)
-            q0 = self.q_net(s0)
-            q1 = self.q_net(s1)
-            #beta0 = policy0['beta'].gather(1,o0)
-            beta1 = policy1['beta'].gather(1,o0) # We use the same option on the next step
-
-            # Value estimate (target)
-            optimal_option_values = q_target.max(1)[0].unsqueeze(1)
-            current_option_values = q_target.gather(1,o0)
-            y = r1+(1-term)*g_t*(
-                    (1-beta1)*current_option_values+
-                    beta1*optimal_option_values
-            )
-            y = y.detach()
-
-            # Value estimate (prediction)
-            y_pred = self.q_net(s0).gather(1,o0)
-    
-            assert y.shape == y_pred.shape
-
-            # Termination
-            q_current_option = q1.gather(1,o0)
-            v = q1.max(1)[0].unsqueeze(1)
-            advantage = (q_current_option-v+termination_reg).detach()
-            loss_term = (beta1*advantage).mean(0)
-
-            # Policy
-            action_log_probs = policy0['iop'][range(batch_size),o0.flatten(),:].log_softmax(1)
-            action_probs = policy0['iop'][range(batch_size),o0.flatten(),:].softmax(1)
-            entropy = -(action_probs*action_log_probs).sum(1)
-            advantage = (y-q0.gather(1,o0)).detach()
-            loss_policy = (action_log_probs.gather(1,a0)*advantage).mean(0)
-            loss_entropy = -entropy_reg*entropy.mean(0)
-
-            # Update Q_U network
-            self.optimizer_q.zero_grad()
-            loss_q = criterion(y_pred,y)
-            loss_q.backward()
-            #for param in self.qu_net.parameters():
-            #    assert param.grad is not None
-            #    param.grad.data.clamp_(-1, 1)
-            self.optimizer_q.step()
-
-            # Update policy network
-            loss = loss_term+loss_policy+loss_entropy
-            self.optimizer_policy.zero_grad()
-            loss.backward()
-            self.optimizer_policy.step()
-
-            # Logging
-            self.logger.log(
-                    #step=self._steps, # XXX: Not working without this, even with implicit key. Look into this.
-                    training_batch_option_value_target=current_option_values.mean().item(),
-                    training_batch_option_value=y_pred.mean().item(),
-                    policy_term_ent_loss=loss.item(),
-                    q_loss=loss_q.item(),
-                    termination_loss=loss_term.item(),
-                    policy_loss=loss_policy.item(),
-                    entropy_loss=loss_entropy.item(),
-            )
-
-        self._training_steps += 1
-
-        self._update_target()
     def _train(self, env_key):
-        self._train_2(env_key)
-    def _train_1(self):
-        if len(self.replay_buffer) < self.warmup_steps:
-            return
-        self._train_actor()
-        if self._steps % self.update_frequency == 0:
-            self._train_critic()
-            self._training_steps += 1
-    def _train_2(self, env_key):
         if len(self.replay_buffer) < self.warmup_steps:
             return
         self._train_actor_acc_loss(env_key)
-        self._train_critic_acc_loss_2(env_key)
+        self._train_critic_acc_loss(env_key)
         if len(self.policy_losses) < self.batch_size:
             return
         #self._train_critic_acc_loss()
         self._train_actor_critic()
         self._training_steps += 1
-    def _train_critic(self, iterations=1):
-        self._train_critic_3(iterations)
-    def _train_critic_1(self, iterations=1):
-        if len(self.replay_buffer) < self.batch_size*iterations:
-            return
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
-        criterion = torch.nn.MSELoss(reduction='mean')
-        for _,(s0,(o0,a0),r1,s1,term) in zip(range(iterations),dataloader):
-            # Fix data types
-            s0 = s0.to(self.device).float()/self.obs_scale
-            o0 = o0.to(self.device).unsqueeze(1)
-            a0 = a0.to(self.device)
-            r1 = r1.float().to(self.device).unsqueeze(1)
-            s1 = s1.to(self.device).float()/self.obs_scale
-            term = term.float().to(self.device).unsqueeze(1)
-            gamma = self.discount_factor
-            if isinstance(self.observation_space,gym.spaces.Discrete):
-                s0 = s0.unsqueeze(1)
-                s1 = s1.unsqueeze(1)
-            if isinstance(self.action_space,gym.spaces.Discrete):
-                a0 = a0.unsqueeze(1)
-
-            policy1 = self.policy_net(s1)
-            q_target = self.q_net_target(s1)
-            #beta0 = policy0['beta'].gather(1,o0)
-            beta1 = policy1['beta'].gather(1,o0) # We use the same option on the next step
-
-            # Value estimate (target)
-            optimal_option_values = q_target.max(1)[0].unsqueeze(1)
-            current_option_values = q_target.gather(1,o0)
-            y = r1+(1-term)*gamma*(
-                    (1-beta1)*current_option_values+
-                    beta1*optimal_option_values
-            )
-            y = y.detach()
-
-            # Value estimate (prediction)
-            y_pred = self.q_net(s0).gather(1,o0)
-    
-            assert y.shape == y_pred.shape
-
-            # Update Q_U network
-            self.optimizer_q.zero_grad()
-            loss_q = criterion(y_pred,y)
-            loss_q.backward()
-            #for param in self.qu_net.parameters():
-            #    assert param.grad is not None
-            #    param.grad.data.clamp_(-1, 1)
-            self.optimizer_q.step()
-
-            # Logging
-            self.logger.log(
-                    training_batch_option_value_target=current_option_values.mean().item(),
-                    training_batch_option_value=y_pred.mean().item(),
-                    q_loss=loss_q.item(),
-            )
-
-        self._update_target()
-    def _train_critic_2(self, iterations=1):
-        """ Train on the pretrained Q network. """
-        if len(self.replay_buffer) < self.batch_size*iterations:
-            return
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
-        criterion = torch.nn.MSELoss(reduction='mean')
-        for _,(s0,(o0,a0),r1,s1,term) in zip(range(iterations),dataloader):
-            # Fix data types
-            s0 = s0.to(self.device).float()/self.obs_scale
-            o0 = o0.to(self.device).unsqueeze(1)
-            a0 = a0.to(self.device)
-            r1 = r1.float().to(self.device).unsqueeze(1)
-            s1 = s1.to(self.device).float()/self.obs_scale
-            term = term.float().to(self.device).unsqueeze(1)
-            #gamma = self.discount_factor
-            if isinstance(self.observation_space,gym.spaces.Discrete):
-                s0 = s0.unsqueeze(1)
-                s1 = s1.unsqueeze(1)
-            if isinstance(self.action_space,gym.spaces.Discrete):
-                a0 = a0.unsqueeze(1)
-
-            policy0 = self.policy_net(s0)
-
-            # Value estimate (target)
-            y = self._pretrained_q_net(s0)
-            y = policy0['iop'].softmax(2) @ y.unsqueeze(2)
-            y = y.squeeze(2)
-
-            # Value estimate (prediction)
-            y_pred = self.q_net(s0)
-    
-            assert y.shape == y_pred.shape
-
-            # Update Q_U network
-            self.optimizer_q.zero_grad()
-            loss_q = criterion(y_pred,y)
-            loss_q.backward()
-            #for param in self.qu_net.parameters():
-            #    assert param.grad is not None
-            #    param.grad.data.clamp_(-1, 1)
-            self.optimizer_q.step()
-
-            # Logging
-            self.logger.log(
-                    training_batch_option_value=y_pred.mean().item(),
-                    q_loss=loss_q.item(),
-            )
-
-        self._update_target()
-    def _train_critic_3(self, iterations=1):
-        """ Same as _train_critic_1, but with the same optimizer as the actor. """
-        if len(self.replay_buffer) < self.batch_size*iterations:
-            return
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
-        criterion = torch.nn.MSELoss(reduction='mean')
-        for _,(s0,(o0,a0),r1,s1,term) in zip(range(iterations),dataloader):
-            # Fix data types
-            s0 = s0.to(self.device).float()/self.obs_scale
-            o0 = o0.to(self.device).unsqueeze(1)
-            a0 = a0.to(self.device)
-            r1 = r1.float().to(self.device).unsqueeze(1)
-            s1 = s1.to(self.device).float()/self.obs_scale
-            term = term.float().to(self.device).unsqueeze(1)
-            gamma = self.discount_factor
-            if isinstance(self.observation_space,gym.spaces.Discrete):
-                s0 = s0.unsqueeze(1)
-                s1 = s1.unsqueeze(1)
-            if isinstance(self.action_space,gym.spaces.Discrete):
-                a0 = a0.unsqueeze(1)
-
-            net_output_0 = self.net(s0)
-            net_output_1 = self.net(s1)
-            net_output_target_1 = self.net_target(s1)
-            q_target = net_output_target_1['q']
-            #beta0 = policy0['beta'].gather(1,o0)
-            beta1 = net_output_1['beta'].gather(1,o0) # We use the same option on the next step
-
-            # Value estimate (target)
-            optimal_option_values = q_target.max(1)[0].unsqueeze(1)
-            current_option_values = q_target.gather(1,o0)
-            y = r1+(1-term)*gamma*(
-                    (1-beta1)*current_option_values+
-                    beta1*optimal_option_values
-            )
-            y = y.detach()
-
-            # Value estimate (prediction)
-            y_pred = net_output_0['q'].gather(1,o0)
-    
-            assert y.shape == y_pred.shape
-
-            # Update Q_U network
-            self.optimizer.zero_grad()
-            loss_q = criterion(y_pred,y)
-            loss_q.backward()
-            #for param in self.qu_net.parameters():
-            #    assert param.grad is not None
-            #    param.grad.data.clamp_(-1, 1)
-            self.optimizer.step()
-
-            # Logging
-            self.logger.log(
-                    training_batch_option_value_target=current_option_values.mean().item(),
-                    training_batch_option_value=y_pred.mean().item(),
-                    q_loss=loss_q.item(),
-            )
-
-        self._update_target()
-    def _train_critic_acc_loss(self, iterations=1):
-        """ Same as _train_critic_1, but with the same optimizer as the actor. """
-        if len(self.replay_buffer) < self.batch_size*iterations:
-            return
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
-        criterion = torch.nn.MSELoss(reduction='mean')
-        for _,(s0,(o0,a0),r1,s1,term) in zip(range(iterations),dataloader):
-            # Fix data types
-            s0 = s0.to(self.device).float()/self.obs_scale
-            o0 = o0.to(self.device).unsqueeze(1)
-            a0 = a0.to(self.device)
-            r1 = r1.float().to(self.device).unsqueeze(1)
-            s1 = s1.to(self.device).float()/self.obs_scale
-            term = term.float().to(self.device).unsqueeze(1)
-            gamma = self.discount_factor
-            if isinstance(self.observation_space,gym.spaces.Discrete):
-                s0 = s0.unsqueeze(1)
-                s1 = s1.unsqueeze(1)
-            if isinstance(self.action_space,gym.spaces.Discrete):
-                a0 = a0.unsqueeze(1)
-
-            net_output_0 = self.net(s0)
-            net_output_1 = self.net(s1)
-            net_output_target_1 = self.net_target(s1)
-            q_target = net_output_target_1['q']
-            #beta0 = policy0['beta'].gather(1,o0)
-            beta1 = net_output_1['beta'].gather(1,o0) # We use the same option on the next step
-
-            # Value estimate (target)
-            optimal_option_values = q_target.max(1)[0].unsqueeze(1)
-            current_option_values = q_target.gather(1,o0)
-            y = r1+(1-term)*gamma*(
-                    (1-beta1)*current_option_values+
-                    beta1*optimal_option_values
-            )
-            y = y.detach()
-
-            # Value estimate (prediction)
-            y_pred = net_output_0['q'].gather(1,o0)
-    
-            assert y.shape == y_pred.shape
-
-            # Update Q_U network
-            loss_q = criterion(y_pred,y)
-            self.critic_losses.append(loss_q)
-
-            # Logging
-            self.logger.log(
-                    training_batch_option_value_target=current_option_values.mean().item(),
-                    training_batch_option_value=y_pred.mean().item(),
-                    q_loss=loss_q.item(),
-            )
-    def _train_critic_acc_loss_2(self, env_key):
+    def _train_critic_acc_loss(self, env_key):
         """ Using A2C state value implementation. Accumulate loss without updating. """
         transition = self.obs_stack[env_key].get_transition()
         if transition is None:
@@ -770,297 +337,6 @@ class OptionCriticAgent(DeployableAgent):
         # Logging
         self.logger.append(
                 state_option_value=net_output_0['q'][0,o0].item(),
-        )
-    def _train_actor(self):
-        self._train_actor_6()
-        #if self._steps <= 300_000:
-        #    self._train_actor_5()
-        #else:
-        #    self._train_actor_6()
-    def _train_actor_1(self):
-        transition = self.obs_stack[False].get_transition() # FIXME: The environment key is hard-coded.
-        if transition is None:
-            return
-        s0,(o0,a0),r1,s1,term = transition
-        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
-
-        gamma = self.discount_factor
-        termination_reg = self.termination_reg
-        entropy_reg = self.entropy_reg
-
-        policy0 = self.policy_net(s0)
-        policy1 = self.policy_net(s1)
-        q_target = self.q_net_target(s1).squeeze(0)
-        q0 = self.q_net(s0).squeeze(0)
-        q1 = self.q_net(s1).squeeze(0)
-        #beta0 = policy0['beta'].squeeze(0)[o0]
-        beta1 = policy1['beta'].squeeze(0)[o0] # We use the same option on the next step
-
-        # Termination
-        q_current_option = q1[o0]
-        v = q1.max()
-        advantage = (q_current_option-v+termination_reg).detach()
-        loss_term = (beta1*advantage).mean(0)
-
-        # Value estimate (target)
-        optimal_option_values = q_target.max()
-        current_option_values = q_target[o0]
-        y = r1+(1-term)*gamma*(
-                (1-beta1)*current_option_values+
-                beta1*optimal_option_values
-        )
-        y = y.detach()
-
-        # Policy
-        action_log_probs = policy0['iop'].squeeze(0)[o0,:].log_softmax(0)
-        action_probs = policy0['iop'].squeeze(0)[o0,:].softmax(0)
-        entropy = -(action_probs*action_log_probs).sum(0)
-        advantage = (y-q0[o0]).detach()
-        loss_policy = (action_log_probs[a0]*advantage).mean(0)
-        loss_entropy = -entropy_reg*entropy
-
-        # Update policy network
-        loss = loss_term+loss_policy+loss_entropy
-        self.optimizer_policy.zero_grad()
-        loss.backward()
-        self.optimizer_policy.step()
-
-        # Logging
-        self.logger.log(
-                policy_term_ent_loss=loss.item(),
-                termination_loss=loss_term.item(),
-                policy_loss=loss_policy.item(),
-                entropy_loss=loss_entropy.item(),
-        )
-    def _train_actor_2(self):
-        """ Copied from https://github.com/lweitkamp/option-critic-pytorch/blob/0c57da7686f8903ed2d8dded3fae832ee9defd1a/option_critic.py#L222 """
-        transition = self.obs_stack[False].get_transition() # FIXME: The environment key is hard-coded.
-        if transition is None:
-            return
-        s0,(o0,a0),r1,s1,term = transition
-        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
-
-        gamma = self.discount_factor
-        termination_reg = self.termination_reg
-        entropy_reg = self.entropy_reg
-
-        policy0 = self.policy_net(s0)
-        policy1 = self.policy_net(s1)
-        q_target = self.q_net_target(s1).squeeze(0)
-        q = self.q_net(s0).squeeze(0)
-        beta0 = policy0['beta'].squeeze(0)[o0]
-        beta1 = policy1['beta'].squeeze(0)[o0] # We use the same option on the next step
-
-        # Termination
-        q_current_option = q[o0]
-        v = q_target.max()
-        advantage = (q_current_option-v+termination_reg).detach()
-        loss_term = (beta0*advantage).mean(0)
-
-        # Value estimate (target)
-        optimal_option_values = q_target.max()
-        current_option_values = q_target[o0]
-        y = r1+(1-term)*gamma*(
-                (1-beta1)*current_option_values+
-                beta1*optimal_option_values
-        )
-        y = y.detach()
-
-        # Policy
-        action_log_probs = policy0['iop'].squeeze(0)[o0,:].log_softmax(0)
-        action_probs = policy0['iop'].squeeze(0)[o0,:].softmax(0)
-        entropy = -(action_probs*action_log_probs).sum(0)
-        advantage = (y-q[o0]).detach()
-        loss_policy = -(action_log_probs[a0]*advantage).mean(0)
-        loss_entropy = -entropy_reg*entropy
-
-        if loss_policy == 0:
-            breakpoint()
-
-        # Update policy network
-        #loss = loss_term+loss_policy+loss_entropy
-        loss = loss_policy+loss_entropy
-        self.optimizer_policy.zero_grad()
-        loss.backward()
-        self.optimizer_policy.step()
-
-        # Logging
-        self.logger.log(
-                policy_term_ent_loss=loss.item(),
-                termination_loss=loss_term.item(),
-                policy_loss=loss_policy.item(),
-                entropy_loss=loss_entropy.item(),
-        )
-    def _train_actor_3(self):
-        """ Advantage uses the same Q function for both the bootstrapped sample and the value estimate. """
-        transition = self.obs_stack[False].get_transition() # FIXME: The environment key is hard-coded.
-        if transition is None:
-            return
-        s0,(o0,a0),r1,s1,term = transition
-        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
-
-        gamma = self.discount_factor
-        termination_reg = self.termination_reg
-        entropy_reg = self.entropy_reg
-
-        policy0 = self.policy_net(s0)
-        policy1 = self.policy_net(s1)
-        q1_target = self.q_net_target(s1).squeeze(0)
-        q1 = self.q_net(s1).squeeze(0)
-        q0 = self.q_net(s0).squeeze(0)
-        beta0 = policy0['beta'].squeeze(0)[o0]
-        beta1 = policy1['beta'].squeeze(0)[o0] # We use the same option on the next step
-
-        # Termination
-        q_current_option = q0[o0]
-        v = q1_target.max()
-        advantage = (q_current_option-v+termination_reg).detach()
-        loss_term = (beta0*advantage).mean(0)
-
-        # Value estimate (target)
-        optimal_option_values = q1.max()
-        current_option_values = q1[o0]
-        y = r1+(1-term)*gamma*(
-                (1-beta1)*current_option_values+
-                beta1*optimal_option_values
-        )
-        y = y.detach()
-
-        # Policy
-        action_log_probs = policy0['iop'].squeeze(0)[o0,:].log_softmax(0)
-        action_probs = policy0['iop'].squeeze(0)[o0,:].softmax(0)
-        entropy = -(action_probs*action_log_probs).sum(0)
-        advantage = (y-q0[o0]).detach()
-        loss_policy = -(action_log_probs[a0]*advantage).mean(0)
-        loss_entropy = -entropy_reg*entropy
-
-        # Update policy network
-        #loss = loss_term+loss_policy+loss_entropy
-        loss = loss_policy+loss_entropy
-        self.optimizer_policy.zero_grad()
-        loss.backward()
-        self.optimizer_policy.step()
-
-        # Logging
-        self.logger.log(
-                policy_term_ent_loss=loss.item(),
-                termination_loss=loss_term.item(),
-                policy_loss=loss_policy.item(),
-                entropy_loss=loss_entropy.item(),
-        )
-    def _train_actor_4(self):
-        """ Train the actor using distillation on the pretrained DQN. """
-        transition = self.obs_stack[False].get_transition() # FIXME: The environment key is hard-coded.
-        if transition is None:
-            return
-        s0,(o0,a0),r1,s1,term = transition
-        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
-        a0,r1,term=a0,r1,term
-
-        policy0 = self.policy_net(s0)
-
-        # Policy
-        criterion = torch.nn.KLDivLoss(reduction='mean')
-        action_log_probs = policy0['iop'][:,o0,:].log_softmax(1)
-        target_log_probs = self._pretrained_q_net(s0).log_softmax(1)
-        loss_policy = criterion(action_log_probs,target_log_probs)
-
-        # Update policy network
-        loss = loss_policy
-        self.optimizer_policy.zero_grad()
-        loss.backward()
-        self.optimizer_policy.step()
-
-        # Logging
-        self.logger.log(
-                policy_term_ent_loss=loss.item(),
-                policy_loss=loss_policy.item(),
-        )
-    def _train_actor_5(self):
-        """ Train the actor using distillation on the pretrained DQN. Use data from the replay buffer. """
-        iterations = 1
-        if len(self.replay_buffer) < self.batch_size*iterations:
-            return
-        if len(self.replay_buffer) < self.warmup_steps:
-            return
-        if self._steps % self.update_frequency != 0:
-            return
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
-        criterion = torch.nn.KLDivLoss(reduction='mean', log_target=True)
-        for _,(s0,(o0,a0),r1,s1,term) in zip(range(iterations),dataloader):
-            s0 = s0.to(self.device).float()/self.obs_scale
-            #s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-            #s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
-            a0,r1,s1,term = a0,r1,s1,term
-
-            policy0 = self.policy_net(s0)
-
-            # Policy
-            action_log_probs = policy0['iop'][range(len(o0)),o0,:].log_softmax(1)
-            target_log_probs = (self._pretrained_q_net(s0)*300).log_softmax(1)
-            loss_policy = criterion(action_log_probs,target_log_probs)
-
-            # Update policy network
-            loss = loss_policy
-            self.optimizer_policy_distillation.zero_grad()
-            loss.backward()
-            self.optimizer_policy_distillation.step()
-
-            # Logging
-            self.logger.log(
-                    training_batch_policy_term_ent_loss=loss.item(),
-                    training_batch_policy_loss=loss_policy.item(),
-            )
-    def _train_actor_6(self):
-        """ Using A2C policy gradient implementation. Termination is ignored. """
-        transition = self.obs_stack[False].get_transition() # FIXME: The environment key is hard-coded.
-        if transition is None:
-            return
-        s0,(o0,a0),r1,s1,term = transition
-        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
-
-        policy0 = self.policy_net(s0)
-        #policy1 = self.policy_net(s1)
-        q0_target = self.q_net_target(s0).squeeze(0)
-        q1_target = self.q_net_target(s1).squeeze(0)
-
-        # Policy
-        log_action_probs = [policy0['iop'].squeeze(0)[o0,:].log_softmax(0)[a0],None]
-        target_state_values = [q0_target.max(),q1_target.max()]
-        rewards = [None,r1]
-        terminals = [False,term]
-        discounts = [self.discount_factor, self.discount_factor]
-        loss_policy = compute_advantage_policy_gradient(
-                log_action_probs=log_action_probs,
-                target_state_values=target_state_values,
-                rewards=rewards,
-                terminals=terminals,
-                discounts=discounts
-        )
-        # Entropy
-        action_probs = policy0['iop'].squeeze(0)[o0,:].softmax(0)
-        entropy = -action_probs*torch.log(action_probs)
-        loss_entropy = -0.01*entropy.sum() # Factor of 0.01 works in A2C
-
-        # Update policy network
-        #loss = loss_term+loss_policy+loss_entropy
-        loss = loss_policy+loss_entropy
-        self.optimizer_policy.zero_grad()
-        loss.backward()
-        self.optimizer_policy.step()
-
-        # Logging
-        self.logger.log(
-                policy_term_ent_loss=loss.item(),
-                #termination_loss=loss_term.item(),
-                policy_loss=loss_policy.item(),
-                entropy_loss=loss_entropy.item(),
         )
     def _train_actor_acc_loss(self, env_key):
         """ Using A2C policy gradient implementation. Termination is ignored. Accumulate loss without updating. """
@@ -1150,15 +426,6 @@ class OptionCriticAgent(DeployableAgent):
         for p1,p2 in zip(self.net_target.parameters(), self.net.parameters()):
             p1.data = (1-tau)*p1+tau*p2
     def act(self, testing=False, env_key=None):
-        return self._act_1(testing=testing,env_key=env_key)
-        #if testing:
-        #    return self._act_1(testing=testing,env_key=env_key)
-        #else:
-        #    if self._steps <= 300_000:
-        #        return self._act_2(testing=testing,env_key=env_key)
-        #    else:
-        #        return self._act_1(testing=testing,env_key=env_key)
-    def _act_1(self, testing=False, env_key=None):
         """ Return a random action according to an epsilon-greedy policy. """
         if env_key is None:
             env_key = testing
@@ -1234,40 +501,6 @@ class OptionCriticAgent(DeployableAgent):
         #    )
 
         return action
-    def _act_2(self, testing=False, env_key=None):
-        """ Act according to the softmax policy with respect to the pretrained DQN. """
-        if env_key is None:
-            env_key = testing
-
-        obs = self.obs_stack[env_key].get_obs()
-        obs = torch.tensor(obs).to(self.device).float()/self.obs_scale
-        if isinstance(self.observation_space,gym.spaces.Discrete):
-            obs = obs.unsqueeze(0).unsqueeze(0)
-        elif isinstance(self.observation_space,gym.spaces.Box):
-            obs = obs.unsqueeze(0)
-        else:
-            raise NotImplementedError()
-
-        q = self._pretrained_q_net(obs).squeeze()*300
-        option = 0
-        # Choose an action
-        action_probs = q.softmax(dim=0)
-        dist = torch.distributions.Categorical(probs=action_probs)
-        action = dist.sample().item()
-
-        self.obs_stack[env_key].append_action((option,action))
-
-        # Save state and logging
-        if not testing:
-            pq = q
-            self.logger.log(
-                    #step=self._steps,
-                    #action_value=self.q_net(obs)[0,option,action].item(),
-                    entropy=dist.entropy().item(),
-                    action_value_diff=(pq.max()-(action_probs.squeeze() * pq.squeeze()).sum()).item()
-            )
-
-        return action
     def _compute_annealed_epsilon(self, max_steps=1_000_000):
         eps = self.eps[False]
         return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
@@ -1290,14 +523,8 @@ class OptionCriticAgent(DeployableAgent):
                 'logger': self.logger.state_dict(),
         }
     def load_state_dict(self, state):
-        self.q_net.load_state_dict(state['q_net'])
-        #self.q_net.load_state_dict(state['q_net'])
-        #self.q_net_target.load_state_dict(state['q_net_target'])
-        #self.policy_net.load_state_dict(state['policy_net_target'])
-
+        self.net.load_state_dict(state['net'])
         self.optimizer.load_state_dict(state['optimizer'])
-        #self.optimizer_q.load_state_dict(state['optimizer_q'])
-        #self.optimizer_policy.load_state_dict(state['optimizer_policy'])
 
         for k,os_state in state['obs_stack'].items():
             self.obs_stack[k].load_state_dict(os_state)
@@ -1323,158 +550,6 @@ class OptionCriticAgent(DeployableAgent):
         #self.q_net.load_state_dict(state['qu_net'])
         #self.policy_net.load_state_dict(state['policy_net'])
 
-class OptionCriticAgentDebug1(OptionCriticAgent):
-    """
-    Implementation of Option-Critic
-    Each option represents one primitive action
-    """
-    def _train(self, iterations=1):
-        if len(self.replay_buffer) < self.batch_size*iterations:
-            return
-        if len(self.replay_buffer) < self.warmup_steps:
-            return
-        if self._steps % self.update_frequency != 0:
-            return
-        assert self.num_options == self.action_space.n
-        dataloader = torch.utils.data.DataLoader(
-                self.replay_buffer, batch_size=self.batch_size, shuffle=True)
-        criterion = torch.nn.MSELoss(reduction='mean')
-        for _,(s0,(o0,a0),r1,s1,term,time,gamma) in zip(range(iterations),dataloader):
-            # Fix data types
-            batch_size = s0.shape[0]
-            s0 = s0.to(self.device).float()/self.obs_scale
-            o0 = o0.to(self.device).unsqueeze(1)
-            a0 = a0.to(self.device)
-            r1 = r1.float().to(self.device).unsqueeze(1)
-            s1 = s1.to(self.device).float()/self.obs_scale
-            term = term.float().to(self.device).unsqueeze(1)
-            time = time.to(self.device).unsqueeze(1)
-            gamma = gamma.float().to(self.device).unsqueeze(1)
-            g_t = torch.pow(gamma,time)
-            if isinstance(self.observation_space,gym.spaces.Discrete):
-                s0 = s0.unsqueeze(1)
-                s1 = s1.unsqueeze(1)
-            if isinstance(self.action_space,gym.spaces.Discrete):
-                a0 = a0.unsqueeze(1)
-
-            termination_reg = 0.01 # From paper
-            entropy_reg = 0.1 # XXX: arbitrary value
-
-            policy0 = self.policy_net(s0)
-            policy1 = self.policy_net(s1)
-            q_target = self.q_net_target(s1)
-            #q0 = self.q_net(s0)
-            q1 = self.q_net(s1)
-            #beta0 = policy0['beta'].gather(1,o0)
-            beta1 = policy1['beta'].gather(1,o0) # We use the same option on the next step
-
-            # Value estimate (target)
-            optimal_option_values = q_target.max(1)[0].unsqueeze(1)
-            current_option_values = q_target.gather(1,o0)
-            y = r1+(1-term)*g_t*(
-                    (1-beta1)*current_option_values+
-                    beta1*optimal_option_values
-            )
-            y = y.detach()
-
-            # Value estimate (prediction)
-            y_pred = self.q_net(s0).gather(1,o0)
-    
-            assert y.shape == y_pred.shape
-
-            # Termination
-            q_current_option = q1.gather(1,o0)
-            v = q1.max(1)[0].unsqueeze(1)
-            advantage = (q_current_option-v+termination_reg).detach()
-            loss_term = (beta1*advantage).mean(0)
-
-            # Policy
-            bce = torch.nn.BCEWithLogitsLoss()
-            logits = torch.cat([x for x in policy0['iop']])
-            target = torch.cat([torch.eye(self.num_options) for _ in policy0['iop']]).to(self.device)
-            loss_policy = bce(logits, target)
-            action_log_probs = policy0['iop'][range(batch_size),o0.flatten(),:].log_softmax(1)
-            action_probs = policy0['iop'][range(batch_size),o0.flatten(),:].softmax(1)
-            entropy = -(action_probs*action_log_probs).sum(1)
-            loss_entropy = (-entropy_reg*entropy).mean(0)
-            if self._training_steps % 1000 == 0:
-                print(logits.softmax(1))
-
-            # Update Q_U network
-            self.optimizer_q.zero_grad()
-            loss_q = criterion(y_pred,y)
-            loss_q.backward()
-            #for param in self.qu_net.parameters():
-            #    assert param.grad is not None
-            #    param.grad.data.clamp_(-1, 1)
-            self.optimizer_q.step()
-
-            # Update policy network
-            loss = loss_term+loss_policy+loss_entropy
-            self.optimizer_policy.zero_grad()
-            loss.backward()
-            self.optimizer_policy.step()
-
-            # Logging
-            self.logger.log(
-                    #step=self._steps, # XXX: Not working without this, even with implicit key. Look into this.
-                    training_batch_option_value_target=current_option_values.mean().item(),
-                    training_batch_option_value=y_pred.mean().item(),
-                    policy_term_ent_loss=loss.item(),
-                    q_loss=loss_q.item(),
-                    termination_loss=loss_term.item(),
-                    policy_loss=loss_policy.item(),
-                    entropy_loss=loss_entropy.item(),
-                    training_batch_entropy=entropy.mean().item(),
-            )
-
-        self._training_steps += 1
-
-        self._update_target()
-
-def run_a2c_debug_exp():
-    from rl.experiments.training.basic import TrainExperiment
-    from experiment import make_experiment_runner
-    from rl.agent.smdp.a2c import A2CAgent, PolicyValueNetworkCNN
-
-    num_actors = 16
-    env_name = 'PongNoFrameskip-v4'
-    train_env_keys = list(range(num_actors))
-
-    exp_runner = make_experiment_runner(
-            TrainExperiment,
-            config={
-                'agent': {
-                    'type': A2CAgent,
-                    'parameters': {
-                        'training_env_keys': train_env_keys,
-                        #'net': DebugA2CNetwork(6),
-                        'net': DebugA2CNetwork4(6),
-                        #'net': PolicyValueNetworkCNN(6),
-                        'max_rollout_length': 2,
-                    },
-                },
-                'env_test': {'env_name': env_name, 'atari': True},
-                'env_train': {'env_name': env_name, 'atari': True},
-                'train_env_keys': train_env_keys,
-                'test_frequency': None,
-                'save_model_frequency': 250_000,
-                'verbose': True,
-            },
-            #trial_id='checkpointtest',
-            #checkpoint_frequency=250_000,
-            checkpoint_frequency=None,
-            max_iterations=50_000_000,
-            verbose=True,
-    )
-    exp_runner.exp.logger.init_wandb({
-        'project': 'A2C-%s' % env_name
-    })
-    exp_runner.exp.agent.net.net.load_state_dict(torch.load('./oc-net-pong.pt'))
-    exp_runner.run()
-    torch.save(exp_runner.exp.agent.net.net.state_dict(), './oc-net.pt')
-    breakpoint()
-
 def run_oc_debug_exp():
     from rl.agent.option_critic import OptionCriticAgent # XXX: Doesn't work unless I import it? Why?
     #from rl.agent.option_critic import OptionCriticAgentDebug1 as OptionCriticAgent
@@ -1499,23 +574,23 @@ def run_oc_debug_exp():
         'entropy_reg': 0.01, # XXX: DEBUG
     }
 
-    params_dqn = {
-        # Use default parameters
-        'atari': True,
-    }
+    #params_dqn = {
+    #    # Use default parameters
+    #    'atari': True,
+    #}
 
-    params_option_critic = { # Jean Harb's parameters
-        'discount_factor': 0.99,
-        'learning_rate': 2.5e-4,
-        'target_update_frequency': 10_000,
-        'polyak_rate': 1,
-        'warmup_steps': 50_000,
-        'replay_buffer_size': 1_000_000,
-        'atari': True,
-        'num_options': 1, # XXX: DEBUG
-        'termination_reg': 0.01,
-        'entropy_reg': 1e-5,
-    }
+    #params_option_critic = { # Jean Harb's parameters
+    #    'discount_factor': 0.99,
+    #    'learning_rate': 2.5e-4,
+    #    'target_update_frequency': 10_000,
+    #    'polyak_rate': 1,
+    #    'warmup_steps': 50_000,
+    #    'replay_buffer_size': 1_000_000,
+    #    'atari': True,
+    #    'num_options': 1, # XXX: DEBUG
+    #    'termination_reg': 0.01,
+    #    'entropy_reg': 1e-5,
+    #}
 
     params_debug = {
             'discount_factor': 0.99,
@@ -1595,5 +670,4 @@ def run_oc_debug_exp():
     exp_runner.run()
 
 if __name__ == "__main__":
-    #run_a2c_debug_exp()
     run_oc_debug_exp()
