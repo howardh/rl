@@ -18,32 +18,6 @@ from rl.agent.agent import DeployableAgent
 from rl.agent.replay_buffer import ReplayBuffer, AtariReplayBuffer
 from rl.agent.smdp.a2c import compute_advantage_policy_gradient, compute_mc_state_value_loss
 
-class QNetworkCNN(torch.nn.Module):
-    def __init__(self, num_actions):
-        super().__init__()
-        self.conv = torch.nn.Sequential(
-            torch.nn.Conv2d(
-                in_channels=4,out_channels=32,kernel_size=8,stride=4),
-            torch.nn.LeakyReLU(),
-            torch.nn.Conv2d(
-                in_channels=32,out_channels=64,kernel_size=4,stride=2),
-            torch.nn.LeakyReLU(),
-            torch.nn.Conv2d(
-                in_channels=64,out_channels=64,kernel_size=3,stride=1),
-            torch.nn.LeakyReLU(),
-        )
-        self.fc = torch.nn.Sequential(
-            torch.nn.Linear(in_features=64*7*7,out_features=512),
-            torch.nn.LeakyReLU(),
-            torch.nn.Linear(in_features=512,out_features=num_actions),
-        )
-    def forward(self, obs):
-        x = obs
-        x = self.conv(x)
-        x = x.view(-1,7*7*64)
-        x = self.fc(x)
-        return x
-
 class QUNetworkCNN(torch.nn.Module):
     def __init__(self, num_actions, num_options):
         super().__init__()
@@ -115,6 +89,26 @@ class OptionCriticNetworkCNN(torch.nn.Module):
         }
         return x
 
+class OptionCriticNetworkDiscrete(torch.nn.Module):
+    def __init__(self, obs_size, num_actions, num_options):
+        super().__init__()
+        # Termination
+        self.beta = torch.nn.Parameter(torch.zeros([obs_size,num_options]))
+        # Intra-option policies
+        self.iop = torch.nn.Parameter(torch.zeros([obs_size,num_options,num_actions]))
+        # Policy over options
+        self.poo = torch.nn.Parameter(torch.zeros([obs_size,num_options]))
+        # Option-value
+        self.q = torch.nn.Parameter(torch.zeros([obs_size,num_options]))
+    def forward(self, obs):
+        x = {
+            'beta': torch.sigmoid(torch.cat([self.beta[o] for o in obs])),
+            'iop': torch.cat([self.iop[o,:,:] for o in obs]),
+            'poo': torch.cat([self.poo[o,:] for o in obs]),
+            'q': torch.cat([self.q[o,:] for o in obs]),
+        }
+        return x
+
 ObsType = TypeVar('ObsType')
 ActionType = TypeVar('ActionType')
 class ObservationStack(Generic[ObsType,ActionType]):
@@ -180,7 +174,7 @@ class ObservationStack(Generic[ObsType,ActionType]):
 
 class OptionCriticAgent(DeployableAgent):
     """
-    Implementation of Option-Critic
+    On-policy implementation of Option-Critic.
     """
     def __init__(self,
             action_space : gym.spaces.Discrete,
@@ -243,11 +237,21 @@ class OptionCriticAgent(DeployableAgent):
         else:
             self.replay_buffer = ReplayBuffer(replay_buffer_size)
 
-        self.net = OptionCriticNetworkCNN( # Termination, intra-option policy, and policy over options
-                num_actions=self.action_space.n,
-                num_options=num_options
-        ).to(self.device)
+        if isinstance(observation_space,gym.spaces.Box):
+            self.net = OptionCriticNetworkCNN( # Termination, intra-option policy, and policy over options
+                    num_actions=action_space.n,
+                    num_options=num_options
+            ).to(self.device)
+        elif isinstance(observation_space,gym.spaces.Discrete):
+            self.net = OptionCriticNetworkDiscrete( # Termination, intra-option policy, and policy over options
+                    obs_size=observation_space.n,
+                    num_actions=self.action_space.n,
+                    num_options=num_options
+            ).to(self.device)
+        else:
+            raise NotImplementedError(f'Unsupported observation space: {type(self.observation_space)}')
         self.net_target = copy.deepcopy(self.net)
+
         self.policy_losses = []
         self.entropy_losses = []
         self.termination_losses = []
@@ -311,17 +315,16 @@ class OptionCriticAgent(DeployableAgent):
         if transition is None:
             return
         s0,(o0,a0),r1,s1,term = transition
-        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
+        if isinstance(self.observation_space,gym.spaces.Discrete):
+            s0 = torch.tensor(s0).to(self.device)
+            s1 = torch.tensor(s1).to(self.device)
+        else:
+            s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
+            s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
         a0 = a0
 
         net_output_0 = self.net(s0)
-        #net_output_1 = self.net(s1)
-        #net_output_target_0 = self.net_target(s0)
         net_output_target_1 = self.net_target(s1)
-        #policy0 = net_output_0
-        #policy1 = self.policy_net(s1)
-        #q0_target = net_output_target_0['q'].squeeze(0)
         q1_target = net_output_target_1['q'].squeeze(0)
 
         # State value loss
@@ -344,8 +347,12 @@ class OptionCriticAgent(DeployableAgent):
         if transition is None:
             return
         s0,(o0,a0),r1,s1,term = transition
-        s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-        s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
+        if isinstance(self.observation_space,gym.spaces.Discrete):
+            s0 = torch.tensor(s0).to(self.device)
+            s1 = torch.tensor(s1).to(self.device)
+        else:
+            s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
+            s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
 
         net_output_0 = self.net(s0)
         net_output_1 = self.net(s1)
@@ -436,7 +443,10 @@ class OptionCriticAgent(DeployableAgent):
             eps = self._compute_annealed_epsilon(self.eps_annealing_steps)
 
         obs = self.obs_stack[env_key].get_obs()
-        obs = torch.tensor(obs).to(self.device).float()/self.obs_scale
+        if isinstance(self.observation_space,gym.spaces.Discrete):
+            obs = torch.tensor(obs).to(self.device)
+        else:
+            obs = torch.tensor(obs).to(self.device).float()/self.obs_scale
         if isinstance(self.observation_space,gym.spaces.Discrete):
             obs = obs.unsqueeze(0).unsqueeze(0)
         elif isinstance(self.observation_space,gym.spaces.Box):
@@ -669,5 +679,75 @@ def run_oc_debug_exp():
         #exp_runner.exp.agent.policy_net.load_state_dict(torch.load('./oc-polnet.pt')) # XXX: DEBUG
     exp_runner.run()
 
+def run_discrete():
+    from rl.agent.option_critic import OptionCriticAgent # XXX: Doesn't work unless I import it? Why?
+    #from rl.agent.option_critic import OptionCriticAgentDebug1 as OptionCriticAgent
+    from rl.experiments.training.basic import TrainExperiment
+    from experiment import make_experiment_runner
+
+    params = {
+        'discount_factor': 0.99,
+        'behaviour_eps': 0.02,
+        'learning_rate': 0.01,
+        'update_frequency': 1,
+        'target_update_frequency': 1,
+        'polyak_rate': 1,
+        'replay_buffer_size': 1, # TODO: Remove
+        'atari': False,
+        #'num_options': 6, # XXX: DEBUG
+        'num_options': 1, # XXX: DEBUG
+        'entropy_reg': 0.01, # XXX: DEBUG
+    }
+
+    env_name = 'FrozenLake-v1'
+    num_actors = 16
+    train_env_keys = list(range(num_actors))
+    debug = False
+
+    if debug:
+        exp_runner = make_experiment_runner(
+                TrainExperiment,
+                config={
+                    'agent': {
+                        'type': OptionCriticAgent,
+                        'parameters': params,
+                    },
+                    'env_test': {'env_name': env_name, 'atari': False},
+                    'env_train': {'env_name': env_name, 'atari': False},
+                    'train_env_keys': train_env_keys,
+                    'verbose': True,
+                    'test_frequency': None,
+                    'save_model_frequency': None,
+                },
+                #trial_id='checkpointtest',
+                checkpoint_frequency=None,
+                max_iterations=5_000_000,
+                verbose=True,
+        )
+    else:
+        exp_runner = make_experiment_runner(
+                TrainExperiment,
+                config={
+                    'agent': {
+                        'type': OptionCriticAgent,
+                        'parameters': params,
+                    },
+                    'env_test': {'env_name': env_name, 'atari': False},
+                    'env_train': {'env_name': env_name, 'atari': False},
+                    'train_env_keys': train_env_keys,
+                    'verbose': True,
+                    'test_frequency': None,
+                    'save_model_frequency': None,
+                },
+                checkpoint_frequency=None,
+                max_iterations=1_000_000,
+                verbose=True,
+        )
+        #exp_runner.exp.logger.init_wandb({
+        #    'project': 'OptionCritic-%s' % env_name
+        #})
+    exp_runner.run()
+
 if __name__ == "__main__":
-    run_oc_debug_exp()
+    #run_oc_debug_exp()
+    run_discrete()

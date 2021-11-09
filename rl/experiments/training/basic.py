@@ -131,8 +131,10 @@ class TrainExperiment(Experiment):
             # TODO: Episode end callback?
             if self.verbose and self._ep_len[env_key] > 0:
                 total_reward = sum(self._ep_rewards[env_key])
-                tqdm.write(f'Iteration {i}\t Training reward: {total_reward}')
                 self.logger.append(train_reward_by_episode=total_reward)
+                #running_avg = np.mean([np.mean(x) for x in self.logger['train_reward_by_episode'][1][-100:]])
+                #tqdm.write(f'Iteration {i}\t Training reward: {total_reward}\t avg: {running_avg}')
+                tqdm.write(f'Iteration {i}\t Training reward: {total_reward}')
             # Reset
             self.done[env_key] = False
             obs = env.reset()
