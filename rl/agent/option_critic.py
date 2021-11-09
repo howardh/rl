@@ -346,6 +346,7 @@ class OptionCriticAgent(DeployableAgent):
         self.net_target = copy.deepcopy(self.net)
         self.policy_losses = []
         self.entropy_losses = []
+        self.termination_losses = []
         self.critic_losses = []
 
         self.optimizer_q = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
@@ -363,6 +364,7 @@ class OptionCriticAgent(DeployableAgent):
         # XXX: DEBUG
         self._pretrained_q_net = rl.debug_tools.pong.get_pretained_model()
         self._pretrained_q_net.to(self.device)
+        self._option_choice_count = defaultdict(lambda: [0]*num_options)
 
     def observe(self, obs, reward=None, terminal=False, testing=False, env_key=None):
         if env_key is None:
@@ -385,6 +387,17 @@ class OptionCriticAgent(DeployableAgent):
 
             # Train each time something is added to the buffer
             self._train(env_key)
+
+        if terminal:
+            # Logging
+            counts = self._option_choice_count[env_key]
+            total = sum(counts)
+            probs = [c/total for c in counts]
+            entropy = sum([-p*np.log(p) for p in probs if p != 0])
+            self.logger.append(option_choice_entropy=entropy)
+            self._option_choice_count[env_key] = [0]*self.num_options # Reset count
+            # Reset
+            self._current_option[env_key] = None
     def _train_old(self, iterations=1):
         if __debug__:
             raise Exception('THIS FUNCTION IS DEPRECATED. DELETE ONCE EVERYTHING ELSE IS WORKING')
@@ -758,7 +771,6 @@ class OptionCriticAgent(DeployableAgent):
         self.logger.append(
                 state_option_value=net_output_0['q'][0,o0].item(),
         )
-
     def _train_actor(self):
         self._train_actor_6()
         #if self._steps <= 300_000:
@@ -1060,7 +1072,7 @@ class OptionCriticAgent(DeployableAgent):
         s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
 
         net_output_0 = self.net(s0)
-        #net_output_1 = self.net(s1)
+        net_output_1 = self.net(s1)
         net_output_target_0 = self.net_target(s0)
         net_output_target_1 = self.net_target(s1)
         policy0 = net_output_0
@@ -1082,21 +1094,32 @@ class OptionCriticAgent(DeployableAgent):
                 discounts=discounts
         )
         loss_policy = loss_policy.squeeze() # Should be a 0D tensor
+
         # Entropy
         action_probs = policy0['iop'].squeeze(0)[o0,:].softmax(0)
         entropy = -action_probs*torch.log(action_probs)
         loss_entropy = -0.01*entropy.sum(0) # Factor of 0.01 works in A2C
 
+        # Termination
+        termination_reg = self.termination_reg
+        q_current_option = net_output_1['q'][0,o0]
+        v = net_output_1['q'].max()
+        beta1 = net_output_1['beta'][0,o0]
+        advantage = (q_current_option-v+termination_reg).detach()
+        loss_term = (beta1*advantage).mean(0)
+
         # Accumulate loss
         self.policy_losses.append(loss_policy)
         self.entropy_losses.append(loss_entropy)
+        self.termination_losses.append(loss_term)
     def _train_actor_critic(self):
         """ Update actor using accumulated losses. """
         # Update policy network
         p_loss = torch.stack(self.policy_losses).mean(0)
         e_loss = torch.stack(self.entropy_losses).mean(0)
+        t_loss = torch.stack(self.termination_losses).mean(0)
         q_loss = torch.stack(self.critic_losses).mean(0)
-        loss = p_loss+e_loss+q_loss
+        loss = p_loss+e_loss+t_loss+q_loss
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -1107,12 +1130,13 @@ class OptionCriticAgent(DeployableAgent):
         # Clear lists
         self.policy_losses.clear()
         self.entropy_losses.clear()
+        self.termination_losses.clear()
         self.critic_losses.clear()
 
         # Logging
         self.logger.log(
                 policy_term_ent_loss=loss.item(),
-                #termination_loss=loss_term.item(),
+                termination_loss=t_loss.item(),
                 policy_loss=p_loss.item(),
                 entropy_loss=e_loss.item(),
                 critic_loss=q_loss.item(),
@@ -1190,6 +1214,9 @@ class OptionCriticAgent(DeployableAgent):
         else:
             self._current_option_duration[env_key] += 1
 
+        assert isinstance(option,int)
+        self._option_choice_count[env_key][option] += 1
+
         if testing:
             vals = pi['q']
             self.logger.append(
@@ -1248,25 +1275,29 @@ class OptionCriticAgent(DeployableAgent):
 
     def state_dict(self):
         return {
-                'qu_net': self.q_net.state_dict(),
-                'qu_net_target': self.q_net_target.state_dict(),
-                'policy_net': self.policy_net.state_dict(),
+                'net': self.net.state_dict(),
+                #'qu_net': self.q_net.state_dict(),
+                #'qu_net_target': self.q_net_target.state_dict(),
+                #'policy_net': self.policy_net.state_dict(),
 
-                'optimizer_qu': self.optimizer_q.state_dict(),
-                'optimizer_policy': self.optimizer_policy.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+                #'optimizer_qu': self.optimizer_q.state_dict(),
+                #'optimizer_policy': self.optimizer_policy.state_dict(),
 
                 'obs_stack': {k:os.state_dict() for k,os in self.obs_stack.items()},
-                'steps': self._steps,
+                'steps': self._steps, # TODO: subtract length of saved losses. Those losses can't be saved because the computation graphs won't be preserved, so we'll dump those and pretend uncount those transitions from the number of steps experienced. But then it'll be inconsistent with the step number in the experiment. How can we resolve this?
                 'training_steps': self._training_steps,
                 'logger': self.logger.state_dict(),
         }
     def load_state_dict(self, state):
         self.q_net.load_state_dict(state['q_net'])
-        self.q_net_target.load_state_dict(state['q_net_target'])
-        self.policy_net.load_state_dict(state['policy_net_target'])
+        #self.q_net.load_state_dict(state['q_net'])
+        #self.q_net_target.load_state_dict(state['q_net_target'])
+        #self.policy_net.load_state_dict(state['policy_net_target'])
 
-        self.optimizer_q.load_state_dict(state['optimizer_q'])
-        self.optimizer_policy.load_state_dict(state['optimizer_policy'])
+        self.optimizer.load_state_dict(state['optimizer'])
+        #self.optimizer_q.load_state_dict(state['optimizer_q'])
+        #self.optimizer_policy.load_state_dict(state['optimizer_policy'])
 
         for k,os_state in state['obs_stack'].items():
             self.obs_stack[k].load_state_dict(os_state)
@@ -1280,14 +1311,17 @@ class OptionCriticAgent(DeployableAgent):
         return {
                 'action_space': self.action_space,
                 'observation_space': self.observation_space,
-                'q_net': self.q_net.state_dict(),
-                'q_net_class': self.q_net.__class__,
-                'policy_net': self.policy_net.state_dict(),
-                'policy_net_class': self.policy_net.__class__,
+                'net': self.net.state_dict(),
+                'net_class': self.net.__class__,
+                #'q_net': self.q_net.state_dict(),
+                #'q_net_class': self.q_net.__class__,
+                #'policy_net': self.policy_net.state_dict(),
+                #'policy_net_class': self.policy_net.__class__,
         }
     def load_state_dict_deploy(self, state):
-        self.q_net.load_state_dict(state['qu_net'])
-        self.policy_net.load_state_dict(state['policy_net'])
+        self.net.load_state_dict(state['net'])
+        #self.q_net.load_state_dict(state['qu_net'])
+        #self.policy_net.load_state_dict(state['policy_net'])
 
 class OptionCriticAgentDebug1(OptionCriticAgent):
     """
@@ -1461,7 +1495,7 @@ def run_oc_debug_exp():
         'replay_buffer_size': 1,
         'atari': True,
         #'num_options': 6, # XXX: DEBUG
-        'num_options': 1, # XXX: DEBUG
+        'num_options': 2, # XXX: DEBUG
         'entropy_reg': 0.01, # XXX: DEBUG
     }
 
@@ -1537,12 +1571,12 @@ def run_oc_debug_exp():
                     'env_train': {'env_name': env_name, 'atari': True},
                     'train_env_keys': train_env_keys,
                     #'test_frequency': 50_000,
-                    #'save_model_frequency': 250_000,
+                    'save_model_frequency': 250_000,
                     #'test_frequency': 10_000,
                     #'save_model_frequency': 50_000,
                     'verbose': True,
                     'test_frequency': None,
-                    'save_model_frequency': None,
+                    #'save_model_frequency': None,
                 },
                 #trial_id='checkpointtest',
                 checkpoint_frequency=250_000,
