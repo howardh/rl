@@ -560,7 +560,7 @@ class OptionCriticAgent(DeployableAgent):
         #self.q_net.load_state_dict(state['qu_net'])
         #self.policy_net.load_state_dict(state['policy_net'])
 
-def run_oc_debug_exp():
+def run_atari():
     from rl.agent.option_critic import OptionCriticAgent # XXX: Doesn't work unless I import it? Why?
     #from rl.agent.option_critic import OptionCriticAgentDebug1 as OptionCriticAgent
     from rl.experiments.training.basic import TrainExperiment
@@ -571,17 +571,13 @@ def run_oc_debug_exp():
         'behaviour_eps': 0.02,
         'learning_rate': 1e-4,
         'update_frequency': 1,
-        #'target_update_frequency': 1_000,
         'target_update_frequency': 200,
         'polyak_rate': 1,
-        #'warmup_steps': 10_000,
         'warmup_steps': 0,
-        #'replay_buffer_size': 100_000,
         'replay_buffer_size': 1,
         'atari': True,
-        #'num_options': 6, # XXX: DEBUG
-        'num_options': 2, # XXX: DEBUG
-        'entropy_reg': 0.01, # XXX: DEBUG
+        'num_options': 1,
+        'entropy_reg': 0.01,
     }
 
     #params_dqn = {
@@ -603,21 +599,23 @@ def run_oc_debug_exp():
     #}
 
     params_debug = {
-            'discount_factor': 0.99,
-            'behaviour_eps': 0.02,
-            'learning_rate': 1e-4,
-            'update_frequency': 1,
-            'target_update_frequency': 1_000,
-            'polyak_rate': 1,
-            'warmup_steps': 100,
-            'replay_buffer_size': 1000,
-            'atari': True,
-            'num_options': 6,
+            **params_pong,
     }
 
-    env_name = 'PongNoFrameskip-v4'
+    #env_name = 'PongNoFrameskip-v4'
+    env_name = 'ALE/Pong-v5'
     #env_name = 'SeaquestNoFrameskip-v4'
     #env_name = 'MsPacmanNoFrameskip-v4'
+    env_config = {
+            'atari': True,
+            'config': {
+                'frameskip': 1,
+                'mode': 0,
+                'difficulty': 0,
+                'repeat_action_probability': 0.25,
+                #'render_mode': 'human',
+            }
+    }
     num_actors = 16
     train_env_keys = list(range(num_actors))
     debug = False
@@ -630,8 +628,8 @@ def run_oc_debug_exp():
                         'type': OptionCriticAgent,
                         'parameters': params_debug,
                     },
-                    'env_test': {'env_name': env_name, 'atari': True},
-                    'env_train': {'env_name': env_name, 'atari': True},
+                    'env_test': {'env_name': env_name, **env_config},
+                    'env_train': {'env_name': env_name, **env_config},
                     'train_env_keys': train_env_keys,
                     'verbose': True,
                     'test_frequency': None,
@@ -648,35 +646,23 @@ def run_oc_debug_exp():
                 config={
                     'agent': {
                         'type': OptionCriticAgent,
-                        #'parameters': params_option_critic,
                         'parameters': params_pong,
-                        #'parameters': params_debug,
                     },
-                    'env_test': {'env_name': env_name, 'atari': True},
-                    'env_train': {'env_name': env_name, 'atari': True},
+                    'env_test': {'env_name': env_name, **env_config},
+                    'env_train': {'env_name': env_name, **env_config},
                     'train_env_keys': train_env_keys,
-                    #'test_frequency': 50_000,
                     'save_model_frequency': 250_000,
-                    #'test_frequency': 10_000,
-                    #'save_model_frequency': 50_000,
                     'verbose': True,
                     'test_frequency': None,
-                    #'save_model_frequency': None,
                 },
                 #trial_id='checkpointtest',
                 checkpoint_frequency=250_000,
-                #checkpoint_frequency=None,
                 max_iterations=50_000_000,
-                #max_iterations=5_000_000,
                 verbose=True,
         )
         exp_runner.exp.logger.init_wandb({
-            'project': 'OptionCritic-%s' % env_name
+            'project': 'OptionCritic-%s' % env_name.replace('/','_') # W&B doesn't support project names with the '/' character
         })
-        #exp_runner.exp.agent.net.load_state_dict(torch.load('./oc-net-pong.pt'))
-        #exp_runner.exp.agent.net_target.load_state_dict(torch.load('./oc-net-pong.pt'))
-        #exp_runner.exp.agent.q_net.load_state_dict(torch.load('./oc-qnet.pt')) # XXX: DEBUG
-        #exp_runner.exp.agent.policy_net.load_state_dict(torch.load('./oc-polnet.pt')) # XXX: DEBUG
     exp_runner.run()
 
 def run_discrete():
@@ -749,5 +735,5 @@ def run_discrete():
     exp_runner.run()
 
 if __name__ == "__main__":
-    #run_oc_debug_exp()
-    run_discrete()
+    run_atari()
+    #run_discrete()
