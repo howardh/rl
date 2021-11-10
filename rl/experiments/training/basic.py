@@ -75,6 +75,7 @@ class TrainExperiment(Experiment):
 
         self.output_directory = output_directory
         self.test_frequency = config.get('test_frequency')
+        self.num_test_episodes = config.get('num_test_episodes', 5)
         self.save_model_frequency = config.get('save_model_frequency')
         self.verbose = config.get('verbose',False)
 
@@ -106,7 +107,7 @@ class TrainExperiment(Experiment):
             self._save_model(i)
         self._train(i)
     def _test(self,i):
-        test_results = [_run_test(self.env_test, self.agent, verbose=self.verbose) for _ in tqdm(range(5), desc='testing')]
+        test_results = [_run_test(self.env_test, self.agent, verbose=self.verbose) for _ in tqdm(range(self.num_test_episodes), desc='testing')]
         test_rewards = [x['total_reward'] for x in test_results]
         #action_values = np.mean(self.agent.logger[-1]['testing_action_value'])
         #tqdm.write(f'Iteration {i}\t Average reward: {avg}\t Action values: {action_values}')

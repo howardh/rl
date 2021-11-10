@@ -1,7 +1,8 @@
 import warnings
-from typing import Optional, Tuple, Generic, TypeVar
+from typing import Optional, Tuple, Generic, TypeVar, Union, Mapping
 from collections import defaultdict
 import copy
+import os
 
 import gym
 import gym.spaces
@@ -11,11 +12,11 @@ import torch.utils.data
 import torch.distributions
 import torch.optim
 import numpy as np
+import dill
 
 from experiment.logger import Logger, SubLogger
 
 from rl.agent.agent import DeployableAgent
-from rl.agent.replay_buffer import ReplayBuffer, AtariReplayBuffer
 from rl.agent.smdp.a2c import compute_advantage_policy_gradient, compute_mc_state_value_loss
 
 class QUNetworkCNN(torch.nn.Module):
@@ -184,7 +185,6 @@ class OptionCriticAgent(DeployableAgent):
             update_frequency : int = 4,
             batch_size : int = 32,
             warmup_steps : int = 50_000,
-            replay_buffer_size : int = 1_000_000,
             target_update_frequency : int = 100,
             polyak_rate : float = 1.,
             device = torch.device('cpu'),
@@ -194,9 +194,8 @@ class OptionCriticAgent(DeployableAgent):
             num_options : int = 8,
             termination_reg : float = 0.01, # From paper
             entropy_reg : float = 0, # XXX: Arbitrary value
-            #q_net : torch.nn.Module = None
+            net : torch.nn.Module = None,
             logger : Logger = None,
-            atari : bool = False,
             ):
         """
         Args:
@@ -232,24 +231,22 @@ class OptionCriticAgent(DeployableAgent):
         self._current_option = {} # Option that is currently executing
         self._current_option_duration = {} # How long the current option has been executing
 
-        if atari:
-            self.replay_buffer = AtariReplayBuffer(replay_buffer_size)
+        if net is not None:
+            self.net = net
         else:
-            self.replay_buffer = ReplayBuffer(replay_buffer_size)
-
-        if isinstance(observation_space,gym.spaces.Box):
-            self.net = OptionCriticNetworkCNN( # Termination, intra-option policy, and policy over options
-                    num_actions=action_space.n,
-                    num_options=num_options
-            ).to(self.device)
-        elif isinstance(observation_space,gym.spaces.Discrete):
-            self.net = OptionCriticNetworkDiscrete( # Termination, intra-option policy, and policy over options
-                    obs_size=observation_space.n,
-                    num_actions=self.action_space.n,
-                    num_options=num_options
-            ).to(self.device)
-        else:
-            raise NotImplementedError(f'Unsupported observation space: {type(self.observation_space)}')
+            if isinstance(observation_space,gym.spaces.Box):
+                self.net = OptionCriticNetworkCNN( # Termination, intra-option policy, and policy over options
+                        num_actions=action_space.n,
+                        num_options=num_options
+                ).to(self.device)
+            elif isinstance(observation_space,gym.spaces.Discrete):
+                self.net = OptionCriticNetworkDiscrete( # Termination, intra-option policy, and policy over options
+                        obs_size=observation_space.n,
+                        num_actions=self.action_space.n,
+                        num_options=num_options
+                ).to(self.device)
+            else:
+                raise NotImplementedError(f'Unsupported observation space: {type(self.observation_space)}')
         self.net_target = copy.deepcopy(self.net)
 
         self.policy_losses = []
@@ -284,8 +281,6 @@ class OptionCriticAgent(DeployableAgent):
             if not isinstance(self.logger, SubLogger):
                 self.logger.log(step=self._steps)
             
-            self.replay_buffer.add_transition(*transition)
-
             # Train each time something is added to the buffer
             self._train(env_key)
 
@@ -300,8 +295,6 @@ class OptionCriticAgent(DeployableAgent):
             # Reset
             self._current_option[env_key] = None
     def _train(self, env_key):
-        if len(self.replay_buffer) < self.warmup_steps:
-            return
         self._train_actor_acc_loss(env_key)
         self._train_critic_acc_loss(env_key)
         if len(self.policy_losses) < self.batch_size:
@@ -548,17 +541,37 @@ class OptionCriticAgent(DeployableAgent):
         return {
                 'action_space': self.action_space,
                 'observation_space': self.observation_space,
+                'num_options': self.num_options,
                 'net': self.net.state_dict(),
                 'net_class': self.net.__class__,
-                #'q_net': self.q_net.state_dict(),
-                #'q_net_class': self.q_net.__class__,
-                #'policy_net': self.policy_net.state_dict(),
-                #'policy_net_class': self.policy_net.__class__,
         }
     def load_state_dict_deploy(self, state):
         self.net.load_state_dict(state['net'])
-        #self.q_net.load_state_dict(state['qu_net'])
-        #self.policy_net.load_state_dict(state['policy_net'])
+
+def make_agent_from_deploy_state(state : Union[str,Mapping], device : torch.device = torch.device('cpu')) -> OptionCriticAgent:
+    if isinstance(state, str): # If it's a string, then it's the filename to the dilled state
+        filename = state
+        if not os.path.isfile(filename):
+            raise Exception('No file found at %s' % filename)
+        with open(filename, 'rb') as f:
+            state = dill.load(f)
+    if not isinstance(state,Mapping):
+        raise ValueError('State is expected to be a dictionary. Found a %s.' % type(state))
+
+    cls = state['net_class']
+    if cls is OptionCriticNetworkCNN:
+        net = OptionCriticNetworkCNN(state['action_space'].n, state['num_options']).to(device)
+    else:
+        raise Exception('Unable to initialize model of type %s' % cls)
+
+    agent = OptionCriticAgent(
+            action_space=state['action_space'],
+            observation_space=state['observation_space'],
+            num_options=state['num_options'],
+            net = net,
+    )
+    agent.load_state_dict_deploy(state)
+    return agent
 
 def run_atari():
     from rl.agent.option_critic import OptionCriticAgent # XXX: Doesn't work unless I import it? Why?
@@ -610,7 +623,7 @@ def run_atari():
             'atari': True,
             'config': {
                 'frameskip': 1,
-                'mode': 0,
+                'mode': 1,
                 'difficulty': 0,
                 'repeat_action_probability': 0.25,
                 #'render_mode': 'human',
