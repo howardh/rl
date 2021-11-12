@@ -16,8 +16,9 @@ import dill
 
 from experiment.logger import Logger, SubLogger
 
+from rl.utils import default_state_dict, default_load_state_dict
 from rl.agent.agent import DeployableAgent
-from rl.agent.smdp.a2c import compute_advantage_policy_gradient, compute_mc_state_value_loss
+from rl.agent.smdp.a2c import compute_advantage_policy_gradient, compute_entropy, compute_mc_state_value_loss
 
 class QUNetworkCNN(torch.nn.Module):
     def __init__(self, num_actions, num_options):
@@ -173,6 +174,90 @@ class ObservationStack(Generic[ObsType,ActionType]):
         self.prev_a = state['prev_a']
         self.curr_a = state['curr_a']
 
+class ObservationStack2(Generic[ObsType,ActionType]):
+    def __init__(self, max_len=None, default_action=None, default_reward=None) -> None:
+        """
+        Args:
+            max_len: The maximum number of transitions to store
+            default_action: This action is added to `action_history` at the end of an episode as padding.
+            default_reward: The reward that is added to `reward_history` on the first step of an episode.
+        """
+        self.max_len = max_len
+        self.default_action = default_action
+        self.default_reward = default_reward
+        self.obs_history = []
+        self.action_history = []
+        self.reward_history = []
+        self.terminal_history = []
+    def __len__(self):
+        return len(self.obs_history)
+    def append_obs(self, obs : ObsType, reward : Optional[float], terminal : bool):
+        # Handle boundary between episodes
+        if reward is None:
+            if len(self.obs_history) != 0:
+                # The last episode just finished, so we receive a new observation to start the episode without an action in between.
+                # Add an action to pad the actions list.
+                self.append_action(self.default_action)
+            reward = self.default_reward
+
+        # Make sure the observations and actions are in sync
+        assert len(self.obs_history) == len(self.action_history)
+
+        # Save data
+        self.obs_history.append(obs)
+        self.reward_history.append(reward)
+        self.terminal_history.append(terminal)
+
+        # Enforce max length
+        if self.max_len is not None and len(self.obs_history) > self.max_len+1:
+            self.obs_history = self.obs_history[1:]
+            self.reward_history = self.reward_history[1:]
+            self.terminal_history = self.terminal_history[1:]
+            self.action_history = self.action_history[1:]
+    def append_action(self, action : ActionType):
+        assert len(self.obs_history) == len(self.action_history)+1
+        self.action_history.append(action)
+    def get_transition(self) -> Optional[Tuple[ObsType,ActionType,float,ObsType,bool]]:
+        """ Return the most recent transition tuple.
+
+        Returns:
+            Tuple: (`s0`, `a0`, `r1`, `s1`, `t1`)
+
+                - `s0`: Starting state
+                - `a0`: Action taken at state `s0`
+                - `r1`: Reward obtained from taking action `a0` at state `s0` and transitioning to `s1`
+                - `s1`: State reached by taking action `a0` at state `s0`
+                - `t1`: `True` if this transition is terminal, and `False` otherwise.
+            If no transition is available, return None.
+        """
+        num_obs = len(self.obs_history)
+        num_actions = len(self.action_history)
+        if num_obs < 2:
+            return None
+        if num_obs-num_actions > 1:
+            raise Exception('Observations and actions out of sync.')
+        i = num_obs-2
+        s0 = self.obs_history[i]
+        a0 = self.action_history[i]
+        s1 = self.obs_history[i+1]
+        r1 = self.reward_history[i+1]
+        t1 = self.terminal_history[i+1]
+        return s0, a0, r1, s1, t1
+    def get_obs(self) -> ObsType:
+        if len(self.obs_history) == 0:
+            raise Exception('No observation available.')
+        return self.obs_history[-1]
+    def clear(self):
+        i = len(self.obs_history)-1
+        self.obs_history = self.obs_history[i:]
+        self.reward_history = self.reward_history[i:]
+        self.terminal_history = self.terminal_history[i:]
+        self.action_history = self.action_history[i:]
+    def state_dict(self):
+        return default_state_dict(self, ['obs_history','action_history','reward_history','terminal_history'])
+    def load_state_dict(self,state):
+        default_load_state_dict(self,state)
+
 class OptionCriticAgent(DeployableAgent):
     """
     On-policy implementation of Option-Critic.
@@ -184,7 +269,6 @@ class OptionCriticAgent(DeployableAgent):
             learning_rate : float = 2.5e-4,
             update_frequency : int = 4,
             batch_size : int = 32,
-            warmup_steps : int = 50_000,
             target_update_frequency : int = 100,
             polyak_rate : float = 1.,
             device = torch.device('cpu'),
@@ -193,7 +277,7 @@ class OptionCriticAgent(DeployableAgent):
             eps_annealing_steps : int = 1_000_000,
             num_options : int = 8,
             termination_reg : float = 0.01, # From paper
-            entropy_reg : float = 0, # XXX: Arbitrary value
+            entropy_reg : float = 0.01, # XXX: Arbitrary value
             net : torch.nn.Module = None,
             logger : Logger = None,
             ):
@@ -214,7 +298,6 @@ class OptionCriticAgent(DeployableAgent):
         self.discount_factor = discount_factor
         self.update_frequency = update_frequency
         self.batch_size = batch_size
-        self.warmup_steps = warmup_steps
         self.target_update_frequency = target_update_frequency
         self.polyak_rate = polyak_rate
         self.device = device
@@ -225,7 +308,7 @@ class OptionCriticAgent(DeployableAgent):
         self.entropy_reg = entropy_reg
 
         # State (training)
-        self.obs_stack = defaultdict(lambda: ObservationStack())
+        self.obs_stack = defaultdict(lambda: ObservationStack2(default_action=(0,0)))
         self._steps = 0 # Number of steps experienced
         self._training_steps = 0 # Number of training steps experienced
         self._current_option = {} # Option that is currently executing
@@ -256,6 +339,9 @@ class OptionCriticAgent(DeployableAgent):
 
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
 
+        self._train_env_keys = set()
+        self._num_training_transitions = 0
+
         # Logging
         if logger is None:
             self.logger = Logger(key_name='step', allow_implicit_key=True)
@@ -267,6 +353,17 @@ class OptionCriticAgent(DeployableAgent):
     def observe(self, obs, reward=None, terminal=False, testing=False, env_key=None):
         if env_key is None:
             env_key = testing
+        if not testing:
+            # Count the number of transitions available for training
+            self._train_env_keys.add(env_key)
+            if len(self.obs_stack[env_key].obs_history) != 0:
+                self._num_training_transitions += 1
+        else:
+            # We don't need to store more than one transition on testing environments because we're not training on that data.
+            self.obs_stack[env_key].max_len = 1
+            # Make sure we're not reusing the same key for testing and training
+            if env_key in self._train_env_keys:
+                raise Exception(f'Environment key "{env_key}" was previously used in training. The same key cannot be reused for testing.')
 
         # Reward clipping
         if reward is not None:
@@ -282,7 +379,7 @@ class OptionCriticAgent(DeployableAgent):
                 self.logger.log(step=self._steps)
             
             # Train each time something is added to the buffer
-            self._train(env_key)
+            #self._train(env_key)
 
         if terminal:
             # Logging
@@ -294,14 +391,140 @@ class OptionCriticAgent(DeployableAgent):
             self._option_choice_count[env_key] = [0]*self.num_options # Reset count
             # Reset
             self._current_option[env_key] = None
+
+        # Train if appropriate
+        if self._num_training_transitions >= self.batch_size:
+            self._train2()
     def _train(self, env_key):
         self._train_actor_acc_loss(env_key)
         self._train_critic_acc_loss(env_key)
         if len(self.policy_losses) < self.batch_size:
             return
-        #self._train_critic_acc_loss()
         self._train_actor_critic()
         self._training_steps += 1
+    def _train2(self):
+        all_losses = [
+                self._compute_loss(env_key)
+                for env_key in self._train_env_keys
+        ]
+        loss_policy = torch.stack([l['policy'] for l in all_losses]).mean()
+        loss_entropy = torch.stack([l['entropy'] for l in all_losses]).mean()
+        loss_termination = torch.stack([l['termination'] for l in all_losses]).mean()
+        loss_q = torch.stack([l['q'] for l in all_losses]).mean()
+
+        loss = loss_policy+loss_entropy+loss_termination+loss_q
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self._training_steps += 1
+
+        self._update_target()
+
+        # Clear lists
+        for env_key in self._train_env_keys:
+            self.obs_stack[env_key].clear()
+        self._num_training_transitions = 0
+
+        # Logging
+        self.logger.log(
+                total_loss=loss.item(),
+                termination_loss=loss_termination.item(),
+                policy_loss=loss_policy.item(),
+                entropy_loss=loss_entropy.item(),
+                critic_loss=loss_q.item(),
+        )
+    def _compute_loss(self, env_key):
+        obs_stack = self.obs_stack[env_key]
+        net_output = [
+                self.net(torch.tensor(obs).to(self.device).unsqueeze(0).float()/self.obs_scale)
+                for obs in obs_stack.obs_history
+        ]
+        net_output_target = [
+                self.net_target(torch.tensor(obs).to(self.device).unsqueeze(0).float()/self.obs_scale)
+                for obs in obs_stack.obs_history
+        ]
+        state_values = [
+                out['q'].squeeze() for out in net_output
+        ]
+        target_state_values = [
+                out['q'].max() for out in net_output_target
+        ]
+        if isinstance(self.action_space,gym.spaces.Discrete):
+            log_action_probs = [
+                    out['iop'].log_softmax(2)[0,o,a]
+                    for out,(o,a) in zip(net_output,obs_stack.action_history)
+            ]
+            entropy = [
+                    compute_entropy(out['iop'].log_softmax(2).squeeze())
+                    for out in net_output
+            ]
+        else:
+            raise NotImplementedError()
+        # Policy loss
+        loss_policy = compute_advantage_policy_gradient(
+                log_action_probs=log_action_probs,
+                target_state_values=target_state_values, # FIXME: I think this is supposed to be a weighted average of the current option value and the max, weighted by the termination probability
+                rewards=obs_stack.reward_history,
+                terminals=obs_stack.terminal_history,
+                discounts=[self.discount_factor]*len(obs_stack)
+        )
+        # Entropy loss
+        loss_entropy = -self.entropy_reg*torch.stack(entropy).mean()
+        # Termination loss
+        def compute_termination_loss(
+                termination_prob,
+                option_values_current,
+                option_values_max,
+                termination_reg):
+            """
+            Option termination gradient.
+
+            Given a sequence of length n, we observe states/options/actions/rewards r_0,s_0,o_0,a_0,r_1,s_1,o_1,a_1,r_2,s_2,...,r_{n-1},s_{n-1},o_{n-1},a_{n-1}.
+
+            Args:
+                termination_prob: A list of n elements. The element at index i is a ???-dimensional tensor containing the predicted probability of terminating option o_{i-1} at state s_i.
+                option_values_current: A list of n elements. The element at index i is the value of option o_{i-1} at state s_i.
+                option_values_max: A list of n elements. The element at index i is the largest option value over all options at state s_i.
+                termination_reg (float): A regularization constant to ensure that termination probabilities do not all converge on 1. Value must be greater than 0.
+            """
+            option_values_current = torch.stack(option_values_current)
+            option_values_max = torch.stack(option_values_max)
+            termination_prob = torch.stack(termination_prob)
+            advantage = option_values_current-option_values_max+termination_reg
+            advantage = advantage.detach()
+            loss = (termination_prob*advantage).mean(0)
+            return loss
+        loss_term = compute_termination_loss(
+                termination_prob = [
+                    out['beta'][0,o]
+                    for (out,(o,_)) in zip(net_output[1:],obs_stack.action_history)
+                ],
+                option_values_current = [
+                    out['q'][0,o]
+                    for (out,(o,_)) in zip(net_output[1:],obs_stack.action_history)
+                ],
+                option_values_max = [
+                    out['q'][0].max()
+                    for out in net_output[1:]
+                ],
+                termination_reg = self.termination_reg
+        )
+        # Q loss
+        loss_q = compute_mc_state_value_loss(
+                state_values = state_values,
+                last_state_target_value = float(target_state_values[-1].item()),
+                rewards=obs_stack.reward_history,
+                terminals=obs_stack.terminal_history,
+                discounts=[self.discount_factor]*len(obs_stack)
+        )
+        return {
+                'policy': loss_policy,
+                'entropy': loss_entropy,
+                'termination': loss_term,
+                'q': loss_q,
+        }
     def _train_critic_acc_loss(self, env_key):
         """ Using A2C state value implementation. Accumulate loss without updating. """
         transition = self.obs_stack[env_key].get_transition()
@@ -330,10 +553,10 @@ class OptionCriticAgent(DeployableAgent):
         )
         self.critic_losses.append(loss_q)
 
-        # Logging
-        self.logger.append(
-                state_option_value=net_output_0['q'][0,o0].item(),
-        )
+        ## Logging
+        #self.logger.append(
+        #        state_option_value=net_output_0['q'][0,o0].item(),
+        #)
     def _train_actor_acc_loss(self, env_key):
         """ Using A2C policy gradient implementation. Termination is ignored. Accumulate loss without updating. """
         transition = self.obs_stack[env_key].get_transition()
@@ -421,8 +644,6 @@ class OptionCriticAgent(DeployableAgent):
         if self._training_steps % self.target_update_frequency != 0:
             return
         tau = self.polyak_rate
-        #for p1,p2 in zip(self.q_net_target.parameters(), self.q_net.parameters()):
-        #    p1.data = (1-tau)*p1+tau*p2
         for p1,p2 in zip(self.net_target.parameters(), self.net.parameters()):
             p1.data = (1-tau)*p1+tau*p2
     def act(self, testing=False, env_key=None):
@@ -494,14 +715,13 @@ class OptionCriticAgent(DeployableAgent):
                     #testing_action_value=vals[0,option,action].item(),
                     testing_option_value=vals[0,option].item(),
             )
-        #else:
-        #    pq = self._pretrained_q_net(obs)
-        #    self.logger.log(
-        #            #step=self._steps,
-        #            #action_value=self.q_net(obs)[0,option,action].item(),
-        #            entropy=dist.entropy().item(),
-        #            action_value_diff=(pq.max()-(action_probs.squeeze() * pq.squeeze()).sum()).item()
-        #    )
+        else:
+            self.logger.log(
+                state_option_value=pi['q'][0,option].item(),
+                    #action_value=self.q_net(obs)[0,option,action].item(),
+                    #entropy=dist.entropy().item(),
+                    #action_value_diff=(pq.max()-(action_probs.squeeze() * pq.squeeze()).sum()).item()
+            )
 
         return action
     def _compute_annealed_epsilon(self, max_steps=1_000_000):
@@ -583,12 +803,10 @@ def run_atari():
         'discount_factor': 0.99,
         'behaviour_eps': 0.02,
         'learning_rate': 1e-4,
+        'batch_size': 128,
         'update_frequency': 1,
         'target_update_frequency': 200,
         'polyak_rate': 1,
-        'warmup_steps': 0,
-        'replay_buffer_size': 1,
-        'atari': True,
         'num_options': 1,
         'entropy_reg': 0.01,
     }
@@ -623,7 +841,7 @@ def run_atari():
             'atari': True,
             'config': {
                 'frameskip': 1,
-                'mode': 1,
+                'mode': 0,
                 'difficulty': 0,
                 'repeat_action_probability': 0.25,
                 #'render_mode': 'human',
