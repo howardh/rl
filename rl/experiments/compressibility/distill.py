@@ -6,7 +6,10 @@ import numpy as np
 import torch
 import torch.utils.data
 from tqdm import tqdm
-import pandas as pd
+try:
+    import pandas as pd
+except:
+    pass
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt

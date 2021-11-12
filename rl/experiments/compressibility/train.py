@@ -16,7 +16,6 @@ def get_params():
         'update_frequency': 1,
         'target_update_frequency': 200,
         'polyak_rate': 1,
-        'warmup_steps': 0,
         'num_options': 1,
         'entropy_reg': 0.01,
     }

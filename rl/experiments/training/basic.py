@@ -18,7 +18,7 @@ from experiment.plotter import plot
 from rl.utils import default_state_dict, default_load_state_dict
 import rl.debug_tools.frozenlake
 
-def _run_test(env, agent, verbose=False):
+def _run_test(env, agent, verbose=False, env_key='test'):
     steps = itertools.count()
     if verbose:
         steps = tqdm(steps, desc='test episode')
@@ -27,11 +27,11 @@ def _run_test(env, agent, verbose=False):
     total_steps = 0
 
     obs = env.reset()
-    agent.observe(obs, testing=True)
+    agent.observe(obs, testing=True, env_key=env_key)
     for total_steps in steps:
-        obs, reward, done, _ = env.step(agent.act(testing=True))
+        obs, reward, done, _ = env.step(agent.act(testing=True, env_key=env_key))
         total_reward += reward
-        agent.observe(obs, reward, done, testing=True)
+        agent.observe(obs, reward, done, testing=True, env_key=env_key)
         if done:
             break
     env.close()

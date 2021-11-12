@@ -14,8 +14,7 @@ import numpy as np
 import torch
 import dill
 import gym
-import ale_py
-import ale_py.gym.environment
+import gym.envs.atari.environment
 
 try:
     import pandas
@@ -229,7 +228,7 @@ def default_load_state_dict(obj, state):
                     raise Exception(f'Object {obj} does not have attribute {k}')
 
 def get_env_state(env):
-    if isinstance(env.unwrapped,ale_py.gym.environment.ALGymEnv):
+    if isinstance(env.unwrapped,gym.envs.atari.environment.AtariEnv):
         # https://github.com/openai/gym/issues/402#issuecomment-260744758
         return env.unwrapped.ale.cloneSystemState()
     env_type = type(env.unwrapped)
