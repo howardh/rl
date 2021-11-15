@@ -437,35 +437,40 @@ class OptionCriticAgent(DeployableAgent):
         )
     def _compute_loss(self, env_key):
         obs_stack = self.obs_stack[env_key]
-        net_output = [
-                self.net(torch.tensor(obs).to(self.device).unsqueeze(0).float()/self.obs_scale)
-                for obs in obs_stack.obs_history
-        ]
-        net_output_target = [
-                self.net_target(torch.tensor(obs).to(self.device).unsqueeze(0).float()/self.obs_scale)
-                for obs in obs_stack.obs_history
-        ]
-        state_values = [
-                out['q'].squeeze() for out in net_output
-        ]
-        target_state_values = [
-                out['q'].max() for out in net_output_target
-        ]
+
+        obs = torch.stack([
+            torch.tensor(o,device=self.device)
+            for o in obs_stack.obs_history
+        ]).float()/self.obs_scale
+        num_obs = obs.shape[0]
+        num_actions = num_obs-1
+        batch0 = range(num_actions)
+        batch1 = range(1,num_actions+1)
+        option,action = zip(*obs_stack.action_history)
+
+        net_output = self.net(obs)
+        net_output_target = self.net_target(obs)
+        state_values = net_output['q']
+        target_state_values_max = net_output_target['q'].max(1)[0]
+        beta1 = net_output['beta'][batch1,option]
+        qt1 = net_output_target['q'][batch1,option] # Q target of current option at the next state
+        qtm1 = net_output_target['q'][batch1,:].max(1)[0] # Q target max
+        target_state_values_expected = torch.cat([
+            torch.tensor([0],device=self.device), # Prepend a 0 as the value of the first state obs[0]. This value is not used anywhere, but needed to make the tensors align properly.
+            (1-beta1)*qt1 + beta1*qtm1
+        ])
         if isinstance(self.action_space,gym.spaces.Discrete):
-            log_action_probs = [
-                    out['iop'].log_softmax(2)[0,o,a]
-                    for out,(o,a) in zip(net_output,obs_stack.action_history)
-            ]
+            log_action_probs = net_output['iop'].log_softmax(2)[batch0,option,action]
             entropy = [
-                    compute_entropy(out['iop'].log_softmax(2).squeeze())
-                    for out in net_output
+                    compute_entropy(iop.log_softmax(1).squeeze())
+                    for iop in net_output['iop']
             ]
         else:
             raise NotImplementedError()
         # Policy loss
         loss_policy = compute_advantage_policy_gradient(
                 log_action_probs=log_action_probs,
-                target_state_values=target_state_values, # FIXME: I think this is supposed to be a weighted average of the current option value and the max, weighted by the termination probability
+                target_state_values=target_state_values_expected,
                 rewards=obs_stack.reward_history,
                 terminals=obs_stack.terminal_history,
                 discounts=[self.discount_factor]*len(obs_stack)
@@ -489,32 +494,23 @@ class OptionCriticAgent(DeployableAgent):
                 option_values_max: A list of n elements. The element at index i is the largest option value over all options at state s_i.
                 termination_reg (float): A regularization constant to ensure that termination probabilities do not all converge on 1. Value must be greater than 0.
             """
-            option_values_current = torch.stack(option_values_current)
-            option_values_max = torch.stack(option_values_max)
-            termination_prob = torch.stack(termination_prob)
+            #option_values_current = torch.stack(option_values_current)
+            #option_values_max = torch.stack(option_values_max)
+            #termination_prob = torch.stack(termination_prob)
             advantage = option_values_current-option_values_max+termination_reg
             advantage = advantage.detach()
             loss = (termination_prob*advantage).mean(0)
             return loss
         loss_term = compute_termination_loss(
-                termination_prob = [
-                    out['beta'][0,o]
-                    for (out,(o,_)) in zip(net_output[1:],obs_stack.action_history)
-                ],
-                option_values_current = [
-                    out['q'][0,o]
-                    for (out,(o,_)) in zip(net_output[1:],obs_stack.action_history)
-                ],
-                option_values_max = [
-                    out['q'][0].max()
-                    for out in net_output[1:]
-                ],
+                termination_prob = beta1,
+                option_values_current = net_output['q'][batch1,option],
+                option_values_max = net_output['q'][batch1,:].max(1)[0],
                 termination_reg = self.termination_reg
         )
         # Q loss
         loss_q = compute_mc_state_value_loss(
                 state_values = state_values,
-                last_state_target_value = float(target_state_values[-1].item()),
+                last_state_target_value = float(target_state_values_max[-1].item()),
                 rewards=obs_stack.reward_history,
                 terminals=obs_stack.terminal_history,
                 discounts=[self.discount_factor]*len(obs_stack)
@@ -803,7 +799,7 @@ def run_atari():
         'discount_factor': 0.99,
         'behaviour_eps': 0.02,
         'learning_rate': 1e-4,
-        'batch_size': 128,
+        'batch_size': 32,
         'update_frequency': 1,
         'target_update_frequency': 200,
         'polyak_rate': 1,
@@ -883,10 +879,11 @@ def run_atari():
                     'env_train': {'env_name': env_name, **env_config},
                     'train_env_keys': train_env_keys,
                     'save_model_frequency': 250_000,
+                    #'slurm_split': True,
                     'verbose': True,
                     'test_frequency': None,
                 },
-                #trial_id='checkpointtest',
+                #trial_id='checkpointtes128t',
                 checkpoint_frequency=250_000,
                 max_iterations=50_000_000,
                 verbose=True,
