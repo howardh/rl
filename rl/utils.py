@@ -235,7 +235,7 @@ def get_env_state(env):
     raise NotImplementedError(f'Unable to handle environment of type {env_type}')
 
 def set_env_state(env, state):
-    if isinstance(env.unwrapped,ale_py.gym.environment.ALGymEnv):
+    if isinstance(env.unwrapped,gym.envs.atari.environment.AtariEnv):
         # https://github.com/openai/gym/issues/402#issuecomment-260744758
         env.unwrapped.ale.restoreSystemState(state)
         return

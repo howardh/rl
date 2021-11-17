@@ -57,6 +57,7 @@ def make_app():
     def run(exp_name : str,
             trial_id : Optional[str] = None,
             results_directory : Optional[str] = None,
+            slurm : bool = typer.Option(False, '--slurm'),
             debug : bool = typer.Option(False, '--debug')):
 
         if trial_id is None:
@@ -64,8 +65,11 @@ def make_app():
             #slurm_job_id = os.environ.get('SLURM_ARRAY_JOB_ID')
             slurm_array_task_id = os.environ.get('SLURM_ARRAY_TASK_ID')
             trial_id = slurm_job_id
-            if slurm_array_task_id is not None:
-                trial_id = '%s_%s' % (slurm_job_id, slurm_array_task_id)
+            if slurm_job_id is not None:
+                if slurm_array_task_id is not None:
+                    trial_id = f'{slurm_job_id}_{slurm_array_task_id}'
+                else:
+                    trial_id = f'{slurm_job_id}'
 
         config = get_params()[exp_name]
         if debug:
@@ -73,17 +77,20 @@ def make_app():
                     TrainExperiment,
                     config={
                         **config,
-                        'save_model_frequency': 5,
+                        #'save_model_frequency': 5,
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    checkpoint_frequency=None,
-                    max_iterations=15,
+                    #checkpoint_frequency=3,
+                    #max_iterations=15,
+                    checkpoint_frequency=100,
+                    max_iterations=10_000,
+                    slurm_split=slurm,
                     verbose=True,
             )
-            exp_runner.exp.logger.init_wandb({
-                'project': f'Compressibility-train-{exp_name} (debug)',
-            })
+            #exp_runner.exp.logger.init_wandb({
+            #    'project': f'Compressibility-train-{exp_name} (debug)',
+            #})
         else:
             exp_runner = make_experiment_runner(
                     TrainExperiment,
@@ -92,6 +99,7 @@ def make_app():
                     trial_id=trial_id,
                     checkpoint_frequency=250_000,
                     max_iterations=50_000_000,
+                    slurm_split=slurm,
                     verbose=True,
             )
             exp_runner.exp.logger.init_wandb({

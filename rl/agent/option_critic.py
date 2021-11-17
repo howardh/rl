@@ -450,15 +450,23 @@ class OptionCriticAgent(DeployableAgent):
 
         net_output = self.net(obs)
         net_output_target = self.net_target(obs)
-        state_values = net_output['q']
-        target_state_values_max = net_output_target['q'].max(1)[0]
+        q = net_output['q']
+        qt = net_output_target['q']
+
+        #target_state_values_max = qt.max(1)[0]
         beta1 = net_output['beta'][batch1,option]
-        qt1 = net_output_target['q'][batch1,option] # Q target of current option at the next state
-        qtm1 = net_output_target['q'][batch1,:].max(1)[0] # Q target max
-        target_state_values_expected = torch.cat([
-            torch.tensor([0],device=self.device), # Prepend a 0 as the value of the first state obs[0]. This value is not used anywhere, but needed to make the tensors align properly.
-            (1-beta1)*qt1 + beta1*qtm1
+        qt1 = qt[batch1,option] # Q target of current option at the next state
+        qtm1 = qt[batch1,:].max(1)[0] # Q target max
+        last_beta = net_output['beta'][-1,option[-1]] # Probability of terminating option n-2 at state n-1. Note that there is no distinct option associated with the last state. It is not a mistake that the indices are misaligned.
+        target_state_value_last = (1-last_beta)*qt[-1,option[-1]]+last_beta*qt[-1,:].max()
+        target_state_values = torch.cat([
+            net_output_target['q'][batch0,option],
+            target_state_value_last.unsqueeze(0) # Compute as an expectation because we don't know yet if the option will be terminated
         ])
+        #target_state_values_expected = torch.cat([
+        #    torch.tensor([0],device=self.device), # TODO: Need the value of the starting state
+        #    (1-beta1)*qt1 + beta1*qtm1
+        #])
         if isinstance(self.action_space,gym.spaces.Discrete):
             log_action_probs = net_output['iop'].log_softmax(2)[batch0,option,action]
             entropy = [
@@ -470,7 +478,7 @@ class OptionCriticAgent(DeployableAgent):
         # Policy loss
         loss_policy = compute_advantage_policy_gradient(
                 log_action_probs=log_action_probs,
-                target_state_values=target_state_values_expected,
+                target_state_values=target_state_values,
                 rewards=obs_stack.reward_history,
                 terminals=obs_stack.terminal_history,
                 discounts=[self.discount_factor]*len(obs_stack)
@@ -509,8 +517,9 @@ class OptionCriticAgent(DeployableAgent):
         )
         # Q loss
         loss_q = compute_mc_state_value_loss(
-                state_values = state_values,
-                last_state_target_value = float(target_state_values_max[-1].item()),
+                state_values = q,
+                #last_state_target_value = float(target_state_values_max[-1].item()),
+                last_state_target_value = target_state_value_last.item(),
                 rewards=obs_stack.reward_history,
                 terminals=obs_stack.terminal_history,
                 discounts=[self.discount_factor]*len(obs_stack)
@@ -795,6 +804,9 @@ def run_atari():
     from rl.experiments.training.basic import TrainExperiment
     from experiment import make_experiment_runner
 
+    #import pprint#
+    #pprint.pprint(dict(os.environ))
+
     params_pong = {
         'discount_factor': 0.99,
         'behaviour_eps': 0.02,
@@ -879,13 +891,13 @@ def run_atari():
                     'env_train': {'env_name': env_name, **env_config},
                     'train_env_keys': train_env_keys,
                     'save_model_frequency': 250_000,
-                    #'slurm_split': True,
                     'verbose': True,
                     'test_frequency': None,
                 },
                 #trial_id='checkpointtes128t',
                 checkpoint_frequency=250_000,
                 max_iterations=50_000_000,
+                #slurm_split=True,
                 verbose=True,
         )
         exp_runner.exp.logger.init_wandb({

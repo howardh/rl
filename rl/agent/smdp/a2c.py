@@ -303,7 +303,7 @@ def compute_mc_state_value_loss(
         v_target.detach()
         # Loss
         loss = (v_pred-v_target)**2
-        losses.append(loss)
+        losses.append(loss.squeeze())
     return torch.stack(losses)
 def compute_mc_state_value_loss_tensor(
         state_values : List[torch.Tensor],

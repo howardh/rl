@@ -382,6 +382,7 @@ def make_app():
     @app.command()
     def run(filename : str,
             results_directory : Optional[str] = None,
+            slurm : bool = typer.Option(False, '--slurm'),
             debug : bool = typer.Option(False, '--debug')):
 
         exp_name = 'distillation'
@@ -393,6 +394,7 @@ def make_app():
                     verbose=True,
                     checkpoint_frequency=5,
                     max_iterations=30*5,
+                    slurm_split=slurm,
                     results_directory=results_directory,
                     config={
                         'teacher_filename': filename
@@ -404,6 +406,7 @@ def make_app():
                     verbose=True,
                     checkpoint_frequency=50_000,
                     max_iterations=1_000_000,
+                    slurm_split=slurm,
                     results_directory=results_directory,
                     config={
                         'teacher_filename': filename

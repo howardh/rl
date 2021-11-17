@@ -16,6 +16,7 @@ def make_app():
             model_filename : str,
             trial_id : Optional[str] = None,
             results_directory : Optional[str] = None,
+            slurm : bool = typer.Option(False, '--slurm'),
             debug : bool = typer.Option(False, '--debug')):
 
         if trial_id is None:
@@ -37,8 +38,9 @@ def make_app():
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    checkpoint_frequency=None,
+                    checkpoint_frequency=10,
                     max_iterations=100,
+                    slurm_split=slurm,
                     verbose=True,
             )
             exp_runner.exp.logger.init_wandb({
@@ -55,6 +57,7 @@ def make_app():
                     trial_id=trial_id,
                     checkpoint_frequency=250_000,
                     max_iterations=1_000_000,
+                    slurm_split=slurm,
                     verbose=True,
             )
             exp_runner.exp.logger.init_wandb({
