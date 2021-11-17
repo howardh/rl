@@ -455,18 +455,12 @@ class OptionCriticAgent(DeployableAgent):
 
         #target_state_values_max = qt.max(1)[0]
         beta1 = net_output['beta'][batch1,option]
-        qt1 = qt[batch1,option] # Q target of current option at the next state
-        qtm1 = qt[batch1,:].max(1)[0] # Q target max
         last_beta = net_output['beta'][-1,option[-1]] # Probability of terminating option n-2 at state n-1. Note that there is no distinct option associated with the last state. It is not a mistake that the indices are misaligned.
         target_state_value_last = (1-last_beta)*qt[-1,option[-1]]+last_beta*qt[-1,:].max()
         target_state_values = torch.cat([
             net_output_target['q'][batch0,option],
             target_state_value_last.unsqueeze(0) # Compute as an expectation because we don't know yet if the option will be terminated
         ])
-        #target_state_values_expected = torch.cat([
-        #    torch.tensor([0],device=self.device), # TODO: Need the value of the starting state
-        #    (1-beta1)*qt1 + beta1*qtm1
-        #])
         if isinstance(self.action_space,gym.spaces.Discrete):
             log_action_probs = net_output['iop'].log_softmax(2)[batch0,option,action]
             entropy = [

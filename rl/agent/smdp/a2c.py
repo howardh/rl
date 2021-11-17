@@ -1,7 +1,7 @@
 import copy
 import itertools
 from collections import defaultdict
-from typing import Dict, Generic, TypeVar, Optional, Tuple, List, Any
+from typing import Dict, Generic, TypeVar, Optional, Tuple, List, Any, Union
 from typing_extensions import TypedDict
 
 import numpy as np
@@ -350,7 +350,7 @@ def compute_mc_state_value_loss_tensor_batch(
     return loss
 def compute_advantage_policy_gradient(
         log_action_probs : List[torch.Tensor],
-        target_state_values : List[torch.Tensor],
+        target_state_values : Union[List[torch.Tensor],torch.Tensor],
         rewards : List[Optional[float]],
         terminals : List[bool],
         discounts : List[float],
@@ -361,12 +361,75 @@ def compute_advantage_policy_gradient(
 
     Args:
         log_action_probs: A list of length n (last element is ignored). The element at index i is a 0-dimensional tensor containing the log probability of selection action a_i at state s_i.
-        target_state_values: A list of length n. The element at index i is the state value of state s_i as predicted by the target Q network.
+        target_state_values: A list of length n or a 1D tensor. The element at index i is the state value of state s_i as predicted by the target Q network.
         rewards: A list of length n (first element is ignored). The element at index i is r_{i+1}. The value can be None if state s_{i} was terminal and s_{i+1} is the initial state of a new episode.
         terminals: A list of length n. The element at index i is True if s_i is a terminal state, and False otherwise.
         discounts: ???
     """
     device = log_action_probs[0].device
+    def compute_v_targets(target_state_values, rewards, terminals, discounts):
+        vt = [0]*(len(target_state_values)+1)
+        if not terminals[-1]:
+            vt[-1] = target_state_values[-1].item()
+        for i in reversed(range(1,len(target_state_values))):
+            if not terminals[i-1]:
+                vt[i] = rewards[i]+discounts[i]*vt[i+1]
+        return vt[1:-1]
+    vt = compute_v_targets(target_state_values, rewards, terminals, discounts)
+    #vt2 = []
+    losses = []
+    for j in range(len(target_state_values)-1):
+        if terminals[j]:
+            losses.append(torch.tensor(0,device=device))
+            continue
+        # Value of the state predicted by the model
+        v_pred = target_state_values[j]
+        # Value of the state sampled from a partial rollout and bootstrapped
+        #v_target = torch.tensor(0., device=device)
+        #discount = 1
+        #for i in range(j+1,len(target_state_values)):
+        #    reward = rewards[i]
+        #    if reward is None:
+        #        raise Exception()
+        #    v_target += discount*reward
+        #    discount *= discounts[i-1]
+        #    if terminals[i]:
+        #        break
+        #    # Bootstrap on the final iteration
+        #    if i == len(target_state_values)-1:
+        #        v_target += discount*target_state_values[i].item()
+        #        break
+        #if not (v_target-vt[j]).abs().item() < 1e-6:
+        #    breakpoint()
+        #vt2.append(v_target) # XXX: DEBUG
+        v_target = vt[j]
+        # Loss
+        advantage = (v_target-v_pred).detach()
+        loss = -log_action_probs[j]*advantage # The loss is stated as a gradient ascent loss in RL papers, so we take the negative for gradient descent
+        losses.append(loss)
+    #if any(terminals):
+    #    breakpoint()
+    #breakpoint()
+    return torch.stack(losses)
+def compute_advantage_policy_gradient_tensor(
+        log_action_probs : TensorType['num_steps', float],
+        target_state_values : TensorType['num_steps', float],
+        rewards : TensorType['num_steps', float],
+        terminals : TensorType['num_steps', bool],
+        discounts : TensorType['num_steps', float],
+    ) -> torch.Tensor:
+    """
+    Advantage policy gradient for discrete action spaces.
+    Given a sequence of length n, we observe states/actions/rewards r_0,s_0,a_0,r_1,s_1,a_1,r_2,s_2,...,r_{n-1},s_{n-1},a_{n-1}.
+
+    Args:
+        log_action_probs: A list of length n (last element is ignored). The element at index i is a 0-dimensional tensor containing the log probability of selection action a_i at state s_i.
+        target_state_values: A list of length n or a 1D tensor. The element at index i is the state value of state s_i as predicted by the target Q network.
+        rewards: A list of length n (first element is ignored). The element at index i is r_{i+1}. The value can be None if state s_{i} was terminal and s_{i+1} is the initial state of a new episode.
+        terminals: A list of length n. The element at index i is True if s_i is a terminal state, and False otherwise.
+        discounts: ???
+    """
+    device = log_action_probs.device
     losses = []
     for j in range(len(target_state_values)-1):
         if terminals[j]:
