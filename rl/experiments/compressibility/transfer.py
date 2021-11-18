@@ -35,6 +35,14 @@ def make_app():
                         **config,
                         'test_frequency': 50,
                         'num_test_episodes': 2,
+                        'eps_annealing_steps': 0,
+                        'agent': {
+                            **config['agent'],
+                            'parameters': {
+                                **config['agent']['parameters'],
+                                'eps_annealing_steps': 0,
+                            }
+                        }
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
@@ -52,6 +60,14 @@ def make_app():
                     config={
                         **config,
                         'test_frequency': 50_000,
+                        'num_test_episodes': 0,
+                        'agent': {
+                            **config['agent'],
+                            'parameters': {
+                                **config['agent']['parameters'],
+                                'eps_annealing_steps': 0,
+                            }
+                        }
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,

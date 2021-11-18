@@ -725,6 +725,8 @@ class OptionCriticAgent(DeployableAgent):
         return action
     def _compute_annealed_epsilon(self, max_steps=1_000_000):
         eps = self.eps[False]
+        if max_steps == 0:
+            return eps
         return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
         #return (1-eps)*np.exp(-self._steps/max_steps)+eps # Exponential
 
