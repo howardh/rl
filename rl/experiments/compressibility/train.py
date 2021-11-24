@@ -1,14 +1,16 @@
 import os
 from typing import Optional
+from pathlib import Path
+
+import dill
 
 from experiment import load_checkpoint, make_experiment_runner
+from experiment.logger import Logger
 
 from rl.agent.option_critic import OptionCriticAgent
 from rl.experiments.training.basic import TrainExperiment
 
-def get_params():
-    params = {}
-
+def get_agent_params():
     base_agent_params = {
         'discount_factor': 0.99,
         'behaviour_eps': 0.02,
@@ -19,32 +21,103 @@ def get_params():
         'num_options': 1,
         'entropy_reg': 0.01,
     }
-    base_env_config = {
+
+    params = {}
+    params['oc-001'] = {
+        'type': OptionCriticAgent,
+        'parameters': base_agent_params,
+    }
+
+    # Use 8 options like in the option-critic paper
+    params['oc-002'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **base_agent_params,
+            'num_options': 8,
+        },
+    }
+
+    return params
+
+def get_env_params():
+    pong = [{
+        'env_name': 'ALE/Pong-v5',
+        'atari': True,
+        'config': {
+            'frameskip': 1,
+            'mode': 0,
+            'difficulty': 0,
+            'repeat_action_probability': 0.25,
+        }
+    },{
+        'env_name': 'ALE/Pong-v5',
         'atari': True,
         'config': {
             'frameskip': 1,
             'mode': 1,
             'difficulty': 0,
             'repeat_action_probability': 0.25,
-            #'render_mode': 'human',
         }
+    },{
+        'env_name': 'ALE/Pong-v5',
+        'atari': True,
+        'config': {
+            'frameskip': 1,
+            'mode': 0,
+            'difficulty': 1,
+            'repeat_action_probability': 0.25,
+        }
+    },]
+
+    seaquest = [{
+        'env_name': 'ALE/Seaquest-v5',
+        'atari': True,
+        'config': {
+            'frameskip': 1,
+            'mode': 0,
+            'difficulty': 0,
+            'repeat_action_probability': 0.25,
+        }
+    }]
+
+    return {
+        'pong': pong,
+        'seaquest': seaquest,
     }
 
-    env_name = 'ALE/Pong-v5'
+def get_params():
+    agent_params = get_agent_params()
+    env_params = get_env_params()
+    params = {}
+
     num_actors = 16
     train_env_keys = list(range(num_actors))
-
-    params['oc-001'] = {
-        'agent': {
-            'type': OptionCriticAgent,
-            'parameters': base_agent_params,
-        },
-        'env_test': {'env_name': env_name, **base_env_config},
-        'env_train': {'env_name': env_name, **base_env_config},
+    base_exp_params = {
         'train_env_keys': train_env_keys,
         'save_model_frequency': 250_000,
         'verbose': True,
         'test_frequency': None,
+    }
+
+    params['exp-001'] = {
+        'agent': agent_params['oc-001'],
+        'env_test': env_params['pong'][0],
+        'env_train': env_params['pong'][0],
+        **base_exp_params,
+    }
+
+    params['exp-002'] = {
+        'agent': agent_params['oc-002'],
+        'env_test': env_params['pong'][0],
+        'env_train': env_params['pong'][0],
+        **base_exp_params,
+    }
+
+    params['exp-003'] = {
+        'agent': agent_params['oc-002'],
+        'env_test': env_params['seaquest'][0],
+        'env_train': env_params['seaquest'][0],
+        **base_exp_params,
     }
 
     return params
@@ -59,18 +132,6 @@ def make_app():
             results_directory : Optional[str] = None,
             slurm : bool = typer.Option(False, '--slurm'),
             debug : bool = typer.Option(False, '--debug')):
-
-        if trial_id is None:
-            slurm_job_id = os.environ.get('SLURM_JOB_ID')
-            #slurm_job_id = os.environ.get('SLURM_ARRAY_JOB_ID')
-            slurm_array_task_id = os.environ.get('SLURM_ARRAY_TASK_ID')
-            trial_id = slurm_job_id
-            if slurm_job_id is not None:
-                if slurm_array_task_id is not None:
-                    trial_id = f'{slurm_job_id}_{slurm_array_task_id}'
-                else:
-                    trial_id = f'{slurm_job_id}'
-
         config = get_params()[exp_name]
         if debug:
             exp_runner = make_experiment_runner(
@@ -81,10 +142,10 @@ def make_app():
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    #checkpoint_frequency=3,
-                    #max_iterations=15,
-                    checkpoint_frequency=100,
-                    max_iterations=10_000,
+                    checkpoint_frequency=2000,
+                    max_iterations=2000,
+                    #checkpoint_frequency=100,
+                    #max_iterations=10_000,
                     slurm_split=slurm,
                     verbose=True,
             )
@@ -102,9 +163,9 @@ def make_app():
                     slurm_split=slurm,
                     verbose=True,
             )
-            exp_runner.exp.logger.init_wandb({
-                'project': f'Compressibility-train-{exp_name}',
-            })
+            #exp_runner.exp.logger.init_wandb({
+            #    'project': f'Compressibility-train-{exp_name}',
+            #})
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
 
@@ -120,10 +181,65 @@ def make_app():
         output = output
         raise NotImplementedError('Not implemented')
 
+    @app.command()
+    def plot(result_directory : Path):
+        import experiment.plotter as eplt
+        from experiment.plotter import EMASmoothing
+
+        checkpoint_filename = os.path.join(result_directory,'checkpoint.pkl')
+        with open(checkpoint_filename,'rb') as f:
+            x = dill.load(f)
+            logger = Logger()
+            logger.load_state_dict(x['exp']['logger'])
+
+        #breakpoint()
+
+        filename = os.path.abspath('plot-so-val.png')
+        eplt.plot(logger,
+                filename=filename,
+                curves=[{
+                    'key': 'agent_state_option_value',
+                    'smooth_fn': EMASmoothing(0.9),
+                }],
+                min_points=2,
+                xlabel='Steps',
+                ylabel='State Option Value',
+                #aggregate='mean',
+        )
+        print(f'Plot saved to {filename}')
+
+        filename = os.path.abspath('plot-rewards.png')
+        eplt.plot(logger,
+                filename=filename,
+                curves=[{
+                    'key': 'train_reward_by_episode',
+                    'smooth_fn': EMASmoothing(0.9),
+                }],
+                min_points=2,
+                xlabel='Steps',
+                ylabel='Rewards',
+                aggregate='mean',
+                #show_unaggregated=False,
+        )
+        print(f'Plot saved to {filename}')
+
+        filename = os.path.abspath('plot-option-choice.png')
+        eplt.stacked_area_plot(logger,
+                filename=filename,
+                key='agent_option_choice_count',
+                #min_points=2,
+                #xlabel='Steps',
+                #ylabel='Rewards',
+                #aggregate='mean',
+                #show_unaggregated=False,
+        )
+        print(f'Plot saved to {filename}')
+
     commands = {
             'run': run,
             'checkpoint': checkpoint,
-            'video': video
+            'video': video,
+            'plot': plot,
     }
 
     return app, commands

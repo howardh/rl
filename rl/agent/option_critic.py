@@ -388,6 +388,7 @@ class OptionCriticAgent(DeployableAgent):
             probs = [c/total for c in counts]
             entropy = sum([-p*np.log(p) for p in probs if p != 0])
             self.logger.append(option_choice_entropy=entropy)
+            self.logger.log(option_choice_count=self._option_choice_count[env_key])
             self._option_choice_count[env_key] = [0]*self.num_options # Reset count
             # Reset
             self._current_option[env_key] = None
@@ -511,7 +512,7 @@ class OptionCriticAgent(DeployableAgent):
         )
         # Q loss
         loss_q = compute_mc_state_value_loss(
-                state_values = q,
+                state_values = q[batch0,option],
                 #last_state_target_value = float(target_state_values_max[-1].item()),
                 last_state_target_value = target_state_value_last.item(),
                 rewards=obs_stack.reward_history,

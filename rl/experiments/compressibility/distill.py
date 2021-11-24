@@ -405,7 +405,7 @@ def make_app():
                     experiment_name=exp_name,
                     verbose=True,
                     checkpoint_frequency=50_000,
-                    max_iterations=1_000_000,
+                    max_iterations=5_000_000,
                     slurm_split=slurm,
                     results_directory=results_directory,
                     config={

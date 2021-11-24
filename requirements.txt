@@ -24,7 +24,7 @@ dm-env==1.3
 dm-haiku==0.0.3
 dm-tree==0.1.5
 docker-pycreds==0.4.0
--e git+ssh://git@github.com/howardh/experiment.git@28bcebef601033abb1275853dc29c890daa55644#egg=experiment
+-e git+ssh://git@github.com/howardh/experiment.git@3c78ff612a3d44a9c17791bf3d1c9ff64f61e911#egg=experiment
 fabulous==0.3.0
 fasteners==0.16
 flatbuffers==1.12
@@ -96,7 +96,7 @@ PyWavelets==1.1.1
 PyYAML==5.4.1
 requests==2.25.1
 requests-oauthlib==1.3.0
--e git+ssh://git@github.com/howardh/rl.git@8a1cc16373366a6c884eca17620f47f25cb8fb8e#egg=rl
+-e git+ssh://git@github.com/howardh/rl.git@aec4084f3095e3cecd1c562de2249d4c2cf0833d#egg=rl
 rlax==0.0.3
 rsa==4.7.2
 scikit-image==0.18.1
