@@ -22,6 +22,51 @@ from rl.agent.option_critic import OptionCriticAgent, make_agent_from_deploy_sta
 from rl.experiments.training.basic import make_env
 from rl.experiments.distillation.rusu2016 import count_parameters, test
 
+class OptionCriticNetworkCNN(torch.nn.Module):
+    def __init__(self, num_actions, num_options):
+        super().__init__()
+        self.head = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=4,out_channels=32,kernel_size=8,stride=4),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(
+                in_channels=32,out_channels=64,kernel_size=4,stride=2),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(
+                in_channels=64,out_channels=64,kernel_size=3,stride=1),
+            torch.nn.ReLU(),
+            torch.nn.Flatten(),
+            torch.nn.Linear(in_features=64*7*7,out_features=512),
+            torch.nn.ReLU(),
+        )
+        # Termination
+        self.beta = torch.nn.Sequential(
+            torch.nn.Linear(in_features=512,out_features=num_options),
+            torch.nn.Sigmoid(),
+        )
+        # Intra-option policies
+        self.iop = torch.nn.Sequential(
+            torch.nn.Linear(in_features=512,out_features=num_actions*num_options),
+            torch.nn.Unflatten(1, (num_options,num_actions))
+        )
+        # Policy over options
+        self.poo = torch.nn.Sequential(
+            torch.nn.Linear(in_features=512,out_features=num_options),
+        )
+        # Option-value
+        self.q = torch.nn.Sequential(
+            torch.nn.Linear(in_features=512,out_features=num_options),
+        )
+    def forward(self, obs):
+        x = obs
+        x = self.head(x)
+        x = {
+            'beta': self.beta(x),
+            'iop': self.iop(x),
+            'poo': self.poo(x),
+            'q': self.q(x),
+        }
+        return x
 class OptionCriticNetworkCNN_1(torch.nn.Module):
     def __init__(self, num_actions, num_options):
         super().__init__()
@@ -220,6 +265,8 @@ class DistillationExperiment(Experiment):
         num_actions = env.action_space.n
         num_options = teacher.net.q[0].out_features
         students = {
+            'OptionCriticNetworkCNN': OptionCriticNetworkCNN(
+                num_actions=num_actions, num_options=num_options),
             'OptionCriticNetworkCNN_1': OptionCriticNetworkCNN_1(
                 num_actions=num_actions, num_options=num_options),
             'OptionCriticNetworkCNN_2': OptionCriticNetworkCNN_2(

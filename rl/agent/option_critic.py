@@ -1,4 +1,3 @@
-import warnings
 from typing import Optional, Tuple, Generic, TypeVar, Union, Mapping
 from collections import defaultdict
 import copy
@@ -332,11 +331,6 @@ class OptionCriticAgent(DeployableAgent):
                 raise NotImplementedError(f'Unsupported observation space: {type(self.observation_space)}')
         self.net_target = copy.deepcopy(self.net)
 
-        self.policy_losses = []
-        self.entropy_losses = []
-        self.termination_losses = []
-        self.critic_losses = []
-
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
 
         self._train_env_keys = set()
@@ -388,22 +382,16 @@ class OptionCriticAgent(DeployableAgent):
             probs = [c/total for c in counts]
             entropy = sum([-p*np.log(p) for p in probs if p != 0])
             self.logger.append(option_choice_entropy=entropy)
-            self.logger.log(option_choice_count=self._option_choice_count[env_key])
+            if not testing:
+                self.logger.log(option_choice_count=self._option_choice_count[env_key])
             self._option_choice_count[env_key] = [0]*self.num_options # Reset count
             # Reset
             self._current_option[env_key] = None
 
         # Train if appropriate
         if self._num_training_transitions >= self.batch_size:
-            self._train2()
-    def _train(self, env_key):
-        self._train_actor_acc_loss(env_key)
-        self._train_critic_acc_loss(env_key)
-        if len(self.policy_losses) < self.batch_size:
-            return
-        self._train_actor_critic()
-        self._training_steps += 1
-    def _train2(self):
+            self._train()
+    def _train(self):
         all_losses = [
                 self._compute_loss(env_key)
                 for env_key in self._train_env_keys
@@ -525,121 +513,6 @@ class OptionCriticAgent(DeployableAgent):
                 'termination': loss_term,
                 'q': loss_q,
         }
-    def _train_critic_acc_loss(self, env_key):
-        """ Using A2C state value implementation. Accumulate loss without updating. """
-        transition = self.obs_stack[env_key].get_transition()
-        if transition is None:
-            return
-        s0,(o0,a0),r1,s1,term = transition
-        if isinstance(self.observation_space,gym.spaces.Discrete):
-            s0 = torch.tensor(s0).to(self.device)
-            s1 = torch.tensor(s1).to(self.device)
-        else:
-            s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-            s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
-        a0 = a0
-
-        net_output_0 = self.net(s0)
-        net_output_target_1 = self.net_target(s1)
-        q1_target = net_output_target_1['q'].squeeze(0)
-
-        # State value loss
-        loss_q = compute_mc_state_value_loss(
-                state_values = [net_output_0['q'][0,o0],net_output_0['q'][0,o0]],
-                last_state_target_value=q1_target.max(),
-                rewards=[None,r1],
-                terminals=[False,term],
-                discounts=[self.discount_factor,self.discount_factor]
-        )
-        self.critic_losses.append(loss_q)
-
-        ## Logging
-        #self.logger.append(
-        #        state_option_value=net_output_0['q'][0,o0].item(),
-        #)
-    def _train_actor_acc_loss(self, env_key):
-        """ Using A2C policy gradient implementation. Termination is ignored. Accumulate loss without updating. """
-        transition = self.obs_stack[env_key].get_transition()
-        if transition is None:
-            return
-        s0,(o0,a0),r1,s1,term = transition
-        if isinstance(self.observation_space,gym.spaces.Discrete):
-            s0 = torch.tensor(s0).to(self.device)
-            s1 = torch.tensor(s1).to(self.device)
-        else:
-            s0 = torch.tensor(s0).to(self.device).float().unsqueeze(0)/self.obs_scale
-            s1 = torch.tensor(s1).to(self.device).float().unsqueeze(0)/self.obs_scale
-
-        net_output_0 = self.net(s0)
-        net_output_1 = self.net(s1)
-        net_output_target_0 = self.net_target(s0)
-        net_output_target_1 = self.net_target(s1)
-        policy0 = net_output_0
-        #policy1 = self.policy_net(s1)
-        q0_target = net_output_target_0['q'].squeeze(0)
-        q1_target = net_output_target_1['q'].squeeze(0)
-
-        # Policy
-        log_action_probs = [net_output_0['iop'].squeeze(0)[o0,:].log_softmax(0)[a0],None]
-        target_state_values = [q0_target.max(),q1_target.max()]
-        rewards = [None,r1]
-        terminals = [False,term]
-        discounts = [self.discount_factor, self.discount_factor]
-        loss_policy = compute_advantage_policy_gradient(
-                log_action_probs=log_action_probs,
-                target_state_values=target_state_values,
-                rewards=rewards,
-                terminals=terminals,
-                discounts=discounts
-        )
-        loss_policy = loss_policy.squeeze() # Should be a 0D tensor
-
-        # Entropy
-        action_probs = policy0['iop'].squeeze(0)[o0,:].softmax(0)
-        entropy = -action_probs*torch.log(action_probs)
-        loss_entropy = -0.01*entropy.sum(0) # Factor of 0.01 works in A2C
-
-        # Termination
-        termination_reg = self.termination_reg
-        q_current_option = net_output_1['q'][0,o0]
-        v = net_output_1['q'].max()
-        beta1 = net_output_1['beta'][0,o0]
-        advantage = (q_current_option-v+termination_reg).detach()
-        loss_term = (beta1*advantage).mean(0)
-
-        # Accumulate loss
-        self.policy_losses.append(loss_policy)
-        self.entropy_losses.append(loss_entropy)
-        self.termination_losses.append(loss_term)
-    def _train_actor_critic(self):
-        """ Update actor using accumulated losses. """
-        # Update policy network
-        p_loss = torch.stack(self.policy_losses).mean(0)
-        e_loss = torch.stack(self.entropy_losses).mean(0)
-        t_loss = torch.stack(self.termination_losses).mean(0)
-        q_loss = torch.stack(self.critic_losses).mean(0)
-        loss = p_loss+e_loss+t_loss+q_loss
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        self._update_target()
-
-        # Clear lists
-        self.policy_losses.clear()
-        self.entropy_losses.clear()
-        self.termination_losses.clear()
-        self.critic_losses.clear()
-
-        # Logging
-        self.logger.log(
-                policy_term_ent_loss=loss.item(),
-                termination_loss=t_loss.item(),
-                policy_loss=p_loss.item(),
-                entropy_loss=e_loss.item(),
-                critic_loss=q_loss.item(),
-        )
     def _update_target(self):
         if self._training_steps % self.target_update_frequency != 0:
             return
@@ -734,30 +607,36 @@ class OptionCriticAgent(DeployableAgent):
     def state_dict(self):
         return {
                 'net': self.net.state_dict(),
-                #'qu_net': self.q_net.state_dict(),
-                #'qu_net_target': self.q_net_target.state_dict(),
-                #'policy_net': self.policy_net.state_dict(),
-
+                'net_target': self.net_target.state_dict(),
                 'optimizer': self.optimizer.state_dict(),
-                #'optimizer_qu': self.optimizer_q.state_dict(),
-                #'optimizer_policy': self.optimizer_policy.state_dict(),
 
                 'obs_stack': {k:os.state_dict() for k,os in self.obs_stack.items()},
-                'steps': self._steps, # TODO: subtract length of saved losses. Those losses can't be saved because the computation graphs won't be preserved, so we'll dump those and pretend uncount those transitions from the number of steps experienced. But then it'll be inconsistent with the step number in the experiment. How can we resolve this?
-                'training_steps': self._training_steps,
+                '_steps': self._steps,
+                '_training_steps': self._training_steps,
+                '_current_option': self._current_option,
+                '_train_env_keys': self._train_env_keys,
+                '_num_training_transitions': self._num_training_transitions,
+
+                '_option_choice_count': self._option_choice_count,
+                '_current_option_duration': self._current_option_duration,
                 'logger': self.logger.state_dict(),
         }
     def load_state_dict(self, state):
         self.net.load_state_dict(state['net'])
+        self.net_target.load_state_dict(state['net_target'])
         self.optimizer.load_state_dict(state['optimizer'])
 
         for k,os_state in state['obs_stack'].items():
             self.obs_stack[k].load_state_dict(os_state)
-        self._steps = state['steps']
-        self._training_steps = state['training_steps']
-        self.logger.load_state_dict(state['logger'])
+        self._steps = state['_steps']
+        self._training_steps = state['_training_steps']
+        self._current_option = state['_current_option']
+        self._train_env_keys = state['_train_env_keys']
+        self._num_training_transitions = state['_num_training_transitions']
 
-        warnings.warn('The replay buffer is not saved. Training the agent from this point may yield unexpected results.')
+        self._option_choice_count = state['_option_choice_count']
+        self._current_option_duration = state['_current_option_duration']
+        self.logger.load_state_dict(state['logger'])
 
     def state_dict_deploy(self):
         return {

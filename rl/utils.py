@@ -15,6 +15,8 @@ import torch
 import dill
 import gym
 import gym.envs.atari.environment
+import gym.wrappers.frame_stack
+import gym.wrappers.time_limit
 
 try:
     import pandas
@@ -228,18 +230,51 @@ def default_load_state_dict(obj, state):
                     raise Exception(f'Object {obj} does not have attribute {k}')
 
 def get_env_state(env):
+    from rl.experiments.training.basic import AtariPreprocessing
+    if isinstance(env, gym.wrappers.frame_stack.FrameStack):
+        # See https://github.com/openai/gym/blob/master/gym/wrappers/frame_stack.py
+        return {
+                'frames': env.frames,
+                'env': get_env_state(env.env),
+        }
+    if isinstance(env, gym.wrappers.time_limit.TimeLimit):
+        return {
+                '_elapsed_steps': env._elapsed_steps,
+                'env': get_env_state(env.env),
+        }
+    if isinstance(env, AtariPreprocessing):
+        return {
+                'game_over': env.game_over,
+                'lives': env.lives,
+                'env': get_env_state(env.env),
+        }
     if isinstance(env.unwrapped,gym.envs.atari.environment.AtariEnv):
         # https://github.com/openai/gym/issues/402#issuecomment-260744758
-        return env.unwrapped.ale.cloneSystemState()
+        return env.unwrapped.clone_state(include_rng=True)
     env_type = type(env.unwrapped)
     raise NotImplementedError(f'Unable to handle environment of type {env_type}')
 
 def set_env_state(env, state):
-    if isinstance(env.unwrapped,gym.envs.atari.environment.AtariEnv):
-        # https://github.com/openai/gym/issues/402#issuecomment-260744758
-        env.unwrapped.ale.restoreSystemState(state)
+    from rl.experiments.training.basic import AtariPreprocessing
+    if isinstance(env, gym.wrappers.frame_stack.FrameStack):
+        # See https://github.com/openai/gym/blob/master/gym/wrappers/frame_stack.py
+        env.frames = state['frames']
+        set_env_state(env.env, state['env'])
         return
-    env_type = type(env.unwrapped)
+    if isinstance(env, gym.wrappers.time_limit.TimeLimit):
+        env._elapsed_steps = state['_elapsed_steps']
+        set_env_state(env.env, state['env'])
+        return
+    if isinstance(env, AtariPreprocessing):
+        env.game_over = state['game_over']
+        env.lives = state['lives']
+        set_env_state(env.env, state['env'])
+        return
+    if isinstance(env,gym.envs.atari.environment.AtariEnv):
+        # https://github.com/openai/gym/issues/402#issuecomment-260744758
+        env.restore_state(state)
+        return
+    env_type = type(env)
     raise NotImplementedError(f'Unable to handle environment of type {env_type}')
 
 # Data processing

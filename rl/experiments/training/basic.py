@@ -169,6 +169,8 @@ class TrainExperiment(Experiment):
     def state_dict(self):
         """ Return the experiment state as a dictionary. """
         return default_state_dict(self, [
+            'agent',
+            'env_train','env_test',
             'output_directory',
             'test_frequency',
             'save_model_frequency',
@@ -180,8 +182,6 @@ class TrainExperiment(Experiment):
         ])
     def load_state_dict(self, state):
         default_load_state_dict(self, state)
-        self.done = {k:True for k in self._train_env_keys}
-        self._ep_len = {k:0 for k in self._train_env_keys}
 
 # See https://github.com/openai/gym/pull/2454
 class AtariPreprocessing(gym.Wrapper):

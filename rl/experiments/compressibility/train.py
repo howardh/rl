@@ -67,6 +67,15 @@ def get_env_params():
             'difficulty': 1,
             'repeat_action_probability': 0.25,
         }
+    },{
+        'env_name': 'ALE/Pong-v5',
+        'atari': True,
+        'config': {
+            'frameskip': 1,
+            'mode': 0,
+            'difficulty': 3,
+            'repeat_action_probability': 0.25,
+        }
     },]
 
     seaquest = [{
@@ -76,6 +85,15 @@ def get_env_params():
             'frameskip': 1,
             'mode': 0,
             'difficulty': 0,
+            'repeat_action_probability': 0.25,
+        }
+    },{
+        'env_name': 'ALE/Seaquest-v5',
+        'atari': True,
+        'config': {
+            'frameskip': 1,
+            'mode': 0,
+            'difficulty': 1,
             'repeat_action_probability': 0.25,
         }
     }]
@@ -134,7 +152,22 @@ def make_app():
             debug : bool = typer.Option(False, '--debug')):
         config = get_params()[exp_name]
         if debug:
-            exp_runner = make_experiment_runner(
+            #exp_runner = make_experiment_runner(
+            #        TrainExperiment,
+            #        config={
+            #            **config,
+            #            #'save_model_frequency': 5,
+            #        },
+            #        results_directory=results_directory,
+            #        trial_id=trial_id,
+            #        checkpoint_frequency=2000,
+            #        max_iterations=2000,
+            #        #checkpoint_frequency=100,
+            #        #max_iterations=10_000,
+            #        slurm_split=slurm,
+            #        verbose=True,
+            #)
+            exp_runner = make_experiment_runner( # Debug checkpointing
                     TrainExperiment,
                     config={
                         **config,
@@ -142,10 +175,8 @@ def make_app():
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    checkpoint_frequency=2000,
-                    max_iterations=2000,
-                    #checkpoint_frequency=100,
-                    #max_iterations=10_000,
+                    checkpoint_frequency=1000,
+                    max_iterations=500_000,
                     slurm_split=slurm,
                     verbose=True,
             )
@@ -189,12 +220,13 @@ def make_app():
         checkpoint_filename = os.path.join(result_directory,'checkpoint.pkl')
         with open(checkpoint_filename,'rb') as f:
             x = dill.load(f)
-            logger = Logger()
-            logger.load_state_dict(x['exp']['logger'])
+        logger = Logger()
+        logger.load_state_dict(x['exp']['logger'])
+        output_directory = x['exp']['output_directory']
+        plot_directory = os.path.join(output_directory,'plots')
+        os.makedirs(plot_directory,exist_ok=True)
 
-        #breakpoint()
-
-        filename = os.path.abspath('plot-so-val.png')
+        filename = os.path.abspath(os.path.join(plot_directory,'plot-so-val.png'))
         eplt.plot(logger,
                 filename=filename,
                 curves=[{
@@ -208,7 +240,7 @@ def make_app():
         )
         print(f'Plot saved to {filename}')
 
-        filename = os.path.abspath('plot-rewards.png')
+        filename = os.path.abspath(os.path.join(plot_directory,'plot-rewards.png'))
         eplt.plot(logger,
                 filename=filename,
                 curves=[{
@@ -219,15 +251,16 @@ def make_app():
                 xlabel='Steps',
                 ylabel='Rewards',
                 aggregate='mean',
-                #show_unaggregated=False,
+                show_unaggregated=False,
         )
         print(f'Plot saved to {filename}')
 
-        filename = os.path.abspath('plot-option-choice.png')
+        filename = os.path.abspath(os.path.join(plot_directory,'plot-option-choice.png'))
         eplt.stacked_area_plot(logger,
                 filename=filename,
                 key='agent_option_choice_count',
                 #min_points=2,
+                title='Option choice relative frequencies',
                 #xlabel='Steps',
                 #ylabel='Rewards',
                 #aggregate='mean',
