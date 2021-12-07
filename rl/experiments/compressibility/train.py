@@ -19,6 +19,7 @@ def get_agent_params():
         'target_update_frequency': 200,
         'polyak_rate': 1,
         'num_options': 1,
+        'termination_reg': 0.01,
         'entropy_reg': 0.01,
     }
 
@@ -34,6 +35,17 @@ def get_agent_params():
         'parameters': {
             **base_agent_params,
             'num_options': 8,
+        },
+    }
+
+    # Option-Critic with deliberation cost params
+    params['oc-003'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **base_agent_params,
+            'num_options': 8,
+            'behaviour_eps': 0.1,
+            'learning_rate': 7e-4,
         },
     }
 
@@ -138,6 +150,13 @@ def get_params():
         **base_exp_params,
     }
 
+    params['exp-004'] = {
+        'agent': agent_params['oc-001'],
+        'env_test': env_params['pong'][3],
+        'env_train': env_params['pong'][3],
+        **base_exp_params,
+    }
+
     return params
 
 def make_app():
@@ -175,7 +194,7 @@ def make_app():
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    checkpoint_frequency=1000,
+                    checkpoint_frequency=10_000,
                     max_iterations=500_000,
                     slurm_split=slurm,
                     verbose=True,
@@ -190,9 +209,10 @@ def make_app():
                     results_directory=results_directory,
                     trial_id=trial_id,
                     checkpoint_frequency=250_000,
-                    max_iterations=50_000_000,
+                    max_iterations=100_000_000,
                     slurm_split=slurm,
                     verbose=True,
+                    modifiable=True,
             )
             #exp_runner.exp.logger.init_wandb({
             #    'project': f'Compressibility-train-{exp_name}',

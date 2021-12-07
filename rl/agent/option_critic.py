@@ -12,6 +12,7 @@ import torch.distributions
 import torch.optim
 import numpy as np
 import dill
+from memory_profiler import profile
 
 from experiment.logger import Logger, SubLogger
 
@@ -261,6 +262,7 @@ class OptionCriticAgent(DeployableAgent):
     """
     On-policy implementation of Option-Critic.
     """
+    @profile
     def __init__(self,
             action_space : gym.spaces.Discrete,
             observation_space : gym.spaces.Space,
@@ -562,7 +564,7 @@ class OptionCriticAgent(DeployableAgent):
 
         # Save state and logging
         if curr_option is None or terminate_option:
-            if curr_option is not None: # If we terminated an option
+            if env_key in self._current_option_duration:
                 if testing:
                     self.logger.append(
                             testing_option_duration=self._current_option_duration[env_key],
