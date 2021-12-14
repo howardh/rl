@@ -12,7 +12,6 @@ import torch.distributions
 import torch.optim
 import numpy as np
 import dill
-from memory_profiler import profile
 
 from experiment.logger import Logger, SubLogger
 
@@ -262,7 +261,6 @@ class OptionCriticAgent(DeployableAgent):
     """
     On-policy implementation of Option-Critic.
     """
-    @profile
     def __init__(self,
             action_space : gym.spaces.Discrete,
             observation_space : gym.spaces.Space,
@@ -279,6 +277,8 @@ class OptionCriticAgent(DeployableAgent):
             num_options : int = 8,
             termination_reg : float = 0.01, # From paper
             entropy_reg : float = 0.01, # XXX: Arbitrary value
+            deliberation_cost : float = 0, # The paper studied a range of values between 0 and 0.03
+            optimizer : str = 'adam', # adam or rmsprop
             net : torch.nn.Module = None,
             logger : Logger = None,
             ):
@@ -307,6 +307,7 @@ class OptionCriticAgent(DeployableAgent):
         self.num_options = num_options
         self.termination_reg = termination_reg
         self.entropy_reg = entropy_reg
+        self.deliberation_cost = deliberation_cost
 
         # State (training)
         self.obs_stack = defaultdict(lambda: ObservationStack2(default_action=(0,0)))
@@ -333,7 +334,12 @@ class OptionCriticAgent(DeployableAgent):
                 raise NotImplementedError(f'Unsupported observation space: {type(self.observation_space)}')
         self.net_target = copy.deepcopy(self.net)
 
-        self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
+        if optimizer == 'adam':
+            self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
+        elif optimizer == 'rmsprop':
+            self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=learning_rate)
+        else:
+            raise Exception(f'Unsupported optimizer: "{optimizer}". Use "adam" or "rmsprop".')
 
         self._train_env_keys = set()
         self._num_training_transitions = 0
@@ -428,6 +434,7 @@ class OptionCriticAgent(DeployableAgent):
         )
     def _compute_loss(self, env_key):
         obs_stack = self.obs_stack[env_key]
+        target_eps = self.eps[True]
 
         obs = torch.stack([
             torch.tensor(o,device=self.device)
@@ -447,7 +454,12 @@ class OptionCriticAgent(DeployableAgent):
         #target_state_values_max = qt.max(1)[0]
         beta1 = net_output['beta'][batch1,option]
         last_beta = net_output['beta'][-1,option[-1]] # Probability of terminating option n-2 at state n-1. Note that there is no distinct option associated with the last state. It is not a mistake that the indices are misaligned.
-        target_state_value_last = (1-last_beta)*qt[-1,option[-1]]+last_beta*qt[-1,:].max()
+        target_state_value_last = (1-last_beta) * qt[-1,option[-1]] \
+                                +    last_beta  * (
+                                        ((1-target_eps) * qt[-1,:].max()
+                                         +  target_eps  * qt[-1,:].mean())
+                                        -self.deliberation_cost
+                                )
         target_state_values = torch.cat([
             net_output_target['q'][batch0,option],
             target_state_value_last.unsqueeze(0) # Compute as an expectation because we don't know yet if the option will be terminated
@@ -492,12 +504,12 @@ class OptionCriticAgent(DeployableAgent):
             #termination_prob = torch.stack(termination_prob)
             advantage = option_values_current-option_values_max+termination_reg
             advantage = advantage.detach()
-            loss = (termination_prob*advantage).mean(0)
+            loss = (termination_prob*(advantage+self.deliberation_cost)).mean(0)
             return loss
         loss_term = compute_termination_loss(
                 termination_prob = beta1,
                 option_values_current = net_output['q'][batch1,option],
-                option_values_max = net_output['q'][batch1,:].max(1)[0],
+                option_values_max = (1-target_eps)*net_output['q'][batch1,:].max(1)[0]+target_eps*net_output['q'][batch1,:].mean(1),
                 termination_reg = self.termination_reg
         )
         # Q loss

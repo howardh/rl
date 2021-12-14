@@ -608,6 +608,9 @@ class A2CAgent(DeployableAgent):
             self._train()
             self._update_target()
     def _train(self):
+        #self._train_a2c()
+        self._train_ppo()
+    def _train_a2c(self):
         t_max = self.max_rollout_length
         log_softmax = torch.nn.LogSoftmax(dim=1)
 
@@ -697,6 +700,9 @@ class A2CAgent(DeployableAgent):
             self.state_values_std.append(np.std(self.state_values_current))
             self.state_values_std_ra.append(np.mean(self.state_values_std) if self._training_steps < 100 else np.mean(self.state_values_std[-100:]))
             self.state_values_current = []
+    def _train_ppo(self):
+        # TODO
+        pass
     def _update_target(self):
         if self._steps % self.target_update_frequency != 0:
             return

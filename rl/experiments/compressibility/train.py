@@ -21,6 +21,7 @@ def get_agent_params():
         'num_options': 1,
         'termination_reg': 0.01,
         'entropy_reg': 0.01,
+        'deliberation_cost': 0,
     }
 
     params = {}
@@ -45,7 +46,12 @@ def get_agent_params():
             **base_agent_params,
             'num_options': 8,
             'behaviour_eps': 0.1,
+            'target_eps': 0.1,
             'learning_rate': 7e-4,
+            'termination_reg': 0,
+            'deliberation_cost': 0.01,
+            'target_update_frequency': 1, # Jean's code doesn't use a target network, and there's no mention of it in the paper.
+            'optimizer': 'rmsprop',
         },
     }
 
@@ -154,6 +160,13 @@ def get_params():
         'agent': agent_params['oc-001'],
         'env_test': env_params['pong'][3],
         'env_train': env_params['pong'][3],
+        **base_exp_params,
+    }
+
+    params['exp-004'] = {
+        'agent': agent_params['oc-003'],
+        'env_test': env_params['seaquest'][0],
+        'env_train': env_params['seaquest'][0],
         **base_exp_params,
     }
 
