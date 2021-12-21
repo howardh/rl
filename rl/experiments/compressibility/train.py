@@ -114,6 +114,18 @@ def get_env_params():
             'difficulty': 1,
             'repeat_action_probability': 0.25,
         }
+    },{
+        'env_name': 'ALE/Seaquest-v5',
+        'atari': True,
+        'atari_config': {
+            'terminal_on_life_loss': True
+        },
+        'config': {
+            'frameskip': 1,
+            'mode': 0,
+            'difficulty': 0,
+            'repeat_action_probability': 0.25,
+        }
     }]
 
     return {
@@ -163,10 +175,17 @@ def get_params():
         **base_exp_params,
     }
 
-    params['exp-004'] = {
+    params['exp-005'] = {
         'agent': agent_params['oc-003'],
         'env_test': env_params['seaquest'][0],
         'env_train': env_params['seaquest'][0],
+        **base_exp_params,
+    }
+
+    params['exp-006'] = { # Terminate on life loss
+        'agent': agent_params['oc-003'],
+        'env_test': env_params['seaquest'][2],
+        'env_train': env_params['seaquest'][2],
         **base_exp_params,
     }
 
@@ -239,13 +258,6 @@ def make_app():
         exp.run()
 
     @app.command()
-    def video(state_filename : str,
-            output : str = 'output.avi'):
-        state_filename = state_filename
-        output = output
-        raise NotImplementedError('Not implemented')
-
-    @app.command()
     def plot(result_directory : Path):
         import experiment.plotter as eplt
         from experiment.plotter import EMASmoothing
@@ -292,19 +304,29 @@ def make_app():
         eplt.stacked_area_plot(logger,
                 filename=filename,
                 key='agent_option_choice_count',
-                #min_points=2,
                 title='Option choice relative frequencies',
-                #xlabel='Steps',
-                #ylabel='Rewards',
-                #aggregate='mean',
-                #show_unaggregated=False,
         )
         print(f'Plot saved to {filename}')
+
+        for k in ['agent_total_loss','agent_termination_loss','agent_policy_loss','agent_entropy_loss','agent_critic_loss','agent_training_option_duration']:
+            filename = os.path.abspath(os.path.join(plot_directory,f'plot-{k}.png'))
+            eplt.plot(logger,
+                    filename=filename,
+                    curves=[{
+                        'key': k,
+                        'smooth_fn': EMASmoothing(0.9),
+                    }],
+                    min_points=2,
+                    xlabel='Steps',
+                    ylabel=k,
+                    aggregate='mean',
+                    show_unaggregated=False,
+            )
+            print(f'Plot saved to {filename}')
 
     commands = {
             'run': run,
             'checkpoint': checkpoint,
-            'video': video,
             'plot': plot,
     }
 

@@ -351,10 +351,17 @@ class OptionCriticAgent(DeployableAgent):
         else:
             self.logger = logger
         self._option_choice_count = defaultdict(lambda: [0]*num_options)
+        self._option_choice_history = defaultdict(lambda: [])
+        self._option_term_history = defaultdict(lambda: [])
 
     def observe(self, obs, reward=None, terminal=False, testing=False, env_key=None):
         if env_key is None:
             env_key = testing
+        if reward is None: # Reset logging stuff
+            self._option_choice_count[env_key] = [0]*self.num_options
+            self._option_term_history[env_key] = []
+            self._option_choice_history[env_key] = []
+            self._current_option[env_key] = None
         if not testing:
             # Count the number of transitions available for training
             self._train_env_keys.add(env_key)
@@ -392,9 +399,6 @@ class OptionCriticAgent(DeployableAgent):
             self.logger.append(option_choice_entropy=entropy)
             if not testing:
                 self.logger.log(option_choice_count=self._option_choice_count[env_key])
-            self._option_choice_count[env_key] = [0]*self.num_options # Reset count
-            # Reset
-            self._current_option[env_key] = None
 
         # Train if appropriate
         if self._num_training_transitions >= self.batch_size:
@@ -565,8 +569,10 @@ class OptionCriticAgent(DeployableAgent):
                 option = vals.max(dim=1)[1].item()
             else:
                 option = torch.randint(0,self.num_options,[1]).item()
+            self._option_term_history[env_key].append(True)
         else:
             option = curr_option
+            self._option_term_history[env_key].append(False)
         # Choose an action
         action_probs = pi['iop'][0,option,:].softmax(dim=0)
         dist = torch.distributions.Categorical(probs=action_probs)
@@ -594,6 +600,7 @@ class OptionCriticAgent(DeployableAgent):
 
         assert isinstance(option,int)
         self._option_choice_count[env_key][option] += 1
+        self._option_choice_history[env_key].append(option)
 
         if testing:
             vals = pi['q']

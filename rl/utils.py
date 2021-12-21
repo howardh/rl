@@ -220,6 +220,9 @@ def default_load_state_dict(obj, state):
 
 def get_env_state(env):
     from rl.experiments.training.basic import AtariPreprocessing
+    import gym.wrappers.frame_stack
+    import gym.wrappers.time_limit
+    import gym.envs.atari.environment
     if isinstance(env, gym.wrappers.frame_stack.FrameStack):
         # See https://github.com/openai/gym/blob/master/gym/wrappers/frame_stack.py
         return {
@@ -237,14 +240,28 @@ def get_env_state(env):
                 'lives': env.lives,
                 'env': get_env_state(env.env),
         }
-    if isinstance(env.unwrapped,gym.envs.atari.environment.AtariEnv):
+    if isinstance(env,gym.envs.atari.environment.AtariEnv):
         # https://github.com/openai/gym/issues/402#issuecomment-260744758
-        return env.unwrapped.clone_state(include_rng=True)
+        return env.clone_state(include_rng=True)
+    try:
+        # This needs to be in a try block because mujoco might not be installed on the machine.
+        # There's no reason to require mujoco to be installed if it's not being used, so we just ignore this.
+        import gym.envs.mujoco
+        if isinstance(env,gym.envs.mujoco.MujocoEnv):
+            return {
+                    'qpos': env.sim.data.qpos,
+                    'qvel': env.sim.data.qvel,
+            }
+    except:
+        pass
     env_type = type(env.unwrapped)
     raise NotImplementedError(f'Unable to handle environment of type {env_type}')
 
 def set_env_state(env, state):
     from rl.experiments.training.basic import AtariPreprocessing
+    import gym.wrappers.frame_stack
+    import gym.wrappers.time_limit
+    import gym.envs.atari.environment
     if isinstance(env, gym.wrappers.frame_stack.FrameStack):
         # See https://github.com/openai/gym/blob/master/gym/wrappers/frame_stack.py
         env.frames = state['frames']
@@ -263,6 +280,15 @@ def set_env_state(env, state):
         # https://github.com/openai/gym/issues/402#issuecomment-260744758
         env.restore_state(state)
         return
+    try:
+        # This needs to be in a try block because mujoco might not be installed on the machine.
+        # There's no reason to require mujoco to be installed if it's not being used, so we just ignore this.
+        import gym.envs.mujoco
+        if isinstance(env,gym.envs.mujoco.MujocoEnv):
+            env.set_state(qpos=state['qpos'],qvel=state['qvel'])
+            return
+    except:
+        pass
     env_type = type(env)
     raise NotImplementedError(f'Unable to handle environment of type {env_type}')
 
