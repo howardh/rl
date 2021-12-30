@@ -1,6 +1,6 @@
 import copy
 from collections import defaultdict
-from typing import Dict, Generic, TypeVar, Optional, Tuple, List, Any, Union
+from typing import Optional, Tuple, List, Union
 from typing_extensions import TypedDict
 
 import numpy as np
@@ -14,6 +14,7 @@ from torchtyping import TensorType
 
 from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss
 from frankenstein.loss.state_value import n_step_value_iterative
+from frankenstein.buffer.history import HistoryBuffer
 from experiment.logger import Logger, SubLogger
 from rl.utils import default_state_dict, default_load_state_dict
 from rl.agent.agent import DeployableAgent
@@ -204,69 +205,6 @@ class PolicyValueNetworkRecurrentFCNN(PolicyValueNetworkRecurrent):
                 torch.zeros([batch_size,self.hidden_size]),
                 torch.zeros([batch_size,self.hidden_size]),
         )
-
-ObsType = TypeVar('ObsType')
-ActionType = TypeVar('ActionType')
-class ObservationStack(Generic[ObsType,ActionType]):
-    def __init__(self) -> None:
-        self.prev : Optional[Tuple[ObsType,Optional[float],bool]] = None
-        self.curr : Optional[Tuple[ObsType,Optional[float],bool]] = None
-        self.prev_a : Optional[ActionType] = None
-        self.curr_a : Optional[ActionType] = None
-    def append_obs(self, obs : ObsType, reward : Optional[float], terminal : bool):
-        if self.curr is not None and self.curr[2]: # If the last observation was terminal
-            self.prev = None
-            self.curr = None
-            self.prev_a = None
-            self.curr_a = None
-        else:
-            self.prev = self.curr
-            self.prev_a = self.curr_a
-        self.curr = (obs, reward, terminal)
-        self.curr_a = None
-    def append_action(self, action : ActionType):
-        if self.curr_a is not None:
-            raise Exception('`append_action` was called twice in a row without a new observation. Make sure to call `append_obs` each time time an observation is received.')
-        self.curr_a = action
-    def get_transition(self) -> Optional[Tuple[ObsType,ActionType,float,ObsType,bool]]:
-        """ Return the most recent transition tuple.
-
-        Returns:
-            Tuple: (`s0`, `a0`, `r1`, `s1`, `t1`)
-
-                - `s0`: Starting state
-                - `a0`: Action taken at state `s0`
-                - `r1`: Reward obtained from taking action `a0` at state `s0` and transitioning to `s1`
-                - `s1`: State reached by taking action `a0` at state `s0`
-                - `t1`: `True` if this transition is terminal, and `False` otherwise.
-            If no transition is available, return None.
-        """
-        if self.prev is None or self.curr is None:
-            return None
-        if self.prev_a is None:
-            return None
-        s0, _, _ = self.prev
-        a0 = self.prev_a
-        s1, r1, t1 = self.curr
-        if r1 is None:
-            return None
-        return s0, a0, r1, s1, t1
-    def get_obs(self) -> ObsType:
-        if self.curr is None:
-            raise Exception('No observation available.')
-        return self.curr[0]
-    def state_dict(self):
-        return {
-                'prev': self.prev,
-                'curr': self.curr,
-                'prev_a': self.prev_a,
-                'curr_a': self.curr_a
-        }
-    def load_state_dict(self,state):
-        self.prev = state['prev']
-        self.curr = state['curr']
-        self.prev_a = state['prev_a']
-        self.curr_a = state['curr_a']
 
 def compute_mc_state_value_loss(
         state_values : Union[torch.Tensor,List[torch.Tensor]],
@@ -574,13 +512,18 @@ class A2CAgent(DeployableAgent):
             raise ValueError(f'Rollout length must be >= 2. Received {max_rollout_length}. Note that a rollout length of n consists of n-1 transitions.')
 
         # State (training)
-        self.obs_stack = defaultdict(lambda: ObservationStack())
-        self.obs_history = defaultdict(lambda: [])
-        self.action_history = defaultdict(lambda: [])
-        self.reward_history = defaultdict(lambda: [])
-        self.terminal_history = defaultdict(lambda: [])
-        self.discount_history = defaultdict(lambda: [])
-        self.next_action = defaultdict(lambda: None)
+        self.train_history_buffer = HistoryBuffer(
+                num_envs=len(training_env_keys),
+                max_len=max_rollout_length,
+                default_action=self.action_space.sample()*0,
+                device=device)
+        self.test_history_buffer = defaultdict(
+            lambda: HistoryBuffer(
+                num_envs=1,
+                max_len=1,
+                default_action=self.action_space.sample()*0,
+                device=device)
+        )
         self._steps = 0 # Number of steps experienced
         self._training_steps = 0 # Number of training steps experienced
 
@@ -624,10 +567,16 @@ class A2CAgent(DeployableAgent):
         if discount is None:
             discount = self.discount_factor
 
+        if testing:
+            history = self.test_history_buffer[env_key][0]
+        else:
+            env_index = self.training_env_keys.index(env_key)
+            history = self.train_history_buffer[env_index]
+
         if reward is not None:
             reward *= self.reward_scale
 
-        self.obs_stack[env_key].append_obs(obs, reward, terminal)
+        history.append_obs(obs, reward, terminal, misc={'discount': discount**time})
 
         # Choose next action
         net_output = self.net(
@@ -653,8 +602,8 @@ class A2CAgent(DeployableAgent):
         state_value = net_output['value']
         self.state_values_current.append(state_value.item())
 
-        self.next_action[env_key] = action
-        self.obs_stack[env_key].append_action(action)
+        if not terminal:
+            history.append_action(action)
 
         # Save training data and train
         if not testing:
@@ -664,35 +613,33 @@ class A2CAgent(DeployableAgent):
 
             self.logger.append(debug_state_value=state_value.item())
 
-            self.obs_history[env_key].append(obs)
-            self.reward_history[env_key].append(reward)
-            self.terminal_history[env_key].append(terminal)
-            self.discount_history[env_key].append(discount**time)
-            self.action_history[env_key].append(action)
-
             self._train()
             self._update_target()
     def _train(self):
         self._train_a2c()
         #self._train_ppo()
     def _train_a2c(self):
+        history = self.train_history_buffer
         t_max = self.max_rollout_length
 
         # Check if we've accumulated enough data
-        num_points = [len(self.obs_history[k]) for k in self.training_env_keys]
+        num_points = [len(history[i].obs_history) for i,_ in enumerate(self.training_env_keys)]
         if min(num_points) >= t_max:
             if max(num_points) != min(num_points):
                 raise Exception('This should not happen')
+            n = num_points[0]
             try:
-                obs = { ek:
-                    torch.stack([
-                        torch.tensor(o,device=self.device) for o in self.obs_history[ek]
-                    ]).float()*self.obs_scale
-                    for ek in self.training_env_keys
+                obs = {
+                    ek: history[i].obs.float()*self.obs_scale
+                    for i,ek in enumerate(self.training_env_keys)
                 }
+                action_history = {ek: history[i].action for i,ek in enumerate(self.training_env_keys)}
+                reward_history = {ek: history[i].reward for i,ek in enumerate(self.training_env_keys)}
+                terminal_history = {ek: history[i].terminal for i,ek in enumerate(self.training_env_keys)}
+                discount_history = {ek: history[i].misc['discount'] for i,ek in enumerate(self.training_env_keys)}
                 indices = { 
-                    ek: range(len(self.obs_history[ek]))
-                    for ek in self.training_env_keys
+                    ek: range(len(history[i].action_history))
+                    for i,ek in enumerate(self.training_env_keys)
                 }
                 net_output = {
                     ek: self.net(obs[ek])
@@ -708,8 +655,9 @@ class A2CAgent(DeployableAgent):
                 }
                 if isinstance(self.action_space,gym.spaces.Discrete):
                     log_action_probs = {ek: 
-                        outputs['action'].log_softmax(1).squeeze()[indices[ek],self.action_history[ek]]
-                     for ek,outputs in net_output.items()}
+                        outputs['action'].log_softmax(1).squeeze()[indices[ek],action_history[ek]]
+                        for ek,outputs in net_output.items()
+                    }
                     entropy = {
                         ek: compute_entropy(outputs['action'].log_softmax(1).squeeze())
                         for ek,outputs in net_output.items()
@@ -719,7 +667,7 @@ class A2CAgent(DeployableAgent):
                         ek: compute_normal_log_prob_batch(
                                 outputs['action_mean'],
                                 outputs['action_std'],
-                                torch.tensor(self.action_history[ek],device=self.device))
+                                torch.tensor(action_history[ek],device=self.device))
                         for ek,outputs in net_output.items()}
                     entropy = {ek: 
                         compute_normal_entropy(out['action_mean'],out['action_std'])
@@ -729,21 +677,21 @@ class A2CAgent(DeployableAgent):
                 raise
             # Train policy
             loss_pi = [advantage_policy_gradient_loss(
-                        log_action_probs = log_action_probs[ek][:-1],
-                        state_values = state_values[ek][:-1].detach(),
+                        log_action_probs = log_action_probs[ek][:n-1],
+                        state_values = state_values[ek][:n-1].detach(),
                         next_state_values = target_state_values[ek][1:],
-                        rewards = torch.tensor([r if r is not None else 0 for r in self.reward_history[ek][1:]], device=self.device),
-                        terminals = torch.tensor(self.terminal_history[ek][1:],device=self.device),
-                        prev_terminals = torch.tensor(self.terminal_history[ek][:-1],device=self.device),
-                        discounts = torch.tensor(self.discount_history[ek][1:],device=self.device),
+                        rewards = reward_history[ek][1:],
+                        terminals = terminal_history[ek][1:],
+                        prev_terminals = terminal_history[ek][:n-1],
+                        discounts = discount_history[ek][1:],
                 ) for ek in self.training_env_keys]
             loss_pi = torch.stack(loss_pi).mean()
             # Train value network
             state_value_estimate = {ek: n_step_value_iterative(
                         state_values = target_state_values[ek][1:],
-                        rewards = torch.tensor([r if r is not None else 0 for r in self.reward_history[ek][1:]], device=self.device),
-                        terminals = torch.tensor(self.terminal_history[ek][1:],device=self.device),
-                        discounts = torch.tensor(self.discount_history[ek][1:],device=self.device),
+                        rewards = reward_history[ek][1:],
+                        terminals = terminal_history[ek][1:],
+                        discounts = discount_history[ek][1:],
                 ) for ek in self.training_env_keys}
             loss_v = [
                     (state_values[ek][:-1]-state_value_estimate[ek])**2
@@ -764,12 +712,7 @@ class A2CAgent(DeployableAgent):
                     psum += p.mean()
                 #breakpoint()
             # Clear data
-            for ek in self.training_env_keys:
-                self.obs_history[ek] = self.obs_history[ek][-1:]
-                self.reward_history[ek] = self.reward_history[ek][-1:]
-                self.terminal_history[ek] = self.terminal_history[ek][-1:]
-                self.discount_history[ek] = self.discount_history[ek][-1:]
-                self.action_history[ek] = self.action_history[ek][-1:]
+            self.train_history_buffer.clear()
             # Log
             self._training_steps += 1
             self.state_values.append(np.mean(self.state_values_current))
@@ -785,23 +728,26 @@ class A2CAgent(DeployableAgent):
                     train_state_value_target_net=np.mean([v.mean().item() for v in target_state_values.values()]),
             )
     def _train_ppo(self):
+        history = self.train_history_buffer
         t_max = self.max_rollout_length
         log_action_probs_old = None
 
         # Check if we've accumulated enough data
-        num_points = [len(self.obs_history[k]) for k in self.training_env_keys]
+        num_points = [len(history[i].obs_history) for i,_ in enumerate(self.training_env_keys)]
         if min(num_points) < t_max:
             return
         if max(num_points) != min(num_points):
             raise Exception('This should not happen')
         for _ in range(1):
             try:
-                obs = { ek:
-                    torch.stack([
-                        torch.tensor(o,device=self.device) for o in self.obs_history[ek]
-                    ]).float()*self.obs_scale
-                    for ek in self.training_env_keys
+                obs = {
+                    ek: history[i].obs.float()*self.obs_scale
+                    for i,ek in enumerate(self.training_env_keys)
                 }
+                action_history = {ek: history[i].action for i,ek in enumerate(self.training_env_keys)}
+                reward_history = {ek: history[i].reward for i,ek in enumerate(self.training_env_keys)}
+                terminal_history = {ek: history[i].terminal for i,ek in enumerate(self.training_env_keys)}
+                discount_history = {ek: history[i].misc['discount'] for i,ek in enumerate(self.training_env_keys)}
                 net_output = {
                     ek: self.net(o)
                     for ek,o in obs.items()
@@ -817,7 +763,7 @@ class A2CAgent(DeployableAgent):
                 if isinstance(self.action_space,gym.spaces.Discrete):
                     log_action_probs = {ek: 
                         out['action'].log_softmax(1).squeeze()[range(len(a)),a]
-                        for ek,(out,a) in zip_dict(net_output,self.action_history)
+                        for ek,(out,a) in zip_dict(net_output,action_history)
                     }
                     entropy = {
                         ek: compute_entropy(outputs['action'].log_softmax(1))
@@ -830,7 +776,7 @@ class A2CAgent(DeployableAgent):
                             out['action_std'],
                             torch.cat([torch.tensor(x, device=self.device) for x in a])
                         )
-                        for ek,(out,a) in zip_dict(net_output,self.action_history)
+                        for ek,(out,a) in zip_dict(net_output,action_history)
                     }
                     entropy = {ek: 
                         compute_normal_entropy(out['action_mean'],out['action_std'])
@@ -847,12 +793,12 @@ class A2CAgent(DeployableAgent):
             loss_pi = [clipped_advantage_policy_gradient_loss(
                         log_action_probs = log_action_probs[ek][:-1],
                         old_log_action_probs = log_action_probs_old[ek][:-1],
-                        state_values = target_state_values[ek][:-1],
+                        state_values = target_state_values[ek][:-1], # Does this need to use `state_values`? That's what I do in the A2C code
                         next_state_values = target_state_values[ek][1:],
-                        rewards = torch.tensor([r if r is not None else 0 for r in self.reward_history[ek][1:]], device=self.device),
-                        terminals = torch.tensor(self.terminal_history[ek][1:], device=self.device),
-                        prev_terminals = torch.tensor(self.terminal_history[ek][:-1], device=self.device),
-                        discounts = torch.tensor(self.discount_history[ek][1:], device=self.device),
+                        rewards = reward_history[ek][1:],
+                        terminals = terminal_history[ek][1:],
+                        prev_terminals = terminal_history[ek][:-1],
+                        discounts = discount_history[ek][1:],
                         epsilon = 0.1,
                 ) for ek in self.training_env_keys]
             loss_pi = torch.stack(loss_pi).mean()
@@ -860,9 +806,9 @@ class A2CAgent(DeployableAgent):
             loss_v = [compute_mc_state_value_loss(
                         state_values = state_values[ek],
                         last_state_target_value = float(target_state_values[ek][-1].item()),
-                        rewards = self.reward_history[ek],
-                        terminals = self.terminal_history[ek],
-                        discounts = self.discount_history[ek],
+                        rewards = reward_history[ek],
+                        terminals = terminal_history[ek],
+                        discounts = discount_history[ek],
                 ) for ek in self.training_env_keys]
             loss_v = torch.stack(loss_v).mean()
             # Entropy
@@ -881,12 +827,7 @@ class A2CAgent(DeployableAgent):
                     breakpoint()
             self.optimizer.step()
         # Clear data
-        for ek in self.training_env_keys:
-            self.obs_history[ek] = self.obs_history[ek][-1:]
-            self.reward_history[ek] = self.reward_history[ek][-1:]
-            self.terminal_history[ek] = self.terminal_history[ek][-1:]
-            self.discount_history[ek] = self.discount_history[ek][-1:]
-            self.action_history[ek] = self.action_history[ek][-1:]
+        history.clear()
         # Log
         self._training_steps += 1
         self.state_values.append(np.mean(self.state_values_current))
@@ -904,7 +845,14 @@ class A2CAgent(DeployableAgent):
         """ Return a random action according to an epsilon-greedy policy. """
         if env_key is None:
             env_key = testing
-        action = self.next_action[env_key]
+
+        if testing:
+            history = self.test_history_buffer[env_key][0]
+        else:
+            env_index = self.training_env_keys.index(env_key)
+            history = self.train_history_buffer[env_index]
+
+        action = history.action_history[-1]
         if action is None:
             raise Exception('No action found. Agent must observe the environment before taking an action.')
 
@@ -924,13 +872,8 @@ class A2CAgent(DeployableAgent):
 
     def state_dict(self):
         return default_state_dict(self, [
-            'obs_stack',
-            'obs_history',
-            'action_history',
-            'reward_history',
-            'terminal_history',
-            'discount_history',
-            'next_action',
+            'train_history_buffer',
+            'test_history_buffer',
             '_steps',
             '_training_steps',
             'net',
@@ -955,164 +898,6 @@ class A2CAgent(DeployableAgent):
     def load_state_dict_deploy(self, state):
         state = state
         pass # TODO
-
-class A2CAgentRecurrent(A2CAgent):
-    def __init__(self, episodes_per_batch=16, reward_scale=1, net : PolicyValueNetworkRecurrent = None, **kwargs):
-        super().__init__(net=net, **kwargs)
-        self.episodes_per_batch = episodes_per_batch
-        self.reward_scale = reward_scale
-
-        self._training_data = []
-
-        if net is None:
-            raise Exception('Models must be provided. `net` is missing.')
-        self.net = net
-
-        self.last_hidden : Dict[Any,Any] = defaultdict(lambda: None)
-    def observe(self, obs, reward=None, terminal=False, testing=False, time=1, discount=None, env_key=None):
-        if env_key is None:
-            env_key = testing
-        if discount is None:
-            discount = self.discount_factor
-
-        if reward is not None:
-            reward *= self.reward_scale
-        obs = torch.tensor(obs)*self.obs_scale
-
-        self.obs_stack[env_key].append_obs(obs, reward, terminal)
-
-        # Choose next action
-        last_hidden = self.last_hidden[env_key]
-        if last_hidden is None:
-            last_hidden = self.net.init_hidden()
-        net_output = self.net(
-                obs.unsqueeze(0).float().to(self.device),
-                last_hidden
-        )
-        assert 'action_mean' in net_output
-        assert 'action_std' in net_output
-        assert 'value' in net_output
-        assert 'hidden' in net_output
-        assert net_output['hidden'] is not None
-        action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
-        action = action_dist.sample().cpu().numpy()
-        self.last_hidden[env_key] = net_output['hidden']
-
-        state_value = net_output['value']
-        self.state_values_current.append(state_value.item())
-
-        self.next_action[env_key] = action
-        self.obs_stack[env_key].append_action(action)
-
-        # Save training data and train
-        if not testing:
-            self._steps += 1
-            self.logger.log(step=self._steps)
-
-            self.obs_history[env_key].append(obs)
-            self.reward_history[env_key].append(reward)
-            self.discount_history[env_key].append(discount**time)
-            self.action_history[env_key].append(action)
-
-            if terminal:
-                # Add this episode to the training data set
-                self._training_data.append({
-                    'obs': self.obs_history[env_key],
-                    'reward': self.reward_history[env_key],
-                    'action': self.action_history[env_key],
-                    'discount': self.discount_history[env_key],
-                })
-                # Reset current episode data
-                self.obs_history[env_key] = []
-                self.reward_history[env_key] = []
-                self.action_history[env_key] = []
-                self.discount_history[env_key] = []
-
-            self._train()
-            self._update_target()
-    def _train(self):
-        if len(self._training_data) < self.episodes_per_batch:
-            return
-
-        total_loss = torch.tensor(0., device=self.device)
-        for episode in self._training_data:
-            episode_length = len(episode['obs'])
-            try:
-                net_output = []
-                hidden = self.net.init_hidden()
-                for obs in episode['obs']:
-                    obs = obs.unsqueeze(0).float().to(self.device)
-                    output = self.net(obs,hidden)
-                    net_output.append(output)
-                    hidden = output['hidden']
-                target_net_output = []
-                hidden = self.net.init_hidden()
-                for obs in episode['obs']:
-                    obs = obs.unsqueeze(0).float().to(self.device)
-                    output = self.target_net(obs,hidden)
-                    target_net_output.append(output)
-                    hidden = output['hidden']
-                state_values = [
-                        o['value'].squeeze()
-                        for o in net_output
-                ]
-                target_state_values = [
-                        o['value'].squeeze()
-                        for o in target_net_output
-                ]
-                log_action_probs = [
-                        compute_normal_log_prob(o['action_mean'],o['action_std'],a)
-                        for o,a in zip(net_output,episode['action'])
-                ]
-                entropy = [
-                    -compute_normal_entropy(o['action_mean'],o['action_std'])
-                    for o in net_output
-                ]
-            except:
-                raise
-
-            # Train policy
-            loss_pi = compute_advantage_policy_gradient(
-                    log_action_probs = log_action_probs,
-                    target_state_values = target_state_values,
-                    rewards = episode['reward'],
-                    terminals = [False]*(episode_length-1)+[True],
-                    discounts = episode['discount'],
-            ).mean(0)
-            # Train value network
-            loss_v = compute_mc_state_value_loss(
-                    state_values = state_values,
-                    last_state_target_value = 0,
-                    rewards = episode['reward'],
-                    terminals = [False]*(episode_length-1)+[True],
-                    discounts = episode['discount'],
-            ).mean(0)
-            # Entropy
-            loss_entropy = torch.stack(entropy).mean(0)
-            # Take a gradient step
-            total_loss += loss_pi+loss_v+0.01*loss_entropy
-
-            self.optimizer.zero_grad()
-            total_loss.backward()
-            self.optimizer.step()
-        # Clear data
-        self._training_data.clear()
-        # Log
-        self._training_steps += 1
-        self.logger.log(
-                debug_loss = total_loss.item()
-        )
-        self.state_values.append(np.mean(self.state_values_current))
-        self.state_values_std.append(np.std(self.state_values_current))
-        self.state_values_std_ra.append(np.mean(self.state_values_std) if self._training_steps < 100 else np.mean(self.state_values_std[-100:]))
-        self.state_values_current = []
-        # Log weights
-        param_vals = torch.cat([param.flatten() for param in self.net.parameters()])
-        self.logger.log(
-                debug_net_param_mean = torch.mean(param_vals).item(),
-                debug_net_param_min = torch.min(param_vals).item(),
-                debug_net_param_max = torch.max(param_vals).item(),
-        )
 
 if __name__ == "__main__":
     import torch.cuda
