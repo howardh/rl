@@ -55,6 +55,22 @@ def get_agent_params():
         },
     }
 
+    # Added target network back in. The value function was exploding with oc-003.
+    params['oc-004'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **base_agent_params,
+            'num_options': 8,
+            'behaviour_eps': 0.1,
+            'target_eps': 0.1,
+            'learning_rate': 7e-4,
+            'termination_reg': 0,
+            'deliberation_cost': 0.01,
+            'target_update_frequency': 100,
+            'optimizer': 'rmsprop',
+        },
+    }
+
     return params
 
 def get_env_params():
@@ -189,6 +205,20 @@ def get_params():
         **base_exp_params,
     }
 
+    params['exp-007'] = { # Testing again with Pong because OC implementation changed
+        'agent': agent_params['oc-003'],
+        'env_test': env_params['pong'][0],
+        'env_train': env_params['pong'][0],
+        **base_exp_params,
+    }
+
+    params['exp-008'] = {
+        'agent': agent_params['oc-004'],
+        'env_test': env_params['pong'][0],
+        'env_train': env_params['pong'][0],
+        **base_exp_params,
+    }
+
     return params
 
 def make_app():
@@ -240,8 +270,10 @@ def make_app():
                     config=config,
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    checkpoint_frequency=250_000,
-                    max_iterations=100_000_000,
+                    #checkpoint_frequency=250_000,
+                    #max_iterations=100_000_000,
+                    checkpoint_frequency=50_000,
+                    max_iterations=50_000*20,
                     slurm_split=slurm,
                     verbose=True,
                     modifiable=True,

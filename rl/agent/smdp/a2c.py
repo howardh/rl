@@ -13,7 +13,7 @@ import gym.spaces
 from torchtyping import TensorType
 
 from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss
-from frankenstein.loss.state_value import n_step_value_iterative
+from frankenstein.value.monte_carlo import monte_carlo_return_iterative
 from frankenstein.buffer.history import HistoryBuffer
 from experiment.logger import Logger, SubLogger
 from rl.utils import default_state_dict, default_load_state_dict
@@ -616,9 +616,6 @@ class A2CAgent(DeployableAgent):
             self._train()
             self._update_target()
     def _train(self):
-        self._train_a2c()
-        #self._train_ppo()
-    def _train_a2c(self):
         history = self.train_history_buffer
         t_max = self.max_rollout_length
 
@@ -687,7 +684,7 @@ class A2CAgent(DeployableAgent):
                 ) for ek in self.training_env_keys]
             loss_pi = torch.stack(loss_pi).mean()
             # Train value network
-            state_value_estimate = {ek: n_step_value_iterative(
+            state_value_estimate = {ek: monte_carlo_return_iterative(
                         state_values = target_state_values[ek][1:],
                         rewards = reward_history[ek][1:],
                         terminals = terminal_history[ek][1:],
@@ -727,113 +724,6 @@ class A2CAgent(DeployableAgent):
                     train_state_value=np.mean([v.mean().item() for v in state_values.values()]),
                     train_state_value_target_net=np.mean([v.mean().item() for v in target_state_values.values()]),
             )
-    def _train_ppo(self):
-        history = self.train_history_buffer
-        t_max = self.max_rollout_length
-        log_action_probs_old = None
-
-        # Check if we've accumulated enough data
-        num_points = [len(history[i].obs_history) for i,_ in enumerate(self.training_env_keys)]
-        if min(num_points) < t_max:
-            return
-        if max(num_points) != min(num_points):
-            raise Exception('This should not happen')
-        for _ in range(1):
-            try:
-                obs = {
-                    ek: history[i].obs.float()*self.obs_scale
-                    for i,ek in enumerate(self.training_env_keys)
-                }
-                action_history = {ek: history[i].action for i,ek in enumerate(self.training_env_keys)}
-                reward_history = {ek: history[i].reward for i,ek in enumerate(self.training_env_keys)}
-                terminal_history = {ek: history[i].terminal for i,ek in enumerate(self.training_env_keys)}
-                discount_history = {ek: history[i].misc['discount'] for i,ek in enumerate(self.training_env_keys)}
-                net_output = {
-                    ek: self.net(o)
-                    for ek,o in obs.items()
-                }
-                state_values = {
-                    ek: out['value'].squeeze()
-                    for ek,out in net_output.items()
-                }
-                target_state_values = {ek: 
-                    self.target_net(o)['value'].squeeze().detach()
-                    for ek,o in obs.items()
-                }
-                if isinstance(self.action_space,gym.spaces.Discrete):
-                    log_action_probs = {ek: 
-                        out['action'].log_softmax(1).squeeze()[range(len(a)),a]
-                        for ek,(out,a) in zip_dict(net_output,action_history)
-                    }
-                    entropy = {
-                        ek: compute_entropy(outputs['action'].log_softmax(1))
-                        for ek,outputs in net_output.items()
-                    }
-                else:
-                    log_action_probs = {
-                        ek: compute_normal_log_prob_batch(
-                            out['action_mean'],
-                            out['action_std'],
-                            torch.cat([torch.tensor(x, device=self.device) for x in a])
-                        )
-                        for ek,(out,a) in zip_dict(net_output,action_history)
-                    }
-                    entropy = {ek: 
-                        compute_normal_entropy(out['action_mean'],out['action_std'])
-                        for ek,out in net_output.items()
-                    }
-                if log_action_probs_old is None:
-                    log_action_probs_old = {
-                            k: v.clone().detach()
-                            for k,v in log_action_probs.items()
-                    }
-            except:
-                raise
-            # Train policy
-            loss_pi = [clipped_advantage_policy_gradient_loss(
-                        log_action_probs = log_action_probs[ek][:-1],
-                        old_log_action_probs = log_action_probs_old[ek][:-1],
-                        state_values = target_state_values[ek][:-1], # Does this need to use `state_values`? That's what I do in the A2C code
-                        next_state_values = target_state_values[ek][1:],
-                        rewards = reward_history[ek][1:],
-                        terminals = terminal_history[ek][1:],
-                        prev_terminals = terminal_history[ek][:-1],
-                        discounts = discount_history[ek][1:],
-                        epsilon = 0.1,
-                ) for ek in self.training_env_keys]
-            loss_pi = torch.stack(loss_pi).mean()
-            # Train value network
-            loss_v = [compute_mc_state_value_loss(
-                        state_values = state_values[ek],
-                        last_state_target_value = float(target_state_values[ek][-1].item()),
-                        rewards = reward_history[ek],
-                        terminals = terminal_history[ek],
-                        discounts = discount_history[ek],
-                ) for ek in self.training_env_keys]
-            loss_v = torch.stack(loss_v).mean()
-            # Entropy
-            loss_entropy = -torch.stack([ e.mean() for e in entropy.values() ]).mean()
-            # Take a gradient step
-            loss = loss_pi+loss_v+0.01*loss_entropy
-            self.optimizer.zero_grad()
-            loss.backward()
-            if __debug__: # Check weights
-                psum = 0
-                for p in self.net.parameters():
-                    if p.grad is None:
-                        continue
-                    psum += p.grad.mean()
-                if psum != psum:
-                    breakpoint()
-            self.optimizer.step()
-        # Clear data
-        history.clear()
-        # Log
-        self._training_steps += 1
-        self.state_values.append(np.mean(self.state_values_current))
-        self.state_values_std.append(np.std(self.state_values_current))
-        self.state_values_std_ra.append(np.mean(self.state_values_std) if self._training_steps < 100 else np.mean(self.state_values_std[-100:]))
-        self.state_values_current = []
     def _update_target(self):
         if self._steps % self.target_update_frequency != 0:
             return
@@ -898,6 +788,144 @@ class A2CAgent(DeployableAgent):
     def load_state_dict_deploy(self, state):
         state = state
         pass # TODO
+
+class PPOAgent(A2CAgent):
+    def __init__(self,
+            action_space : gym.spaces.Box,
+            observation_space : gym.spaces.Box,
+            discount_factor : float = 0.99,
+            learning_rate : float = 1e-4,
+            target_update_frequency : int = 40_000, # Mnih 2016 - section 8
+            polyak_rate : float = 1.0,              # Mnih 2016 - section 8
+            max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
+            training_env_keys : List = [],
+            obs_scale : float = 1/255,
+            reward_scale : float = 1,
+            device : torch.device = torch.device('cpu'),
+            net : PolicyValueNetwork = None,
+            logger : Logger = None,
+            # PPO-specific stuff
+            num_minibatches : int = 5,
+        ):
+        super().__init__(action_space, observation_space, discount_factor=discount_factor, learning_rate=learning_rate, target_update_frequency=target_update_frequency, polyak_rate=polyak_rate, max_rollout_length=max_rollout_length, training_env_keys=training_env_keys, obs_scale=obs_scale, reward_scale=reward_scale, device=device, net=net, logger=logger)
+        self.num_minibatches = num_minibatches
+    def _train(self):
+        history = self.train_history_buffer
+        t_max = self.max_rollout_length
+        log_action_probs_old = None
+
+        # Check if we've accumulated enough data
+        num_points = [len(history[i].obs_history) for i,_ in enumerate(self.training_env_keys)]
+        if min(num_points) < t_max:
+            return
+        if max(num_points) != min(num_points):
+            raise Exception('This should not happen')
+        n = num_points[0]
+        for _ in range(self.num_minibatches):
+            try:
+                obs = {
+                    ek: history[i].obs.float()*self.obs_scale
+                    for i,ek in enumerate(self.training_env_keys)
+                }
+                action_history = {ek: history[i].action for i,ek in enumerate(self.training_env_keys)}
+                reward_history = {ek: history[i].reward for i,ek in enumerate(self.training_env_keys)}
+                terminal_history = {ek: history[i].terminal for i,ek in enumerate(self.training_env_keys)}
+                discount_history = {ek: history[i].misc['discount'] for i,ek in enumerate(self.training_env_keys)}
+                net_output = {
+                    ek: self.net(o)
+                    for ek,o in obs.items()
+                }
+                state_values = {
+                    ek: out['value'].squeeze()
+                    for ek,out in net_output.items()
+                }
+                target_state_values = {ek: 
+                    self.target_net(o)['value'].squeeze().detach()
+                    for ek,o in obs.items()
+                }
+                if isinstance(self.action_space,gym.spaces.Discrete):
+                    log_action_probs = {ek: 
+                        out['action'].log_softmax(1).squeeze()[range(len(a)),a]
+                        for ek,(out,a) in zip_dict(net_output,action_history)
+                    }
+                    entropy = {
+                        ek: compute_entropy(outputs['action'].log_softmax(1))
+                        for ek,outputs in net_output.items()
+                    }
+                else:
+                    log_action_probs = {
+                        ek: compute_normal_log_prob_batch(
+                            out['action_mean'],
+                            out['action_std'],
+                            torch.cat([torch.tensor(x, device=self.device) for x in a])
+                        )
+                        for ek,(out,a) in zip_dict(net_output,action_history)
+                    }
+                    entropy = {ek: 
+                        compute_normal_entropy(out['action_mean'],out['action_std'])
+                        for ek,out in net_output.items()
+                    }
+                if log_action_probs_old is None:
+                    log_action_probs_old = {
+                            k: v.clone().detach()
+                            for k,v in log_action_probs.items()
+                    }
+            except:
+                raise
+            # Train policy
+            loss_pi = [clipped_advantage_policy_gradient_loss(
+                        log_action_probs = log_action_probs[ek][:n-1],
+                        old_log_action_probs = log_action_probs_old[ek][:n-1],
+                        state_values = state_values[ek][:n-1].detach(), # Does this need to use `state_values`? That's what I do in the A2C code
+                        next_state_values = target_state_values[ek][1:n],
+                        rewards = reward_history[ek][1:n],
+                        terminals = terminal_history[ek][1:n],
+                        prev_terminals = terminal_history[ek][:n-1],
+                        discounts = discount_history[ek][1:n],
+                        epsilon = 0.1,
+                ) for ek in self.training_env_keys]
+            loss_pi = torch.stack(loss_pi).mean()
+            # Train value network
+            loss_v = [compute_mc_state_value_loss(
+                        state_values = state_values[ek],
+                        last_state_target_value = float(target_state_values[ek][-1].item()),
+                        rewards = reward_history[ek],
+                        terminals = terminal_history[ek],
+                        discounts = discount_history[ek],
+                ) for ek in self.training_env_keys]
+            loss_v = torch.stack(loss_v).mean()
+            # Entropy
+            loss_entropy = -torch.stack([ e.mean() for e in entropy.values() ]).mean()
+            # Take a gradient step
+            loss = loss_pi+loss_v+0.01*loss_entropy
+            self.optimizer.zero_grad()
+            loss.backward()
+            if __debug__: # Check weights
+                psum = 0
+                for p in self.net.parameters():
+                    if p.grad is None:
+                        continue
+                    psum += p.grad.mean()
+                if psum != psum:
+                    breakpoint()
+            self.optimizer.step()
+            # Log
+            self.logger.append(
+                    loss_pi=loss_pi.item(),
+                    loss_v=loss_v.item(),
+                    loss_entropy=loss_entropy.item(),
+                    loss_total=loss.item(),
+                    train_state_value=np.mean([v.mean().item() for v in state_values.values()]),
+                    train_state_value_target_net=np.mean([v.mean().item() for v in target_state_values.values()]),
+            )
+        # Clear data
+        history.clear()
+        # Log
+        self._training_steps += 1
+        self.state_values.append(np.mean(self.state_values_current))
+        self.state_values_std.append(np.std(self.state_values_current))
+        self.state_values_std_ra.append(np.mean(self.state_values_std) if self._training_steps < 100 else np.mean(self.state_values_std[-100:]))
+        self.state_values_current = []
 
 if __name__ == "__main__":
     import torch.cuda
@@ -993,5 +1021,47 @@ if __name__ == "__main__":
         })
         exp_runner.run()
 
+    def run_atari_ppo():
+        from rl.agent.smdp.a2c import PPOAgent
+
+        num_actors = 16
+        env_name = 'ALE/Pong-v5'
+        train_env_keys = list(range(num_actors))
+        env_config = {
+            'frameskip': 1,
+            'mode': 0,
+            'difficulty': 0,
+            'repeat_action_probability': 0.25,
+        }
+
+        exp_runner = make_experiment_runner(
+                TrainExperiment,
+                config={
+                    'agent': {
+                        'type': PPOAgent,
+                        'parameters': {
+                            'training_env_keys': train_env_keys,
+                            'num_minibatches': 1,
+                        },
+                    },
+                    'env_test': {'env_name': env_name, 'atari': True, 'config': env_config},
+                    'env_train': {'env_name': env_name, 'atari': True, 'config': env_config},
+                    'train_env_keys': train_env_keys,
+                    'test_frequency': None,
+                    'save_model_frequency': 250_000,
+                    'verbose': True,
+                },
+                #trial_id='checkpointtest',
+                checkpoint_frequency=250_000,
+                #checkpoint_frequency=None,
+                max_iterations=50_000_000,
+                verbose=True,
+        )
+        #exp_runner.exp.logger.init_wandb({
+        #    'project': 'PPO-%s' % env_name.replace('/','_')
+        #})
+        exp_runner.run()
+
     #run_mujoco()
-    run_atari()
+    #run_atari()
+    run_atari_ppo()

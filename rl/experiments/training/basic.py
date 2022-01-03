@@ -179,6 +179,7 @@ class TrainExperiment(Experiment):
             'done',
             'env_train',
             '_ep_len',
+            '_ep_rewards',
         ])
     def load_state_dict(self, state):
         default_load_state_dict(self, state)
@@ -328,10 +329,10 @@ class AtariPreprocessing(gym.Wrapper):
     def _get_obs(self):
         if self.frame_skip > 1:  # more efficient in-place pooling
             np.maximum(self.obs_buffer[0], self.obs_buffer[1], out=self.obs_buffer[0])
-        obs = cv2.resize(
+        obs = cv2.resize( # type: ignore
             self.obs_buffer[0],
             (self.screen_size, self.screen_size),
-            interpolation=cv2.INTER_AREA,
+            interpolation=cv2.INTER_AREA, # type: ignore
         )
 
         if self.scale_obs:
