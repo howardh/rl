@@ -187,7 +187,6 @@ class OptionCriticAgent(DeployableAgent):
         self.deliberation_cost = deliberation_cost
 
         # State (training)
-        #self.obs_stack = defaultdict(lambda: ObservationStack2(default_action=(0,0)))
         self.train_history_buffer = HistoryBuffer(max_len=batch_size, default_action=(0,0), device=device)
         self.test_history_buffer = defaultdict(
             lambda: HistoryBuffer(max_len=1, default_action=(0,0), device=device)
@@ -262,7 +261,6 @@ class OptionCriticAgent(DeployableAgent):
         history.append_obs(obs, reward, terminal)
 
         # Add to replay buffer
-        #transition = self.obs_stack[env_key].get_transition()
         if not testing:
             self._steps += 1
             if not isinstance(self.logger, SubLogger):
@@ -324,6 +322,9 @@ class OptionCriticAgent(DeployableAgent):
         batch0 = range(num_actions)
         batch1 = range(1,num_actions+1)
         option,action = history.action
+        if history.terminal[-1]:
+            option = option[:-1]
+            action = action[:-1]
 
         net_output = self.net(obs)
         net_output_target = self.net_target(obs)

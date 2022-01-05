@@ -41,11 +41,11 @@ def _run_test(env, agent, verbose=False, env_key='test'):
         'total_reward': total_reward,
     }
 
-def make_env(env_name, config={}, atari=False, one_hot_obs=False, atari_config={}):
+def make_env(env_name, config={}, atari=False, one_hot_obs=False, atari_config={}, frame_stack=4):
     env = gym.make(env_name, **config)
     if atari:
         env = AtariPreprocessing(env, **atari_config)
-        env = FrameStack(env, 4)
+        env = FrameStack(env, frame_stack)
     if one_hot_obs:
         env = rl.debug_tools.frozenlake.OnehotObs(env)
     return env

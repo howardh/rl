@@ -71,6 +71,24 @@ def get_agent_params():
         },
     }
 
+    # Train with one option
+    params['oc-005'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **params['oc-004']['parameters'],
+            'num_options': 1,
+        },
+    }
+
+    # Train with two options
+    params['oc-005-2'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **params['oc-004']['parameters'],
+            'num_options': 2,
+        },
+    }
+
     return params
 
 def get_env_params():
@@ -219,6 +237,20 @@ def get_params():
         **base_exp_params,
     }
 
+    params['exp-009'] = { # Test with one option
+        'agent': agent_params['oc-005'],
+        'env_test': env_params['pong'][0],
+        'env_train': env_params['pong'][0],
+        **base_exp_params,
+    }
+
+    params['exp-009-2'] = { # Test with two option
+        'agent': agent_params['oc-005-2'],
+        'env_test': env_params['pong'][0],
+        'env_train': env_params['pong'][0],
+        **base_exp_params,
+    }
+
     return params
 
 def make_app():
@@ -270,17 +302,15 @@ def make_app():
                     config=config,
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    #checkpoint_frequency=250_000,
-                    #max_iterations=100_000_000,
-                    checkpoint_frequency=50_000,
-                    max_iterations=50_000*20,
+                    checkpoint_frequency=250_000,
+                    max_iterations=50_000_000,
                     slurm_split=slurm,
                     verbose=True,
                     modifiable=True,
             )
-            #exp_runner.exp.logger.init_wandb({
-            #    'project': f'Compressibility-train-{exp_name}',
-            #})
+            exp_runner.exp.logger.init_wandb({
+                'project': f'Compressibility-train-{exp_name}',
+            })
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
 

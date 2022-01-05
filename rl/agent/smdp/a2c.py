@@ -12,8 +12,8 @@ import torch.optim
 import gym.spaces
 from torchtyping import TensorType
 
-from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss
-from frankenstein.value.monte_carlo import monte_carlo_return_iterative
+from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss, advantage_policy_gradient_loss_batch
+from frankenstein.value.monte_carlo import monte_carlo_return_iterative, monte_carlo_return_iterative_batch
 from frankenstein.buffer.history import HistoryBuffer
 from experiment.logger import Logger, SubLogger
 from rl.utils import default_state_dict, default_load_state_dict
@@ -108,6 +108,44 @@ class PolicyValueNetworkCNN(PolicyValueNetwork):
                 'value': v,
                 'action': pi, # Unnormalized action probabilities
         }
+class PolicyValueNetworkRecurrentCNN(PolicyValueNetworkRecurrent):
+    """ A model which acts both as a policy network and a state-value estimator. """
+    def __init__(self, num_actions, hidden_size, in_channels=1):
+        super().__init__()
+        self.num_actions = num_actions
+        self._hidden_size = hidden_size
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=in_channels,out_channels=32,kernel_size=8,stride=4),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=32,out_channels=64,kernel_size=4,stride=2),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=64,out_channels=64,kernel_size=3,stride=1),
+            torch.nn.LeakyReLU(),
+        )
+        self.lstm = torch.nn.LSTMCell(input_size=64*7*7,hidden_size=hidden_size)
+        self.v = torch.nn.Linear(in_features=512,out_features=1)
+        self.pi = torch.nn.Linear(in_features=512,out_features=num_actions)
+    def forward(self, x, hidden) -> PolicyValueNetworkOutput:
+        x = self.conv(x)
+        x = x.view(-1,64*7*7)
+        h,c = self.lstm(x,hidden)
+        x = h
+        v = self.v(x)
+        pi = self.pi(x)
+        return {
+                'value': v,
+                'action': pi, # Unnormalized action probabilities
+                'hidden': (h,c),
+        }
+    def init_hidden(self, batch_size=1):
+        device = next(self.parameters()).device
+        return (
+                torch.zeros([batch_size,self._hidden_size], device=device),
+                torch.zeros([batch_size,self._hidden_size], device=device),
+        )
 class PolicyValueNetworkLinear(PolicyValueNetwork):
     """ A model which acts both as a policy network and a state-value estimator. """
     def __init__(self, num_features, num_actions,bias=False):
@@ -927,6 +965,251 @@ class PPOAgent(A2CAgent):
         self.state_values_std_ra.append(np.mean(self.state_values_std) if self._training_steps < 100 else np.mean(self.state_values_std[-100:]))
         self.state_values_current = []
 
+class A2CAgentRecurrent(A2CAgent):
+    def __init__(self,
+            action_space : gym.spaces.Box,
+            observation_space : gym.spaces.Box,
+            discount_factor : float = 0.99,
+            learning_rate : float = 1e-4,
+            target_update_frequency : int = 40_000, # Mnih 2016 - section 8
+            polyak_rate : float = 1.0,              # Mnih 2016 - section 8
+            max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
+            training_env_keys : List = [],
+            obs_scale : float = 1/255,
+            reward_scale : float = 1,
+            hidden_reset_min_prob : float = 0,
+            hidden_reset_max_prob : float = 0,
+            device : torch.device = torch.device('cpu'),
+            net : PolicyValueNetworkRecurrent = None,
+            logger : Logger = None,
+        ):
+        super().__init__(action_space, observation_space, discount_factor=discount_factor, learning_rate=learning_rate, target_update_frequency=target_update_frequency, polyak_rate=polyak_rate, max_rollout_length=max_rollout_length, training_env_keys=training_env_keys, obs_scale=obs_scale, reward_scale=reward_scale, device=device, net=net, logger=logger)
+        self.hidden_reset_min_prob = hidden_reset_min_prob
+        self.hidden_reset_max_prob = hidden_reset_max_prob
+        self._prev_hidden = {}
+    def _init_default_net(self, observation_space, action_space,device) -> PolicyValueNetworkRecurrent:
+        if isinstance(observation_space, gym.spaces.Box):
+            assert observation_space.shape is not None
+            if len(observation_space.shape) == 1: # Mujoco
+                return PolicyValueNetworkRecurrentFCNN(
+                        num_features=observation_space.shape[0],
+                        num_actions=action_space.shape[0],
+                        shared_std=False
+                ).to(device)
+            if len(observation_space.shape) == 3: # Atari
+                return PolicyValueNetworkRecurrentCNN(
+                        num_actions=action_space.n,
+                        hidden_size=512,
+                        in_channels=observation_space.shape[0],
+                ).to(device)
+        raise Exception('Unsupported observation space or action space.')
+    def observe(self, obs, reward=None, terminal=False, testing=False, time=1, discount=None, env_key=None):
+        assert isinstance(self.net, PolicyValueNetworkRecurrent)
+        if env_key is None:
+            env_key = testing
+        if discount is None:
+            discount = self.discount_factor
+
+        if testing:
+            history = self.test_history_buffer[env_key][0]
+        else:
+            env_index = self.training_env_keys.index(env_key)
+            history = self.train_history_buffer[env_index]
+
+        if reward is not None:
+            reward *= self.reward_scale
+
+        hidden_reset_prob = self._compute_annealed_epsilon(
+                max_eps=self.hidden_reset_max_prob, min_eps=self.hidden_reset_min_prob, max_steps=1_000_000)
+        hidden_reset = not testing and np.random.rand() < hidden_reset_prob
+        if reward is None or hidden_reset:
+            self._prev_hidden[env_key] = self.net.init_hidden(batch_size=1)
+
+        history.append_obs(obs, reward, terminal,
+                misc={
+                    'discount': discount**time,
+                    'hidden': tuple([x.squeeze() for x in self._prev_hidden[env_key]]),
+                    'hidden_reset': hidden_reset
+                })
+
+        # Choose next action
+        net_output = self.net(
+                torch.tensor(obs,device=self.device).unsqueeze(0).float()*self.obs_scale,
+                hidden=self._prev_hidden[env_key]
+        )
+        assert 'hidden' in net_output
+        self._prev_hidden[env_key] = tuple([x.detach() for x in net_output['hidden']])
+        if isinstance(self.action_space, gym.spaces.Discrete):
+            assert 'action' in net_output
+            action_probs_unnormalized = net_output['action']
+            action_probs = action_probs_unnormalized.softmax(1).squeeze()
+            assert torch.abs(action_probs.sum()-1) < 1e-6
+            action_dist = torch.distributions.Categorical(action_probs)
+            action = action_dist.sample().item()
+        elif isinstance(self.action_space, gym.spaces.Box):
+            assert 'action_mean' in net_output
+            assert 'action_std' in net_output
+            action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
+            action = action_dist.sample().cpu().numpy()
+        else:
+            raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
+        self.logger.log(train_entropy=action_dist.entropy().mean().item())
+
+        assert 'value' in net_output
+        state_value = net_output['value']
+        self.state_values_current.append(state_value.item())
+
+        if not terminal:
+            history.append_action(action)
+
+        # Save training data and train
+        if not testing:
+            self._steps += 1
+            if not isinstance(self.logger, SubLogger):
+                self.logger.log(step=self._steps)
+
+            self.logger.log(
+                    debug_state_value=state_value.item(),
+                    hidden_reset_prob=hidden_reset_prob,
+            )
+
+            self._train()
+            self._update_target()
+    def _train(self):
+        history = self.train_history_buffer
+        t_max = self.max_rollout_length
+
+        # Check if we've accumulated enough data
+        num_points = [len(history[i].obs_history) for i,_ in enumerate(self.training_env_keys)]
+        if min(num_points) >= t_max:
+            if max(num_points) != min(num_points):
+                raise Exception('This should not happen')
+            n = num_points[0]
+            try:
+                misc = history.misc
+                assert isinstance(misc,dict)
+                hidden = misc['hidden']
+                obs = history.obs.float()*self.obs_scale
+                action_history = history.action
+                reward_history = history.reward
+                terminal_history = history.terminal
+                discount_history = misc['discount']
+                hidden_reset = misc['hidden_reset']
+
+                net_output = []
+                h = (hidden[0][0,:],hidden[1][0,:])
+                for o,hr in zip(obs,hidden_reset):
+                    h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
+                            h[0]*hr.logical_not().unsqueeze(1),
+                            h[1]*hr.logical_not().unsqueeze(1),
+                    )
+                    no = self.net(o,h)
+                    h = no['hidden']
+                    net_output.append(no)
+
+                target_net_output = []
+                h = (hidden[0][0,:],hidden[1][0,:])
+                for o,hr in zip(obs,hidden_reset):
+                    h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
+                            h[0]*hr.logical_not().unsqueeze(1),
+                            h[1]*hr.logical_not().unsqueeze(1),
+                    )
+                    no = self.target_net(o,h)
+                    h = no['hidden']
+                    target_net_output.append(no)
+
+                state_values = torch.stack([o['value'].squeeze() for o in net_output])
+                target_state_values = torch.stack([o['value'].squeeze() for o in target_net_output])
+                if isinstance(self.action_space,gym.spaces.Discrete):
+                    log_action_probs = torch.cat([
+                        o['action'].log_softmax(1).gather(1,a.unsqueeze(0))
+                        for o,a in zip(net_output,action_history)
+                    ])
+                    #batch_size = obs.shape[1]
+                    #log_action_probs = torch.cat([
+                    #    torch.stack([torch.arange(18) for _ in range(batch_size)]).gather(1,a.unsqueeze(0))
+                    #    for o,a in zip(net_output,history.action)
+                    #])
+                    #for s,b in itertools.product(range(n),range(batch_size)):
+                    #    assert log_action_probs[s,b] == net_output[s]['action'][b,history.action[s,b]]
+                    #log_action_probs = {ek: 
+                    #    outputs['action'].log_softmax(1).squeeze()[indices[ek],action_history[ek]]
+                    #    for ek,outputs in net_output.items()
+                    #}
+                    entropy = torch.stack([
+                        compute_entropy(o['action'].log_softmax(1).squeeze())
+                        for o in net_output
+                    ])
+                else:
+                    raise NotImplementedError()
+                    #log_action_probs = {
+                    #    ek: compute_normal_log_prob_batch(
+                    #            outputs['action_mean'],
+                    #            outputs['action_std'],
+                    #            torch.tensor(action_history[ek],device=self.device))
+                    #    for ek,outputs in net_output.items()}
+                    #entropy = {ek: 
+                    #    compute_normal_entropy(out['action_mean'],out['action_std'])
+                    #    for ek,out in net_output.items()
+                    #}
+            except:
+                raise
+            # Train policy
+            loss_pi = advantage_policy_gradient_loss_batch(
+                    log_action_probs = log_action_probs[:n-1,:],
+                    state_values = state_values[:n-1,:].detach(),
+                    next_state_values = target_state_values[1:,:],
+                    rewards = reward_history[1:,:],
+                    terminals = terminal_history[1:,:],
+                    prev_terminals = terminal_history[:n-1,:],
+                    discounts = discount_history[1:,:],
+            )
+            loss_pi = loss_pi.mean()
+            # Train value network
+            state_value_estimate = monte_carlo_return_iterative_batch(
+                    state_values = target_state_values[1:,:],
+                    rewards = reward_history[1:,:],
+                    terminals = terminal_history[1:,:],
+                    discounts = discount_history[1:,:],
+            )
+            loss_v = (state_values[:-1,:]-state_value_estimate)**2
+            loss_v = loss_v.mean()
+            # Entropy
+            loss_entropy = -entropy.mean()
+            # Take a gradient step
+            loss = loss_pi+loss_v+0.01*loss_entropy
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            # Check weights
+            if __debug__:
+                psum = 0
+                for p in self.net.parameters():
+                    psum += p.mean()
+                #breakpoint()
+            # Clear data
+            self.train_history_buffer.clear()
+            # Log
+            self._training_steps += 1
+            self.state_values.append(np.mean(self.state_values_current))
+            self.state_values_std.append(np.std(self.state_values_current))
+            self.state_values_std_ra.append(np.mean(self.state_values_std) if self._training_steps < 100 else np.mean(self.state_values_std[-100:]))
+            self.state_values_current = []
+            self.logger.log(
+                    loss_pi=loss_pi.item(),
+                    loss_v=loss_v.item(),
+                    loss_entropy=loss_entropy.item(),
+                    loss_total=loss.item(),
+                    train_state_value=state_values.mean().item(),
+                    train_state_value_target_net=target_state_values.mean().item(),
+            )
+
+    def _compute_annealed_epsilon(self, max_eps, min_eps, max_steps=1_000_000):
+        if max_steps == 0:
+            return min_eps
+        #return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
+        return (max_eps-min_eps)*np.exp(-self._steps/max_steps)+min_eps # Exponential
+
 if __name__ == "__main__":
     import torch.cuda
     import numpy as np
@@ -972,9 +1255,9 @@ if __name__ == "__main__":
                 max_iterations=50_000_000,
                 verbose=True,
         )
-        exp_runner.exp.logger.init_wandb({
-            'project': 'A2C-%s' % env_name.replace('/','_')
-        })
+        #exp_runner.exp.logger.init_wandb({
+        #    'project': 'A2C-%s' % env_name.replace('/','_')
+        #})
         #exp_runner.exp.logger.init_wandb({
         #    'project': 'PPO-%s' % env_name.replace('/','_')
         #})
@@ -1062,6 +1345,48 @@ if __name__ == "__main__":
         #})
         exp_runner.run()
 
+    def run_atari_recurrent():
+        from rl.agent.smdp.a2c import A2CAgentRecurrent
+
+        num_actors = 16
+        env_name = 'ALE/Pong-v5'
+        train_env_keys = list(range(num_actors))
+        env_config = {
+            'frameskip': 1,
+            'mode': 0,
+            'difficulty': 0,
+            'repeat_action_probability': 0.25,
+        }
+
+        exp_runner = make_experiment_runner(
+                TrainExperiment,
+                config={
+                    'agent': {
+                        'type': A2CAgentRecurrent,
+                        'parameters': {
+                            'training_env_keys': train_env_keys,
+                            #'max_rollout_length': 32
+                        },
+                    },
+                    'env_test': {'env_name': env_name, 'atari': True, 'config': env_config, 'frame_stack': 4},
+                    'env_train': {'env_name': env_name, 'atari': True, 'config': env_config, 'frame_stack': 4},
+                    'train_env_keys': train_env_keys,
+                    'test_frequency': None,
+                    'save_model_frequency': 250_000,
+                    'verbose': True,
+                },
+                #trial_id='checkpointtest',
+                checkpoint_frequency=250_000,
+                #checkpoint_frequency=None,
+                max_iterations=50_000_000,
+                verbose=True,
+        )
+        exp_runner.exp.logger.init_wandb({
+            'project': 'A2C-recurrent-%s' % env_name.replace('/','_')
+        })
+        exp_runner.run()
+
     #run_mujoco()
     #run_atari()
-    run_atari_ppo()
+    #run_atari_ppo()
+    run_atari_recurrent()
