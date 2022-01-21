@@ -89,6 +89,63 @@ def get_agent_params():
         },
     }
 
+    # Use the same parameters as oc-001, but add in deliberation cost
+    params['oc-006'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **base_agent_params,
+            'deliberation_cost': 0.01,
+        }
+    }
+
+    # Save as above, but remove termination regularization
+    params['oc-007'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **base_agent_params,
+            'deliberation_cost': 0.01,
+            'termination_reg': 0,
+        }
+    }
+
+    # Save as above, but using 2 options instead of 1
+    params['oc-008'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **base_agent_params,
+            'deliberation_cost': 0.01,
+            'termination_reg': 0,
+            'num_options': 2,
+        }
+    }
+
+    # Save as above, but using a higher epsilon
+    params['oc-009'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **base_agent_params,
+            'deliberation_cost': 0.01,
+            'termination_reg': 0,
+            'num_options': 2,
+            'behaviour_eps': 0.1,
+            'target_eps': 0.1,
+        }
+    }
+
+    # Save as above, but using rmsprop
+    params['oc-010'] = {
+        'type': OptionCriticAgent,
+        'parameters': {
+            **base_agent_params,
+            'deliberation_cost': 0.01,
+            'termination_reg': 0,
+            'num_options': 2,
+            'behaviour_eps': 0.1,
+            'target_eps': 0.1,
+            'optimizer': 'rmsprop',
+        }
+    }
+
     return params
 
 def get_env_params():
@@ -251,6 +308,31 @@ def get_params():
         **base_exp_params,
     }
 
+    params['exp-010'] = { # exp-001 works, but exp-009(-02) doesn't. Testing exp-001, but just with delibration cost added.
+        **params['exp-001'],
+        'agent': agent_params['oc-006'],
+    }
+
+    params['exp-011'] = { # exp-010 works. Remove termination regularization and try again.
+        **params['exp-001'],
+        'agent': agent_params['oc-007'],
+    }
+
+    params['exp-012'] = { # exp-011 works. Add more options now (2 options)
+        **params['exp-001'],
+        'agent': agent_params['oc-008'],
+    }
+
+    params['exp-013'] = { # exp-012 works but is degenerate. Increase epsilon.
+        **params['exp-001'],
+        'agent': agent_params['oc-009'],
+    }
+
+    params['exp-013-1'] = { # Using rmsprop instead of adam
+        **params['exp-001'],
+        'agent': agent_params['oc-010'],
+    }
+
     return params
 
 def make_app():
@@ -262,6 +344,7 @@ def make_app():
             trial_id : Optional[str] = None,
             results_directory : Optional[str] = None,
             slurm : bool = typer.Option(False, '--slurm'),
+            wandb : bool = typer.Option(False, '--wandb'),
             debug : bool = typer.Option(False, '--debug')):
         config = get_params()[exp_name]
         if debug:
@@ -293,9 +376,10 @@ def make_app():
                     slurm_split=slurm,
                     verbose=True,
             )
-            #exp_runner.exp.logger.init_wandb({
-            #    'project': f'Compressibility-train-{exp_name} (debug)',
-            #})
+            if wandb:
+                exp_runner.exp.logger.init_wandb({
+                    'project': f'Compressibility-train-{exp_name} (debug)',
+                })
         else:
             exp_runner = make_experiment_runner(
                     TrainExperiment,
@@ -308,9 +392,10 @@ def make_app():
                     verbose=True,
                     modifiable=True,
             )
-            exp_runner.exp.logger.init_wandb({
-                'project': f'Compressibility-train-{exp_name}',
-            })
+            if wandb:
+                exp_runner.exp.logger.init_wandb({
+                    'project': f'Compressibility-train-{exp_name}',
+                })
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
 

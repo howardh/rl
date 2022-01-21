@@ -1,6 +1,5 @@
 import os
 import itertools
-#from typing import Mapping
 
 import gym
 from gym.wrappers import FrameStack#, AtariPreprocessing
@@ -53,7 +52,13 @@ def make_env(env_name, config={}, atari=False, one_hot_obs=False, atari_config={
 class TrainExperiment(Experiment):
     """ An experiment for training a standard RL algorithm. """
     def setup(self, config, output_directory=None):
-        self.logger = Logger(key_name='step',allow_implicit_key=True)
+        assert output_directory is not None
+        self.logger = Logger(
+                key_name='step',
+                allow_implicit_key=True,
+                in_memory=False,
+                max_file_length=config.get('logger_max_file_length', None),
+                filename=os.path.join(output_directory,'log.pkl'))
         self.logger.log(step=0)
 
         self.device = self._init_device()

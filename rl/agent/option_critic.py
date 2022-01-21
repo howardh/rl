@@ -370,7 +370,7 @@ class OptionCriticAgent(DeployableAgent):
                 option_values_current = net_output['q'][batch1,option],
                 option_values_max = (1-target_eps)*net_output['q'][batch1,:].max(1)[0]+target_eps*net_output['q'][batch1,:].mean(1),
                 termination_reg = self.termination_reg,
-                deliberation_cost=self.deliberation_cost,
+                deliberation_cost = self.deliberation_cost,
         )
         # Q loss
         state_value_estimates = monte_carlo_return_iterative(
@@ -445,12 +445,14 @@ class OptionCriticAgent(DeployableAgent):
                 if testing:
                     self.logger.append(
                             testing_option_duration=self._current_option_duration[env_key],
-                            testing_option_choice=option
+                            testing_option_choice=option,
+                            testing_all_option_values=pi['q'].squeeze().tolist(),
                     )
                 else:
                     self.logger.append(
                             training_option_duration=self._current_option_duration[env_key],
-                            training_option_choice=option
+                            training_option_choice=option,
+                            training_all_option_values=pi['q'].squeeze().tolist(),
                     )
             self._current_option[env_key] = option
             self._current_option_duration[env_key] = 1

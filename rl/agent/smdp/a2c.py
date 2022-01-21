@@ -1210,6 +1210,19 @@ class A2CAgentRecurrent(A2CAgent):
         #return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
         return (max_eps-min_eps)*np.exp(-self._steps/max_steps)+min_eps # Exponential
 
+    def state_dict(self):
+        return {
+                **super().state_dict(),
+                '_prev_hidden': self._prev_hidden,
+                'hidden_reset_min_prob': self.hidden_reset_min_prob,
+                'hidden_reset_max_prob': self.hidden_reset_max_prob,
+        }
+    def load_state_dict(self, state):
+        self._prev_hidden = state.pop('_prev_hidden')
+        self.hidden_reset_min_prob = state.pop('hidden_reset_min_prob')
+        self.hidden_reset_max_prob = state.pop('hidden_reset_max_prob')
+        super().load_state_dict(state)
+
 if __name__ == "__main__":
     import torch.cuda
     import numpy as np
@@ -1378,12 +1391,13 @@ if __name__ == "__main__":
                 #trial_id='checkpointtest',
                 checkpoint_frequency=250_000,
                 #checkpoint_frequency=None,
-                max_iterations=50_000_000,
+                #max_iterations=50_000_000,
+                max_iterations=500_000,
                 verbose=True,
         )
-        exp_runner.exp.logger.init_wandb({
-            'project': 'A2C-recurrent-%s' % env_name.replace('/','_')
-        })
+        #exp_runner.exp.logger.init_wandb({
+        #    'project': 'A2C-recurrent-%s' % env_name.replace('/','_')
+        #})
         exp_runner.run()
 
     #run_mujoco()

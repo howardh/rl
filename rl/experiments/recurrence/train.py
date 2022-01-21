@@ -1,9 +1,9 @@
 import os
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 import dill
-
+import experiment.logger
 from experiment import load_checkpoint, make_experiment_runner
 from experiment.logger import Logger
 
@@ -95,6 +95,7 @@ def make_app():
             trial_id : Optional[str] = None,
             results_directory : Optional[str] = None,
             slurm : bool = typer.Option(False, '--slurm'),
+            wandb : bool = typer.Option(False, '--wandb'),
             debug : bool = typer.Option(False, '--debug')):
         config = get_params()[exp_name]
         if debug:
@@ -111,9 +112,10 @@ def make_app():
                     verbose=True,
                     modifiable=True,
             )
-            #exp_runner.exp.logger.init_wandb({
-            #    'project': 'A2C-recurrent-%s' % env_name.replace('/','_')
-            #})
+            if wandb:
+                exp_runner.exp.logger.init_wandb({
+                    'project': f'A2C-recurrent-{exp_name}'
+                })
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
 
@@ -132,62 +134,30 @@ def make_app():
             x = dill.load(f)
         logger = Logger()
         logger.load_state_dict(x['exp']['logger'])
+        if isinstance(logger.data, experiment.logger.FileBackedList):
+            logger.data.iterate_past_end = True
         output_directory = x['exp']['output_directory']
         plot_directory = os.path.join(output_directory,'plots')
         os.makedirs(plot_directory,exist_ok=True)
 
-        filename = os.path.abspath(os.path.join(plot_directory,'plot-so-val.png'))
-        eplt.plot(logger,
-                filename=filename,
-                curves=[{
-                    'key': 'agent_state_option_value',
-                    'smooth_fn': EMASmoothing(0.9),
-                }],
-                min_points=2,
-                xlabel='Steps',
-                ylabel='State Option Value',
-                #aggregate='mean',
-        )
-        print(f'Plot saved to {filename}')
-
-        filename = os.path.abspath(os.path.join(plot_directory,'plot-rewards.png'))
-        eplt.plot(logger,
-                filename=filename,
-                curves=[{
-                    'key': 'train_reward_by_episode',
-                    'smooth_fn': EMASmoothing(0.9),
-                }],
-                min_points=2,
-                xlabel='Steps',
-                ylabel='Rewards',
-                aggregate='mean',
-                show_unaggregated=False,
-        )
-        print(f'Plot saved to {filename}')
-
-        filename = os.path.abspath(os.path.join(plot_directory,'plot-option-choice.png'))
-        eplt.stacked_area_plot(logger,
-                filename=filename,
-                key='agent_option_choice_count',
-                title='Option choice relative frequencies',
-        )
-        print(f'Plot saved to {filename}')
-
-        for k in ['agent_total_loss','agent_termination_loss','agent_policy_loss','agent_entropy_loss','agent_critic_loss','agent_training_option_duration']:
-            filename = os.path.abspath(os.path.join(plot_directory,f'plot-{k}.png'))
-            eplt.plot(logger,
-                    filename=filename,
-                    curves=[{
-                        'key': k,
-                        'smooth_fn': EMASmoothing(0.9),
-                    }],
-                    min_points=2,
-                    xlabel='Steps',
-                    ylabel=k,
-                    aggregate='mean',
-                    show_unaggregated=False,
-            )
-            print(f'Plot saved to {filename}')
+        for k in ['agent_train_state_value_target_net', 'agent_train_state_value', 'train_reward', 'train_reward_by_episode']:
+            try:
+                filename = os.path.abspath(os.path.join(plot_directory,f'plot-{k}.png'))
+                eplt.plot(logger,
+                        filename=filename,
+                        curves=[{
+                            'key': k,
+                            'smooth_fn': EMASmoothing(0.9),
+                        }],
+                        min_points=2,
+                        xlabel='Steps',
+                        ylabel=k,
+                        aggregate='mean',
+                        show_unaggregated=False,
+                )
+                print(f'Plot saved to {filename}')
+            except KeyError:
+                print(f'Could not plot {k}. Key not found.')
 
     commands = {
             'run': run,
