@@ -106,13 +106,13 @@ class TrainExperiment(Experiment):
         #tqdm.write(pprint.pformat(test_results[i], indent=4))
         #tqdm.write('Mean weights:')
         #tqdm.write(pprint.pformat([x.abs().mean().item() for x in agent.qu_net.parameters()], indent=4))
-        self.logger.log(test_rewards=test_rewards, test_rewards_mean=np.mean(test_rewards))
+        self.logger.log(test_rewards=test_rewards, test_rewards_mean=np.array(test_rewards).mean())
         # Plot
         plot_filename = os.path.join(self.output_directory,'plot.png')
         plot(logger=self.logger, curves=['test_rewards'], filename=plot_filename, xlabel='steps', ylabel='test rewards')
         # Terminal output
         if self.verbose:
-            mean_reward = np.mean(test_rewards)
+            mean_reward = np.array(test_rewards).mean()
             tqdm.write(f'Iteration {i}\t Average testing reward: {mean_reward}')
             tqdm.write('Plot saved to %s' % os.path.abspath(plot_filename))
     def _train(self,i):

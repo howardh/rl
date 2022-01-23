@@ -7,8 +7,8 @@ import experiment.logger
 from experiment import load_checkpoint, make_experiment_runner
 from experiment.logger import Logger
 
-from rl.agent.smdp.a2c import A2CAgentRecurrent
-from rl.experiments.training.basic import TrainExperiment
+from rl.agent.smdp.a2c import A2CAgentRecurrentVec
+from rl.experiments.training.vectorized import TrainExperiment
 
 def merge(source, destination):
     """
@@ -48,38 +48,45 @@ class ExperimentConfigs(dict):
 def get_params():
     params = ExperimentConfigs()
 
-    num_actors = 16
-    train_env_keys = list(range(num_actors))
-    env_name = 'ALE/Pong-v5'
+    num_envs = 16
+    env_name = 'Pong-v5'
+    #env_config = {
+    #    'frameskip': 1,
+    #    'mode': 0,
+    #    'difficulty': 0,
+    #    'repeat_action_probability': 0.25,
+    #}
     env_config = {
-        'frameskip': 1,
-        'mode': 0,
-        'difficulty': 0,
-        'repeat_action_probability': 0.25,
+            'env_name': env_name,
+            'atari': True,
+            'atari_config': {
+                'num_envs': num_envs
+            }
     }
 
     params.add('exp-001', {
         'agent': {
-            'type': A2CAgentRecurrent,
+            'type': A2CAgentRecurrentVec,
             'parameters': {
-                'training_env_keys': train_env_keys,
-                'max_rollout_length': 5,
+                'target_update_frequency': 32_000,
+                'num_train_envs': num_envs,
+                'num_test_envs': 1,
+                'max_rollout_length': 128,
                 'hidden_reset_min_prob': 0,
                 'hidden_reset_max_prob': 0,
             },
         },
-        'env_test': {'env_name': env_name, 'atari': True, 'config': env_config, 'frame_stack': 1},
-        'env_train': {'env_name': env_name, 'atari': True, 'config': env_config, 'frame_stack': 1},
-        'train_env_keys': train_env_keys,
+        'env_test': env_config,
+        'env_train': env_config,
         'test_frequency': None,
-        'save_model_frequency': 250_000,
+        'save_model_frequency': None,
         'verbose': True,
     })
 
     params.add_change('exp-002', {
         'agent': {
             'parameters': {
-                'max_rollout_length': 32
+                #'max_rollout_length': 32
             },
         },
     })
@@ -107,7 +114,7 @@ def make_app():
                     results_directory=results_directory,
                     trial_id=trial_id,
                     checkpoint_frequency=250_000,
-                    max_iterations=50_000_000,
+                    max_iterations=5_000_000,
                     slurm_split=slurm,
                     verbose=True,
                     modifiable=True,
@@ -140,7 +147,7 @@ def make_app():
         plot_directory = os.path.join(output_directory,'plots')
         os.makedirs(plot_directory,exist_ok=True)
 
-        for k in ['agent_train_state_value_target_net', 'agent_train_state_value', 'train_reward', 'train_reward_by_episode']:
+        for k in ['agent_train_state_value_target_net', 'agent_train_state_value', 'train_reward', 'reward']:
             try:
                 filename = os.path.abspath(os.path.join(plot_directory,f'plot-{k}.png'))
                 eplt.plot(logger,

@@ -219,7 +219,7 @@ def default_load_state_dict(obj, state):
                     raise Exception(f'Object {obj} does not have attribute {k}')
 
 def get_env_state(env):
-    from rl.experiments.training.basic import AtariPreprocessing
+    from rl.experiments.training._utils import AtariPreprocessing
     import gym.wrappers.frame_stack
     import gym.wrappers.time_limit
     import gym.envs.atari.environment
@@ -243,6 +243,8 @@ def get_env_state(env):
     if isinstance(env,gym.envs.atari.environment.AtariEnv):
         # https://github.com/openai/gym/issues/402#issuecomment-260744758
         return env.clone_state(include_rng=True)
+    if type(env).__name__ == 'AtariGymEnvPool':
+        return None # TODO: How do I save an envpool state? I can't pickle the entire environment.
     try:
         # This needs to be in a try block because mujoco might not be installed on the machine.
         # There's no reason to require mujoco to be installed if it's not being used, so we just ignore this.
@@ -258,7 +260,7 @@ def get_env_state(env):
     raise NotImplementedError(f'Unable to handle environment of type {env_type}')
 
 def set_env_state(env, state):
-    from rl.experiments.training.basic import AtariPreprocessing
+    from rl.experiments.training._utils import AtariPreprocessing
     import gym.wrappers.frame_stack
     import gym.wrappers.time_limit
     import gym.envs.atari.environment
@@ -280,6 +282,8 @@ def set_env_state(env, state):
         # https://github.com/openai/gym/issues/402#issuecomment-260744758
         env.restore_state(state)
         return
+    if type(env).__name__ == 'AtariGymEnvPool':
+        return # TODO: How do I save an envpool state? I can't pickle the entire environment.
     try:
         # This needs to be in a try block because mujoco might not be installed on the machine.
         # There's no reason to require mujoco to be installed if it's not being used, so we just ignore this.
