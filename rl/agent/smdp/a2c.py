@@ -246,6 +246,15 @@ class PolicyValueNetworkRecurrentFCNN(PolicyValueNetworkRecurrent):
                 torch.zeros([batch_size,self.hidden_size]),
         )
 
+class PolicyValueNetworkRecurrentCNNNotRecurrent(PolicyValueNetworkRecurrentCNN):
+    """ A model which acts both as a policy network and a state-value estimator.
+    Same architecture as the recurrent network, but the hidden state is always 0.
+    """
+    def forward(self, x, hidden=None) -> PolicyValueNetworkOutput:
+        batch_size = x.size(0)
+        hidden = self.init_hidden(batch_size)
+        return super().forward(x,hidden)
+
 def compute_mc_state_value_loss(
         state_values : Union[torch.Tensor,List[torch.Tensor]],
         last_state_target_value: float,
@@ -511,6 +520,9 @@ def zip_dict(*dcts):
         return
     for i in set(dcts[0]).intersection(*dcts[1:]):
         yield (i, tuple(d[i] for d in dcts))
+
+##################################################
+# Non-Vectorized Agents
 
 class A2CAgent(DeployableAgent):
     """
@@ -1219,6 +1231,9 @@ class A2CAgentRecurrent(A2CAgent):
         self.hidden_reset_max_prob = state.pop('hidden_reset_max_prob')
         super().load_state_dict(state)
 
+##################################################
+# Vectorized Agents
+
 class A2CAgentVec(DeployableAgent):
     """
     Implementation of A2C.
@@ -1302,8 +1317,13 @@ class A2CAgentVec(DeployableAgent):
                         shared_std=False
                 ).to(device)
             if len(observation_space.shape) == 3: # Atari
-                return PolicyValueNetworkCNN(
-                        action_space.n
+                #return PolicyValueNetworkCNN(
+                #        action_space.n
+                #).to(device)
+                return PolicyValueNetworkRecurrentCNNNotRecurrent(
+                        num_actions=action_space.n,
+                        hidden_size=512,
+                        in_channels=4,
                 ).to(device)
         raise Exception('Unsupported observation space or action space.')
 
@@ -1484,6 +1504,265 @@ class A2CAgentVec(DeployableAgent):
     def load_state_dict_deploy(self, state):
         state = state
         pass # TODO
+
+class A2CAgentRecurrentVec(A2CAgentVec):
+    def __init__(self,
+            action_space : gym.spaces.Box,
+            observation_space : gym.spaces.Box,
+            discount_factor : float = 0.99,
+            learning_rate : float = 1e-4,
+            target_update_frequency : int = 40_000, # Mnih 2016 - section 8
+            polyak_rate : float = 1.0,              # Mnih 2016 - section 8
+            max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
+            num_train_envs : int = 16,
+            num_test_envs : int = 4,
+            obs_scale : float = 1/255,
+            reward_scale : float = 1,
+            hidden_reset_min_prob : float = 0,
+            hidden_reset_max_prob : float = 0,
+            device : torch.device = torch.device('cpu'),
+            net : PolicyValueNetworkRecurrent = None,
+            logger : Logger = None,
+        ):
+        super().__init__(
+                action_space = action_space,
+                observation_space = observation_space,
+                discount_factor = discount_factor,
+                learning_rate = learning_rate,
+                target_update_frequency = target_update_frequency,
+                polyak_rate = polyak_rate,
+                max_rollout_length = max_rollout_length,
+                num_train_envs = num_train_envs,
+                num_test_envs = num_test_envs,
+                obs_scale = obs_scale,
+                reward_scale = reward_scale,
+                device = device,
+                net = net,
+                logger = logger,
+        )
+        self.hidden_reset_min_prob = hidden_reset_min_prob
+        self.hidden_reset_max_prob = hidden_reset_max_prob
+        self._prev_hidden = None
+    def _init_default_net(self, observation_space, action_space,device) -> PolicyValueNetworkRecurrent:
+        if isinstance(observation_space, gym.spaces.Box):
+            assert observation_space.shape is not None
+            if len(observation_space.shape) == 1: # Mujoco
+                return PolicyValueNetworkRecurrentFCNN(
+                        num_features=observation_space.shape[0],
+                        num_actions=action_space.shape[0],
+                        shared_std=False
+                ).to(device)
+            if len(observation_space.shape) == 3: # Atari
+                return PolicyValueNetworkRecurrentCNN(
+                        num_actions=action_space.n,
+                        hidden_size=512,
+                        in_channels=observation_space.shape[0],
+                ).to(device)
+                #return PolicyValueNetworkRecurrentCNNNotRecurrent(
+                #        num_actions=action_space.n,
+                #        hidden_size=512,
+                #        in_channels=observation_space.shape[0],
+                #).to(device)
+        raise Exception('Unsupported observation space or action space.')
+    def observe(self, obs, reward=None, terminal=None, testing=False, time=1, discount=None):
+        assert isinstance(self.net, PolicyValueNetworkRecurrent)
+        batch_size = obs.shape[0]
+        if discount is None:
+            discount = self.discount_factor
+
+        if testing:
+            history = self.test_history_buffer
+        else:
+            history = self.train_history_buffer
+
+        if reward is not None:
+            reward *= self.reward_scale
+
+        hidden_reset_prob = self._compute_annealed_epsilon(
+                max_eps=self.hidden_reset_max_prob, min_eps=self.hidden_reset_min_prob, max_steps=1_000_000)
+        hidden_reset = not testing and np.random.rand(batch_size) < hidden_reset_prob
+        if terminal is not None:
+            hidden_reset = hidden_reset | terminal
+        hidden_reset = torch.tensor(hidden_reset,device=self.device).unsqueeze(1)
+        if self._prev_hidden is None:
+            self._prev_hidden = self.net.init_hidden(batch_size=batch_size)
+        else:
+            self._prev_hidden = ( # FIXME: Hard-coded hidden state format
+                hidden_reset*self.net.init_hidden(batch_size=batch_size)[0],
+                hidden_reset*self.net.init_hidden(batch_size=batch_size)[1],
+            )
+
+        history.append_obs(obs, reward, terminal,
+                misc={
+                    'discount': torch.tensor([discount**time]*batch_size),
+                    'hidden': tuple([x.squeeze() for x in self._prev_hidden]),
+                    'hidden_reset': hidden_reset
+                })
+
+        # Choose next action
+        net_output = self.net(
+                torch.tensor(obs,device=self.device).float()*self.obs_scale,
+                hidden=self._prev_hidden
+        )
+        assert 'hidden' in net_output
+        self._prev_hidden = tuple([x.detach() for x in net_output['hidden']])
+        if isinstance(self.action_space, gym.spaces.Discrete):
+            assert 'action' in net_output
+            action_probs_unnormalized = net_output['action']
+            action_probs = action_probs_unnormalized.softmax(1).squeeze()
+            assert (torch.abs(action_probs.sum(1)-1) < 1e-6).all()
+            action_dist = torch.distributions.Categorical(action_probs)
+            action = action_dist.sample().cpu().numpy()
+        elif isinstance(self.action_space, gym.spaces.Box):
+            assert 'action_mean' in net_output
+            assert 'action_std' in net_output
+            action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
+            action = action_dist.sample().cpu().numpy()
+        else:
+            raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
+        self.logger.log(train_entropy=action_dist.entropy().mean().item())
+
+        assert 'value' in net_output
+        state_value = net_output['value']
+        self.state_values_current.append(state_value.mean().item())
+
+        history.append_action(action)
+
+        # Save training data and train
+        if not testing:
+            self._steps += self.num_training_envs
+            if not isinstance(self.logger, SubLogger):
+                self.logger.log(step=self._steps)
+
+            self.logger.log(
+                    debug_state_value=state_value.mean().item(),
+                    hidden_reset_prob=hidden_reset_prob,
+            )
+
+            self._train()
+            self._update_target()
+    def _train(self):
+        history = self.train_history_buffer
+        t_max = self.max_rollout_length
+
+        # Check if we've accumulated enough data
+        num_points = len(history.obs_history)
+        if num_points >= t_max:
+            n = num_points
+            try:
+                misc = history.misc
+                assert isinstance(misc,dict)
+                hidden = misc['hidden']
+                hidden_reset = misc['hidden_reset']
+                discount = misc['discount']
+
+                obs = history.obs.float()*self.obs_scale
+                action = history.action
+                reward = history.reward
+                terminal = history.terminal
+
+                net_output = []
+                h = (hidden[0][0,:,:],hidden[1][0,:,:])
+                for o,hr in zip(obs,hidden_reset):
+                    h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
+                            h[0]*hr.logical_not(),
+                            h[1]*hr.logical_not(),
+                    )
+                    no = self.net(o,h)
+                    h = no['hidden']
+                    net_output.append(no)
+                net_output = default_collate(net_output)
+
+                target_net_output = []
+                h = (hidden[0][0,:,:],hidden[1][0,:,:])
+                for o,hr in zip(obs,hidden_reset):
+                    h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
+                            h[0]*hr.logical_not(),
+                            h[1]*hr.logical_not(),
+                    )
+                    no = self.target_net(o,h)
+                    h = no['hidden']
+                    target_net_output.append(no)
+                target_net_output = default_collate(target_net_output)
+
+                state_values = net_output['value'].squeeze(2)
+                target_state_values = target_net_output['value'].squeeze(2)
+
+                if isinstance(self.action_space,gym.spaces.Discrete):
+                    log_action_probs = net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
+                    entropy = -(net_output['action'].log_softmax(2)*net_output['action'].softmax(2)).sum(2).mean()
+                else:
+                    raise NotImplementedError()
+                    #log_action_probs = {
+                    #    ek: compute_normal_log_prob_batch(
+                    #            outputs['action_mean'],
+                    #            outputs['action_std'],
+                    #            torch.tensor(action_history[ek],device=self.device))
+                    #    for ek,outputs in net_output.items()}
+                    #entropy = {ek: 
+                    #    compute_normal_entropy(out['action_mean'],out['action_std'])
+                    #    for ek,out in net_output.items()
+                    #}
+            except:
+                raise
+            # Train policy
+            loss_pi = advantage_policy_gradient_loss_batch(
+                    log_action_probs = log_action_probs[:n-1,:],
+                    state_values = state_values[:n-1,:].detach(),
+                    next_state_values = target_state_values[1:,:],
+                    rewards = reward[1:,:],
+                    terminals = terminal[1:,:],
+                    prev_terminals = terminal[:n-1,:],
+                    discounts = discount[1:,:],
+            )
+            loss_pi = loss_pi.mean()
+            # Train value network
+            state_value_estimate = monte_carlo_return_iterative_batch(
+                    state_values = target_state_values[1:,:].detach(),
+                    rewards = reward[1:,:],
+                    terminals = terminal[1:,:],
+                    discounts = discount[1:,:],
+            )
+            loss_v = (state_values[:-1,:]-state_value_estimate)**2
+            loss_v = loss_v.mean()
+            # Entropy
+            loss_entropy = -entropy.mean()
+            # Take a gradient step
+            loss = loss_pi+loss_v+0.01*loss_entropy
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            # Clear data
+            self.train_history_buffer.clear()
+            # Log
+            self._training_steps += 1
+            self.logger.log(
+                    loss_pi=loss_pi.item(),
+                    loss_v=loss_v.item(),
+                    loss_entropy=loss_entropy.item(),
+                    loss_total=loss.item(),
+                    train_state_value=state_values.mean().item(),
+                    train_state_value_target_net=target_state_values.mean().item(),
+            )
+
+    def _compute_annealed_epsilon(self, max_eps, min_eps, max_steps=1_000_000):
+        if max_steps == 0:
+            return min_eps
+        #return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
+        return (max_eps-min_eps)*np.exp(-self._steps/max_steps)+min_eps # Exponential
+
+    def state_dict(self):
+        return {
+                **super().state_dict(),
+                '_prev_hidden': self._prev_hidden,
+                'hidden_reset_min_prob': self.hidden_reset_min_prob,
+                'hidden_reset_max_prob': self.hidden_reset_max_prob,
+        }
+    def load_state_dict(self, state):
+        self._prev_hidden = state.pop('_prev_hidden')
+        self.hidden_reset_min_prob = state.pop('hidden_reset_min_prob')
+        self.hidden_reset_max_prob = state.pop('hidden_reset_max_prob')
+        super().load_state_dict(state)
 
 if __name__ == "__main__":
     import torch.cuda
@@ -1682,9 +1961,9 @@ if __name__ == "__main__":
             max_rollout_length=8,
             device=device,
         )
-        agent.logger.init_wandb({
-            'project': 'A2C-envpool-%s' % env_name.replace('/','_')
-        })
+        #agent.logger.init_wandb({
+        #    'project': 'A2C-envpool-%s' % env_name.replace('/','_')
+        #})
 
         total_reward = 0
         obs = env.reset()
