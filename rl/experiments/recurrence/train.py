@@ -83,12 +83,22 @@ def get_params():
         'verbose': True,
     })
 
+    # Decrease framestack from default of 4 to 3 (working)
     params.add_change('exp-002', {
-        'agent': {
-            'parameters': {
-                #'max_rollout_length': 32
-            },
-        },
+        'env_test':  {'atari_config': {'stack_num': 3}},
+        'env_train': {'atari_config': {'stack_num': 3}},
+    })
+
+    # Decrease framestack to 2
+    params.add_change('exp-003', {
+        'env_test':  {'atari_config': {'stack_num': 2}},
+        'env_train': {'atari_config': {'stack_num': 2}},
+    })
+
+    # Decrease framestack to 1
+    params.add_change('exp-004', {
+        'env_test':  {'atari_config': {'stack_num': 1}},
+        'env_train': {'atari_config': {'stack_num': 1}},
     })
 
     return params
