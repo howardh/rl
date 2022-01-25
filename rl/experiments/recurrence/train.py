@@ -40,7 +40,7 @@ class ExperimentConfigs(dict):
         if inherit is None:
             self[key] = config
         else:
-            self[key] = merge(self[inherit],config)
+            self[key] = merge(config,self[inherit])
         self._last_key = key
     def add_change(self, key, config):
         self.add(key, config, inherit=self._last_key)
@@ -99,6 +99,15 @@ def get_params():
     params.add_change('exp-004', {
         'env_test':  {'atari_config': {'stack_num': 1}},
         'env_train': {'atari_config': {'stack_num': 1}},
+    })
+
+    params.add_change('exp-005', {
+        'agent': {
+            'parameters': {
+                'hidden_reset_min_prob': 0,
+                'hidden_reset_max_prob': 0.5,
+            },
+        },
     })
 
     return params
