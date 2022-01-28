@@ -831,14 +831,14 @@ class A2CAgent(DeployableAgent):
         default_load_state_dict(self,state)
 
     def state_dict_deploy(self):
-        return {
-            'action_space': self.action_space,
-            'observation_space': self.observation_space,
-            # TODO
-        }
+        return default_state_dict(self, [
+            'action_space',
+            'observation_space',
+            'net',
+        ])
     def load_state_dict_deploy(self, state):
-        state = state
-        pass # TODO
+        default_load_state_dict(self,state)
+
 
 class PPOAgent(A2CAgent):
     def __init__(self,
@@ -976,6 +976,7 @@ class PPOAgent(A2CAgent):
         history.clear()
         # Log
         self._training_steps += 1
+
 
 class A2CAgentRecurrent(A2CAgent):
     def __init__(self,
@@ -1231,6 +1232,7 @@ class A2CAgentRecurrent(A2CAgent):
         self.hidden_reset_max_prob = state.pop('hidden_reset_max_prob')
         super().load_state_dict(state)
 
+
 ##################################################
 # Vectorized Agents
 
@@ -1255,6 +1257,7 @@ class A2CAgentVec(DeployableAgent):
             obs_scale : float = 1/255,
             reward_scale : float = 1,
             device : torch.device = torch.device('cpu'),
+            optimizer : str = 'rmsprop', # adam or rmsprop
             net : PolicyValueNetwork = None,
             logger : Logger = None,
         ):
@@ -1294,8 +1297,12 @@ class A2CAgentVec(DeployableAgent):
             self.net = net
             self.net.to(device)
         self.target_net = copy.deepcopy(self.net)
-        #self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
-        self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=learning_rate)
+        if optimizer == 'adam':
+            self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
+        elif optimizer == 'rmsprop':
+            self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=learning_rate)
+        else:
+            raise Exception(f'Unsupported optimizer: "{optimizer}". Use "adam" or "rmsprop".')
 
         # Logging
         if logger is None:
@@ -1494,16 +1501,19 @@ class A2CAgentVec(DeployableAgent):
         ])
     def load_state_dict(self, state):
         default_load_state_dict(self,state)
+        # The environment will be reset, so clear the buffer
+        self.train_history_buffer.clear(fullclear=True)
+        self.test_history_buffer.clear(fullclear=True)
 
     def state_dict_deploy(self):
-        return {
-            'action_space': self.action_space,
-            'observation_space': self.observation_space,
-            # TODO
-        }
+        return default_state_dict(self, [
+            'action_space',
+            'observation_space',
+            'net',
+        ])
     def load_state_dict_deploy(self, state):
-        state = state
-        pass # TODO
+        default_load_state_dict(self,state)
+
 
 class A2CAgentRecurrentVec(A2CAgentVec):
     def __init__(self,
@@ -1521,6 +1531,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             hidden_reset_min_prob : float = 0,
             hidden_reset_max_prob : float = 0,
             device : torch.device = torch.device('cpu'),
+            optimizer : str = 'rmsprop', # adam or rmsprop
             net : PolicyValueNetworkRecurrent = None,
             logger : Logger = None,
         ):
@@ -1537,6 +1548,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 obs_scale = obs_scale,
                 reward_scale = reward_scale,
                 device = device,
+                optimizer = optimizer,
                 net = net,
                 logger = logger,
         )
@@ -1595,7 +1607,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
         history.append_obs(obs, reward, terminal,
                 misc={
                     'discount': torch.tensor([discount**time]*batch_size),
-                    'hidden': tuple([x.squeeze() for x in self._prev_hidden]),
+                    'hidden': self._prev_hidden,
                     'hidden_reset': hidden_reset
                 })
 
@@ -1662,7 +1674,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 terminal = history.terminal
 
                 net_output = []
-                h = (hidden[0][0,:,:],hidden[1][0,:,:])
+                h = (hidden[0][0],hidden[1][0])
                 for o,hr in zip(obs,hidden_reset):
                     h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
                             h[0]*hr.logical_not(),
@@ -1763,6 +1775,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
         self.hidden_reset_min_prob = state.pop('hidden_reset_min_prob')
         self.hidden_reset_max_prob = state.pop('hidden_reset_max_prob')
         super().load_state_dict(state)
+
 
 if __name__ == "__main__":
     import torch.cuda

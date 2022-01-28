@@ -10,6 +10,7 @@ from experiment.logger import Logger
 from rl.agent.smdp.a2c import A2CAgentRecurrentVec
 from rl.experiments.training.vectorized import TrainExperiment
 
+
 def merge(source, destination):
     """
     (Source: https://stackoverflow.com/a/20666342/382388)
@@ -31,6 +32,7 @@ def merge(source, destination):
 
     return destination
 
+
 class ExperimentConfigs(dict):
     def __init__(self):
         self._last_key = None
@@ -44,6 +46,7 @@ class ExperimentConfigs(dict):
         self._last_key = key
     def add_change(self, key, config):
         self.add(key, config, inherit=self._last_key)
+
 
 def get_params():
     params = ExperimentConfigs()
@@ -101,6 +104,8 @@ def get_params():
         'env_train': {'atari_config': {'stack_num': 1}},
     })
 
+    # All of the above experiments encountered catastrophic forgetting
+    # Trying a random thing to see if it helps
     params.add_change('exp-005', {
         'agent': {
             'parameters': {
@@ -110,7 +115,22 @@ def get_params():
         },
     })
 
+    # It could be due to not having enough randomness in the environment?
+    params.add('exp-006', {
+        'env_test':  {'atari_config': {'repeat_action_probability': 0.25}},
+        'env_train': {'atari_config': {'repeat_action_probability': 0.25}},
+    }, inherit='exp-004')
+
+    params.add_change('exp-007', {
+        'agent': {
+            'parameters': {
+                'max_rollout_length': 256,
+            },
+        },
+    })
+
     return params
+
 
 def make_app():
     import typer
@@ -193,9 +213,11 @@ def make_app():
 
     return app, commands
 
+
 def run():
     app,_ = make_app()
     app()
+
 
 if __name__ == "__main__":
     run()

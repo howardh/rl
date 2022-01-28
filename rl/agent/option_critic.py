@@ -171,7 +171,7 @@ class OptionCriticAgent(DeployableAgent):
         self.action_space = action_space
         self.observation_space = observation_space
         if isinstance(observation_space,gym.spaces.Box):
-            self.obs_scale = observation_space.high.max()
+            self.obs_scale = np.array(observation_space.high).max()
 
         self.discount_factor = discount_factor
         self.update_frequency = update_frequency
