@@ -1599,9 +1599,10 @@ class A2CAgentRecurrentVec(A2CAgentVec):
         if self._prev_hidden is None:
             self._prev_hidden = self.net.init_hidden(batch_size=batch_size)
         else:
+            initial_hidden = self.net.init_hidden(batch_size=batch_size)
             self._prev_hidden = ( # FIXME: Hard-coded hidden state format
-                hidden_reset*self.net.init_hidden(batch_size=batch_size)[0],
-                hidden_reset*self.net.init_hidden(batch_size=batch_size)[1],
+                hidden_reset.logical_not() * self._prev_hidden[0] + hidden_reset * initial_hidden[0],
+                hidden_reset.logical_not() * self._prev_hidden[1] + hidden_reset * initial_hidden[1],
             )
 
         history.append_obs(obs, reward, terminal,
@@ -1743,6 +1744,13 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             loss = loss_pi+loss_v+0.01*loss_entropy
             self.optimizer.zero_grad()
             loss.backward()
+            if __debug__:
+                for p in self.net.parameters():
+                    if p.grad is None:
+                        continue
+                    if p.grad.isnan().any():
+                        print('NaN gradients')
+                        breakpoint()
             self.optimizer.step()
             # Clear data
             self.train_history_buffer.clear()

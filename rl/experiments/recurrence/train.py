@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import Optional
+import copy
 
 import dill
 import experiment.logger
@@ -22,6 +23,7 @@ def merge(source, destination):
     >>> merge(b, a) == { 'first' : { 'all_rows' : { 'pass' : 'dog', 'fail' : 'cat', 'number' : '5' } } }
     True
     """
+    destination = copy.deepcopy(destination)
     for key, value in source.items():
         if isinstance(value, dict):
             # get node or create one
@@ -113,13 +115,13 @@ def get_params():
                 'hidden_reset_max_prob': 0.5,
             },
         },
-    })
+    }) # It did not help
 
     # It could be due to not having enough randomness in the environment?
     params.add('exp-006', {
         'env_test':  {'atari_config': {'repeat_action_probability': 0.25}},
         'env_train': {'atari_config': {'repeat_action_probability': 0.25}},
-    }, inherit='exp-004')
+    }, inherit='exp-004') # Looks fairly stable, but return doesn't grow much.
 
     params.add_change('exp-007', {
         'agent': {
