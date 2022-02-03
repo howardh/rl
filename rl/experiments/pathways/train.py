@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import Optional
+from pprint import pprint
 
 import gym.spaces
 import dill
@@ -14,7 +15,11 @@ from rl.experiments.recurrence.train import ExperimentConfigs
 from rl.experiments.pathways.models import ConvPolicy
 
 
-class Agent(A2CAgentRecurrentVec):
+class AttnRecAgent(A2CAgentRecurrentVec):
+    def __init__(self, recurrence_type='RecurrentAttention', num_recurrence_blocks=1, **kwargs):
+        self._recurrence_type = recurrence_type
+        self._num_recurrence_blocks = num_recurrence_blocks
+        super().__init__(**kwargs)
     def _init_default_net(self, observation_space, action_space, device) -> PolicyValueNetworkRecurrent:
         if isinstance(observation_space, gym.spaces.Box):
             assert observation_space.shape is not None
@@ -29,12 +34,14 @@ class Agent(A2CAgentRecurrentVec):
                         num_heads=8,
                         ff_size = 1024,
                         in_channels=observation_space.shape[0],
+                        recurrence_type=self._recurrence_type,
+                        num_blocks=self._num_recurrence_blocks,
                 ).to(device)
         raise Exception('Unsupported observation space or action space.')
 
 
 def get_params():
-    from rl.experiments.pathways.train import Agent # Need to import for pickling purposes
+    from rl.experiments.pathways.train import AttnRecAgent as Agent # Need to import for pickling purposes
 
     params = ExperimentConfigs()
 
@@ -66,6 +73,8 @@ def get_params():
                 'max_rollout_length': 128,
                 'hidden_reset_min_prob': 0,
                 'hidden_reset_max_prob': 0,
+                'recurrence_type': 'RecurrentAttention',
+                'num_recurrence_blocks': 1,
             },
         },
         'env_test': env_config,
@@ -73,6 +82,30 @@ def get_params():
         'test_frequency': None,
         'save_model_frequency': None,
         'verbose': True,
+    })
+
+    params.add_change('exp-002', {
+        'agent': {
+            'parameters': {
+                'recurrence_type': 'RecurrentAttention2',
+            },
+        },
+    })
+
+    params.add_change('exp-003', {
+        'agent': {
+            'parameters': {
+                'recurrence_type': 'RecurrentAttention3',
+            },
+        },
+    })
+
+    params.add_change('exp-004', {
+        'agent': {
+            'parameters': {
+                'recurrence_type': 'RecurrentAttention4',
+            },
+        },
     })
 
     return params
@@ -90,6 +123,7 @@ def make_app():
             wandb : bool = typer.Option(False, '--wandb'),
             debug : bool = typer.Option(False, '--debug')):
         config = get_params()[exp_name]
+        pprint(config)
         if debug:
             raise NotImplementedError()
         else:

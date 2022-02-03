@@ -1677,6 +1677,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 net_output = []
                 h = (hidden[0][0],hidden[1][0])
                 for o,hr in zip(obs,hidden_reset):
+                    # FIXME: This assumes that the initial hidden state is 0.
                     h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
                             h[0]*hr.logical_not(),
                             h[1]*hr.logical_not(),
@@ -1689,6 +1690,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 target_net_output = []
                 h = (hidden[0][0,:,:],hidden[1][0,:,:])
                 for o,hr in zip(obs,hidden_reset):
+                    # FIXME: This assumes that the initial hidden state is 0.
                     h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
                             h[0]*hr.logical_not(),
                             h[1]*hr.logical_not(),

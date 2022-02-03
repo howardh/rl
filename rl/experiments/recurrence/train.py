@@ -28,7 +28,7 @@ def merge(source, destination):
         if isinstance(value, dict):
             # get node or create one
             node = destination.setdefault(key, {})
-            merge(value, node)
+            destination[key] = merge(value, node)
         else:
             destination[key] = value
 
@@ -115,13 +115,13 @@ def get_params():
                 'hidden_reset_max_prob': 0.5,
             },
         },
-    }) # It did not help
+    }) # Haven't tried this since fixing the hidden state bug. Not sure if it's useful or not.
 
     # It could be due to not having enough randomness in the environment?
     params.add('exp-006', {
         'env_test':  {'atari_config': {'repeat_action_probability': 0.25}},
         'env_train': {'atari_config': {'repeat_action_probability': 0.25}},
-    }, inherit='exp-004') # Looks fairly stable, but return doesn't grow much.
+    }, inherit='exp-004') # I have no idea if this worked. The last experiment I ran was bugged and didn't use this config.
 
     params.add_change('exp-007', {
         'agent': {

@@ -45,6 +45,7 @@ class RecurrentAttention(torch.nn.Module):
 
 
 class RecurrentAttention2(torch.nn.Module):
+    # Output to next block is computed from the attention output rather than just the raw attention output
     def __init__(self, input_size, key_size, value_size, num_heads, ff_size):
         super(RecurrentAttention2, self).__init__()
         self.fc_query = torch.nn.Sequential(
@@ -91,6 +92,7 @@ class RecurrentAttention2(torch.nn.Module):
 
 
 class RecurrentAttention3(torch.nn.Module):
+    # Output to next block includes information from the block's input.
     def __init__(self, input_size, key_size, value_size, num_heads, ff_size):
         super(RecurrentAttention3, self).__init__()
         self.fc_query = torch.nn.Sequential(
@@ -144,8 +146,68 @@ class RecurrentAttention3(torch.nn.Module):
         }
 
 
+class RecurrentAttention4(torch.nn.Module):
+    # Bounded outputs with tanh
+    def __init__(self, input_size, key_size, value_size, num_heads, ff_size):
+        super(RecurrentAttention4, self).__init__()
+        self.fc_query = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, key_size),
+                torch.nn.Tanh(),
+        )
+        self.fc_key = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, key_size),
+                torch.nn.Tanh(),
+        )
+        self.fc_value = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, value_size),
+                torch.nn.Tanh(),
+        )
+        self.fc_output = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size*2, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, input_size),
+                torch.nn.Tanh(),
+        )
+        self.fc_gate = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size*2, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, 1),
+                torch.nn.Sigmoid()
+        )
+        self.attention = torch.nn.MultiheadAttention(key_size, num_heads=num_heads, batch_first=False)
+    def forward(self,
+            x: TensorType['batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float]):
+        query = self.fc_query(x).unsqueeze(0) # (1, batch_size, key_size)
+        attn_output, attn_output_weights = self.attention(query, input_keys, input_values) # (1, batch_size, value_size)
+        output_keys = self.fc_key(attn_output) # (1, batch_size, key_size)
+        output_values = self.fc_value(attn_output) # (1, batch_size, value_size)
+        output_x = self.fc_output(torch.cat([attn_output.squeeze(0),x], dim=1)) # (batch_size, value_size)
+        output_gate = self.fc_gate(torch.cat([attn_output.squeeze(0),x], dim=1)) # (batch_size, 1)
+        return {
+            'attn_output': attn_output.squeeze(0), # (batch_size, value_size)
+            'attn_output_weights': attn_output_weights.squeeze(1), # (batch_size, seq_len)
+            'key': output_keys.squeeze(0), # (batch_size, key_size)
+            'value': output_values.squeeze(0), # (batch_size, value_size)
+            'x': output_gate*output_x + (1-output_gate)*attn_output.squeeze(0) # (batch_size, value_size)
+        }
+
+
 class ConvPolicy(PolicyValueNetworkRecurrent):
-    def __init__(self, num_actions, in_channels, input_size, key_size, value_size, num_heads, ff_size, num_blocks=1):
+    def __init__(self, num_actions, in_channels, input_size, key_size, value_size, num_heads, ff_size, num_blocks=1,
+            recurrence_type='RecurrentAttention'):
         super(ConvPolicy, self).__init__()
         self.key_size = key_size
         self.input_size = input_size
@@ -166,8 +228,20 @@ class ConvPolicy(PolicyValueNetworkRecurrent):
         )
         self.fc_key = torch.nn.Linear(in_features=512, out_features=key_size)
         self.fc_value = torch.nn.Linear(in_features=512, out_features=value_size)
+
+        recurrenceCls = None
+        if recurrence_type == 'RecurrentAttention':
+            recurrenceCls = RecurrentAttention
+        elif recurrence_type == 'RecurrentAttention2':
+            recurrenceCls = RecurrentAttention2
+        elif recurrence_type == 'RecurrentAttention3':
+            recurrenceCls = RecurrentAttention3
+        elif recurrence_type == 'RecurrentAttention4':
+            recurrenceCls = RecurrentAttention4
+        else:
+            raise ValueError('Unknown recurrence type: {}'.format(recurrence_type))
         self.attention = torch.nn.ModuleList([
-                RecurrentAttention(input_size, key_size, value_size, num_heads, ff_size)
+                recurrenceCls(input_size, key_size, value_size, num_heads, ff_size)
                 for _ in range(num_blocks)
         ])
 
