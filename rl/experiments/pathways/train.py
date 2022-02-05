@@ -108,6 +108,30 @@ def get_params():
         },
     })
 
+    params.add_change('exp-005', {
+        'agent': {
+            'parameters': {
+                'recurrence_type': 'RecurrentAttention5',
+            },
+        },
+    })
+
+    params.add_change('exp-006', {
+        'agent': {
+            'parameters': {
+                'recurrence_type': 'RecurrentAttention6',
+            },
+        },
+    })
+
+    params.add_change('exp-007', {
+        'agent': {
+            'parameters': {
+                'recurrence_type': 'RecurrentAttention7',
+            },
+        },
+    })
+
     return params
 
 
@@ -119,6 +143,7 @@ def make_app():
     def run(exp_name : str,
             trial_id : Optional[str] = None,
             results_directory : Optional[str] = None,
+            max_iterations : int = 5_000_000,
             slurm : bool = typer.Option(False, '--slurm'),
             wandb : bool = typer.Option(False, '--wandb'),
             debug : bool = typer.Option(False, '--debug')):
@@ -133,7 +158,7 @@ def make_app():
                     results_directory=results_directory,
                     trial_id=trial_id,
                     checkpoint_frequency=250_000,
-                    max_iterations=5_000_000,
+                    max_iterations=max_iterations,
                     slurm_split=slurm,
                     verbose=True,
                     modifiable=True,

@@ -45,7 +45,7 @@ class RecurrentAttention(torch.nn.Module):
 
 
 class RecurrentAttention2(torch.nn.Module):
-    # Output to next block is computed from the attention output rather than just the raw attention output
+    # Output to next block is computed from the attention output rather than just being the raw attention output
     def __init__(self, input_size, key_size, value_size, num_heads, ff_size):
         super(RecurrentAttention2, self).__init__()
         self.fc_query = torch.nn.Sequential(
@@ -205,6 +205,41 @@ class RecurrentAttention4(torch.nn.Module):
         }
 
 
+class RecurrentAttention5(RecurrentAttention):
+    # Just add tanh to RecurrentAttention, which we already know to work
+    def forward(self,
+            x: TensorType['batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float]):
+        output = super().forward(x, input_keys, input_values)
+        output['x'] = output['x'].tanh()
+        output['key'] = output['x'].tanh()
+        output['value'] = output['x'].tanh()
+        return output
+
+
+class RecurrentAttention6(RecurrentAttention):
+    # RecurrentAttention5 doesn't seem to work. Try only using tanh on the value output, since that's the part that propagates through time and has a higher potential of exploding.
+    # This is working
+    def forward(self,
+            x: TensorType['batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float]):
+        output = super().forward(x, input_keys, input_values)
+        output['value'] = output['x'].tanh()
+        return output
+
+
+class RecurrentAttention7(RecurrentAttention2):
+    def forward(self,
+            x: TensorType['batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float]):
+        output = super().forward(x, input_keys, input_values)
+        output['value'] = output['x'].tanh()
+        return output
+
+
 class ConvPolicy(PolicyValueNetworkRecurrent):
     def __init__(self, num_actions, in_channels, input_size, key_size, value_size, num_heads, ff_size, num_blocks=1,
             recurrence_type='RecurrentAttention'):
@@ -229,15 +264,21 @@ class ConvPolicy(PolicyValueNetworkRecurrent):
         self.fc_key = torch.nn.Linear(in_features=512, out_features=key_size)
         self.fc_value = torch.nn.Linear(in_features=512, out_features=value_size)
 
+        recurrenceClasses = {
+                cls.__name__: cls
+                for cls in [
+                    RecurrentAttention,
+                    RecurrentAttention2,
+                    RecurrentAttention3,
+                    RecurrentAttention4,
+                    RecurrentAttention5,
+                    RecurrentAttention6,
+                    RecurrentAttention7,
+                ]
+        }
         recurrenceCls = None
-        if recurrence_type == 'RecurrentAttention':
-            recurrenceCls = RecurrentAttention
-        elif recurrence_type == 'RecurrentAttention2':
-            recurrenceCls = RecurrentAttention2
-        elif recurrence_type == 'RecurrentAttention3':
-            recurrenceCls = RecurrentAttention3
-        elif recurrence_type == 'RecurrentAttention4':
-            recurrenceCls = RecurrentAttention4
+        if recurrence_type in recurrenceClasses:
+            recurrenceCls = recurrenceClasses[recurrence_type]
         else:
             raise ValueError('Unknown recurrence type: {}'.format(recurrence_type))
         self.attention = torch.nn.ModuleList([
@@ -287,7 +328,6 @@ class ConvPolicy(PolicyValueNetworkRecurrent):
                 torch.zeros([len(self.attention), batch_size, self.key_size], device=device), # Key
                 torch.zeros([len(self.attention), batch_size, self.key_size], device=device), # Query
         )
-
 
 
 if __name__ == '__main__':
