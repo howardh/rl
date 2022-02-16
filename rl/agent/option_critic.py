@@ -12,12 +12,14 @@ import torch.distributions
 import torch.optim
 import numpy as np
 import dill
+from torch.utils.data.dataloader import default_collate
 
 from experiment.logger import Logger, SubLogger
 
-from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss
-from frankenstein.value.monte_carlo import monte_carlo_return_iterative
+from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, advantage_policy_gradient_loss_batch
+from frankenstein.value.monte_carlo import monte_carlo_return_iterative, monte_carlo_return_iterative_batch
 from frankenstein.buffer.history import HistoryBuffer
+from frankenstein.buffer.vec_history import VecHistoryBuffer
 from rl.agent.agent import DeployableAgent
 from rl.agent.smdp.a2c import compute_entropy
 
@@ -132,6 +134,17 @@ def compute_termination_loss(
     advantage = option_values_current-option_values_max+termination_reg
     advantage = advantage.detach()
     loss = (termination_prob*(advantage+deliberation_cost)).mean(0)
+    return loss
+
+def compute_termination_loss_batch(
+        termination_prob,
+        option_values_current,
+        option_values_max,
+        termination_reg,
+        deliberation_cost):
+    advantage = option_values_current-option_values_max+termination_reg
+    advantage = advantage.detach()
+    loss = (termination_prob*(advantage+deliberation_cost)).mean(1).mean(0)
     return loss
 
 class OptionCriticAgent(DeployableAgent):
@@ -532,6 +545,376 @@ class OptionCriticAgent(DeployableAgent):
     def load_state_dict_deploy(self, state):
         self.net.load_state_dict(state['net'])
 
+class OptionCriticAgentVec(OptionCriticAgent):
+    """
+    On-policy implementation of Option-Critic.
+    """
+    def __init__(self,
+            action_space : gym.spaces.Discrete,
+            observation_space : gym.spaces.Space,
+            discount_factor : float = 0.99,
+            learning_rate : float = 2.5e-4,
+            update_frequency : int = 4,
+            batch_size : int = 16*16,
+            target_update_frequency : int = 100,
+            polyak_rate : float = 1.,
+            num_train_envs : int = 16,
+            num_test_envs : int = 4,
+            device = torch.device('cpu'),
+            behaviour_eps : float = 0.1,
+            target_eps : float = 0.05,
+            eps_annealing_steps : int = 1_000_000,
+            num_options : int = 8,
+            termination_reg : float = 0.01, # From paper
+            entropy_reg : float = 0.01, # XXX: Arbitrary value
+            deliberation_cost : float = 0, # The paper studied a range of values between 0 and 0.03
+            optimizer : str = 'adam', # adam or rmsprop
+            net : torch.nn.Module = None,
+            logger : Logger = None,
+            ):
+        super().__init__(
+                action_space=action_space,
+                observation_space=observation_space,
+                discount_factor=discount_factor,
+                learning_rate=learning_rate,
+                update_frequency=update_frequency,
+                batch_size=batch_size,
+                target_update_frequency=target_update_frequency,
+                polyak_rate=polyak_rate,
+                device=device,
+                behaviour_eps=behaviour_eps,
+                target_eps=target_eps,
+                eps_annealing_steps=eps_annealing_steps,
+                num_options=num_options,
+                termination_reg=termination_reg,
+                entropy_reg=entropy_reg,
+                deliberation_cost=deliberation_cost,
+                optimizer=optimizer,
+                net=net,
+                logger=logger,
+        )
+        self.num_train_envs = num_train_envs
+        self.num_test_envs = num_test_envs
+        self.train_history_buffer = VecHistoryBuffer(
+                max_len=batch_size, num_envs=self.num_train_envs, device=device)
+        self.test_history_buffer = VecHistoryBuffer(
+                max_len=1, num_envs=self.num_test_envs, device=device)
+
+        self._current_option = [
+                torch.zeros([self.num_train_envs], dtype=torch.long, device=device),
+                torch.zeros([self.num_test_envs], dtype=torch.long, device=device),
+        ]
+        self._current_option_duration = [
+                torch.zeros([self.num_train_envs], dtype=torch.long, device=device),
+                torch.zeros([self.num_test_envs], dtype=torch.long, device=device),
+        ]
+
+        # Logging
+        self._option_choice_count = [
+                torch.zeros([self.num_train_envs,num_options], dtype=torch.long, device=device),
+                torch.zeros([self.num_test_envs,num_options], dtype=torch.long, device=device),
+        ]
+        self._option_choice_history = [[],[]]
+        self._option_term_history = [[],[]]
+
+    def observe(self, obs, reward=None, terminal=None, testing=False):
+        if reward is None: # Reset logging stuff
+            #self._option_choice_count[env_key] = [0]*self.num_options
+            #self._option_term_history[env_key] = []
+            #self._option_choice_history[env_key] = []
+            #self._current_option[env_key] = None
+            pass
+        if not testing:
+            # Count the number of transitions available for training
+            history = self.train_history_buffer
+            if len(history.obs_history) != 0:
+                self._num_training_transitions += 1
+        else:
+            # Make sure we're not reusing the same key for testing and training
+            history = self.test_history_buffer
+
+        # Reward clipping
+        if reward is not None:
+            reward = np.clip(reward, -1, 1)
+
+        history.append_obs(obs, reward, terminal)
+
+        # Add to replay buffer
+        if not testing:
+            self._steps += self.num_train_envs
+            if not isinstance(self.logger, SubLogger):
+                self.logger.log(step=self._steps)
+
+        if terminal is not None and terminal.any():
+            # Logging
+            t = torch.tensor(terminal, dtype=torch.long, device=self.device).unsqueeze(1)
+            counts = t * self._option_choice_count[testing]
+            counts = counts.sum(0)+1e-5 # Add 1e-5 to avoid division by zero
+            total = counts.sum()
+            probs = counts/total
+            entropy = -(probs*torch.log(probs)).sum()
+            self.logger.append(option_choice_entropy=entropy)
+            self._option_choice_count[testing] = (1 - t) * self._option_choice_count[testing]
+            if not testing:
+                self.logger.log(option_choice_count=counts.cpu().numpy().tolist())
+
+        # Train if appropriate
+        if self._num_training_transitions >= self.batch_size:
+            self._train()
+    def _train(self):
+        all_losses = self._compute_loss()
+        loss_policy = all_losses['policy']
+        loss_entropy = all_losses['entropy']
+        loss_termination = all_losses['termination']
+        loss_q = all_losses['q']
+
+        loss = loss_policy+loss_entropy+loss_termination+loss_q
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self._training_steps += 1
+
+        self._update_target()
+
+        # Clear lists
+        self.train_history_buffer.clear()
+        self._num_training_transitions = 0
+
+        # Logging
+        self.logger.log(
+                total_loss=loss.item(),
+                termination_loss=loss_termination.item(),
+                policy_loss=loss_policy.item(),
+                entropy_loss=loss_entropy.item(),
+                critic_loss=loss_q.item(),
+        )
+    def _compute_loss(self):
+        history = self.train_history_buffer
+        n = len(history.obs_history)
+        target_eps = self.eps[True]
+
+        obs = history.obs.float()/self.obs_scale
+        option, action = history.action
+        reward = history.reward
+        terminal = history.terminal
+
+        net_output = default_collate([self.net(o) for o in obs])
+        net_output_target = default_collate([self.net_target(o) for o in obs])
+        q = net_output['q']
+        qt = net_output_target['q']
+
+        #target_state_values_max = qt.max(1)[0]
+        #beta1 = net_output['beta'][batch1,option]
+        beta1 = net_output['beta'][1:,:,:].gather(2,option.unsqueeze(2)).squeeze(2)
+        last_beta = beta1[-1,:]
+        #last_beta = net_output['beta'][-1,:,option[-1]] # Probability of terminating option n-2 at state n-1. Note that there is no distinct option associated with the last state. It is not a mistake that the indices are misaligned.
+        def compute_target_state_value(beta, q, option, target_eps, deliberation_cost=0):
+            current_option_val = q.gather(1, option.unsqueeze(1)).squeeze(1)
+            best_option_val = (1 - target_eps) * q.max(1)[0] + target_eps  * q.mean(1)
+            return (1-beta) * current_option_val \
+                    + beta  * (best_option_val - deliberation_cost)
+        target_state_value_last = compute_target_state_value(
+                beta=last_beta,
+                q=qt[-1,:], 
+                option=option[-1,:],
+                target_eps=target_eps,
+                deliberation_cost=self.deliberation_cost
+        )
+        target_state_values = torch.cat([
+            net_output_target['q'][:-1,:,:].gather(2,option.unsqueeze(2)).squeeze(2),
+            target_state_value_last.unsqueeze(0) # Compute as an expectation because we don't know yet if the option will be terminated
+        ])
+        if isinstance(self.action_space,gym.spaces.Discrete):
+            #def gather2(x,i0,i1):
+            #    shape = list(x.shape)
+            #    new_shape = shape[:-2]+[x.size(-1)*x.size(-2)]
+            #    x = x.contiguous()
+            #    x = x.view(*new_shape)
+            #def gather2_iter(x,i0,i1):
+            #    output = torch.empty(x.size(0),x.size(1),1,1,device=x.device)
+            #    for i in range(output.size(0)):
+            #        for j in range(output.size(1)):
+            #            for k in range(output.size(2)):
+            #                for l in range(output.size(3)):
+            #                    output[i,j,k,l] = x[i,j,i0[i,j,k,l],i1[i,j,k,l]]
+            #    return output
+            #log_action_probs = gather2(
+            #        net_output['iop'].log_softmax(2)[:-1,:,:,:],
+            #        option.unsqueeze(2),
+            #        action.unsqueeze(2),
+            #)
+            log_action_probs = net_output['iop'].log_softmax(2)[:-1,:,:,:].gather(2,option.unsqueeze(2).unsqueeze(3).expand(n-1,self.num_train_envs,1,self.action_space.n)).gather(3,action.unsqueeze(2).unsqueeze(3)).squeeze(3).squeeze(2)
+            #entropy = [
+            #        compute_entropy(iop.log_softmax(1))
+            #        for iop in net_output['iop']
+            #]
+            entropy = -(net_output['iop'].log_softmax(3)*net_output['iop'].softmax(3)).sum(3).mean()
+        else:
+            raise NotImplementedError()
+        # Policy loss
+        loss_policy = advantage_policy_gradient_loss_batch(
+                log_action_probs = log_action_probs[:n-1,:],
+                state_values = target_state_values[:n-1,:].detach(),
+                next_state_values = target_state_values[1:,:].detach(),
+                rewards = reward[1:,:],
+                terminals = terminal[1:,:],
+                prev_terminals = terminal[:n-1,:],
+                discounts=torch.ones([n-1,self.num_train_envs],device=self.device)*self.discount_factor,
+        )
+        loss_policy = loss_policy.mean()
+        # Entropy loss
+        loss_entropy = -self.entropy_reg*entropy
+        # Termination loss
+        loss_term = compute_termination_loss_batch(
+                termination_prob = beta1,
+                #option_values_current = net_output['q'][batch1,option],
+                option_values_current = net_output['q'][1:,:,:].gather(2,option.unsqueeze(2)).squeeze(2),
+                option_values_max = (1-target_eps)*net_output['q'][1:,:,:].max(2)[0]+target_eps*net_output['q'][1:,:,:].mean(2),
+                termination_reg = self.termination_reg,
+                deliberation_cost = self.deliberation_cost,
+        )
+        # Q loss
+        state_value_estimates = monte_carlo_return_iterative_batch(
+                state_values = target_state_values[1:,:].detach(),
+                rewards = reward[1:,:],
+                terminals = terminal[1:,:],
+                discounts=torch.ones([n-1,self.num_train_envs],device=self.device)*self.discount_factor,
+        )
+        #loss_q = (q[batch0,option.squeeze()]-state_value_estimates)**2
+        loss_q = (q[:-1,:,:].gather(2,option.unsqueeze(2)).squeeze(2)-state_value_estimates)**2
+        loss_q = loss_q.mean()
+        # Output
+        return {
+                'policy': loss_policy,
+                'entropy': loss_entropy,
+                'termination': loss_term,
+                'q': loss_q,
+        }
+    def act(self, testing=False):
+        """ Return a random action according to an epsilon-greedy policy. """
+        num_envs = self.num_train_envs if not testing else self.num_test_envs
+
+        if testing:
+            eps = self.eps[testing]
+            history = self.test_history_buffer
+        else:
+            eps = self._compute_annealed_epsilon(self.eps_annealing_steps)
+            history = self.train_history_buffer
+
+        obs = history.obs_history[-1]
+        if isinstance(self.observation_space,gym.spaces.Discrete):
+            obs = torch.tensor(obs).to(self.device)
+        else:
+            obs = torch.tensor(obs).to(self.device).float()/self.obs_scale
+
+        if isinstance(self.observation_space,gym.spaces.Discrete):
+            # obs = obs.unsqueeze(0).unsqueeze(0)
+            raise NotImplementedError()
+        elif isinstance(self.observation_space,gym.spaces.Box):
+            pass
+        else:
+            raise NotImplementedError()
+
+        curr_option = self._current_option[testing]
+        pi = self.net(obs)
+        # Choose an option
+        terminate_probs = pi['beta'].gather(1,curr_option.unsqueeze(1)).squeeze()
+        terminate_option = terminate_probs > torch.rand(num_envs,device=self.device)
+        best_option = pi['q'].max(dim=1)[1]
+        rand_option = torch.randint(0,self.num_options,(num_envs,),device=self.device)
+        rand_option_prob = torch.rand(num_envs,device=self.device) < eps
+        option = terminate_option.long()*curr_option  \
+               + (1-terminate_option.long())*(
+                    rand_option_prob.long()*rand_option + 
+                    (1-rand_option_prob.long())*best_option
+               )
+        self._option_term_history[testing].append(terminate_option.cpu().numpy().tolist())
+        # Choose an action
+        action_probs = pi['iop'][0,option,:].softmax(dim=0)
+        dist = torch.distributions.Categorical(probs=action_probs)
+        action = dist.sample()
+
+        history.append_action((option,action))
+
+        # Save state and logging
+        #if curr_option is None or terminate_option:
+        #    if env_key in self._current_option_duration:
+        #        if testing:
+        #            self.logger.append(
+        #                    testing_option_duration=self._current_option_duration[env_key],
+        #                    testing_option_choice=option,
+        #                    testing_all_option_values=pi['q'].squeeze().tolist(),
+        #            )
+        #        else:
+        #            self.logger.append(
+        #                    training_option_duration=self._current_option_duration[env_key],
+        #                    training_option_choice=option,
+        #                    training_all_option_values=pi['q'].squeeze().tolist(),
+        #            )
+        #    self._current_option[env_key] = option
+        #    self._current_option_duration[env_key] = 1
+        #else:
+        #    self._current_option_duration[env_key] += 1
+        self._current_option_duration[testing] = terminate_option*self._current_option_duration[testing]+1
+
+        self._option_choice_count[testing][range(num_envs),option] += 1
+        self._option_choice_history[testing].append(option.cpu().numpy().tolist())
+
+        if testing:
+            vals = pi['q']
+            self.logger.append(
+                    #step=self._steps,
+                    #testing_action_value=vals[0,option,action].item(),
+                    testing_option_value_mean=vals[0,option].mean().item(),
+            )
+        else:
+            self.logger.log(
+                state_option_value_mean=pi['q'][0,option].mean().item(),
+                    #action_value=self.q_net(obs)[0,option,action].item(),
+                    #entropy=dist.entropy().item(),
+                    #action_value_diff=(pq.max()-(action_probs.squeeze() * pq.squeeze()).sum()).item()
+            )
+
+        return action.cpu().numpy()
+
+    def state_dict(self):
+        return {
+                'net': self.net.state_dict(),
+                'net_target': self.net_target.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+
+                'train_history_buffer': self.train_history_buffer,
+                'test_history_buffer': self.test_history_buffer,
+                '_steps': self._steps,
+                '_training_steps': self._training_steps,
+                '_current_option': self._current_option,
+                '_train_env_keys': self._train_env_keys,
+                '_num_training_transitions': self._num_training_transitions,
+
+                '_option_choice_count': self._option_choice_count,
+                '_current_option_duration': self._current_option_duration,
+                'logger': self.logger.state_dict(),
+        }
+    def load_state_dict(self, state):
+        self.net.load_state_dict(state['net'])
+        self.net_target.load_state_dict(state['net_target'])
+        self.optimizer.load_state_dict(state['optimizer'])
+
+        self.train_history_buffer = state['train_history_buffer']
+        self.test_history_buffer = state['test_history_buffer']
+        self._steps = state['_steps']
+        self._training_steps = state['_training_steps']
+        self._current_option = state['_current_option']
+        self._train_env_keys = state['_train_env_keys']
+        self._num_training_transitions = state['_num_training_transitions']
+
+        self._option_choice_count = state['_option_choice_count']
+        self._current_option_duration = state['_current_option_duration']
+        self.logger.load_state_dict(state['logger'])
+
+
 def make_agent_from_deploy_state(state : Union[str,Mapping], device : torch.device = torch.device('cpu')) -> OptionCriticAgent:
     if isinstance(state, str): # If it's a string, then it's the filename to the dilled state
         filename = state
@@ -734,6 +1117,46 @@ def run_discrete():
         #})
     exp_runner.run()
 
+def run_atari_envpool():
+    import envpool
+    from tqdm import tqdm
+    import itertools
+
+    device = torch.device('cuda')
+    #device = torch.device('cpu')
+    num_envs = 16
+    env_name = 'Pong-v5'
+
+    env = envpool.make(env_name, env_type="gym", num_envs=num_envs)
+    agent = OptionCriticAgentVec(
+        observation_space=env.observation_space,
+        action_space=env.action_space,
+        target_update_frequency=32_000,
+        num_train_envs=num_envs,
+        num_test_envs=5,
+        batch_size=8*num_envs,
+        device=device,
+    )
+    agent.logger.init_wandb({
+        'project': 'OptionCritic-envpool-%s' % env_name.replace('/','_')
+    })
+
+    total_reward = 0
+    obs = env.reset()
+    agent.observe(obs)
+    for _ in tqdm(itertools.count()):
+        action = agent.act()
+        obs, reward, done, _ = env.step(action)
+        agent.observe(obs, reward, done)
+
+        total_reward += reward
+
+        if done.any():
+            agent.logger.log(reward=total_reward[done].mean().item())
+            tqdm.write(str(total_reward[done].tolist()))
+            total_reward = total_reward*(1-done)
+
 if __name__ == "__main__":
-    run_atari()
+    #run_atari()
+    run_atari_envpool()
     #run_discrete()
