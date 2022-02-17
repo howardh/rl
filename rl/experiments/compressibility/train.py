@@ -150,6 +150,7 @@ def get_agent_params():
 
 def get_env_params():
     pong = [{
+        # Normal Pong
         'env_name': 'ALE/Pong-v5',
         'atari': True,
         'config': {
@@ -159,6 +160,7 @@ def get_env_params():
             'repeat_action_probability': 0.25,
         }
     },{
+        # Wobbly pong?
         'env_name': 'ALE/Pong-v5',
         'atari': True,
         'config': {
@@ -168,6 +170,7 @@ def get_env_params():
             'repeat_action_probability': 0.25,
         }
     },{
+        # Easier pong (opponent paddle smaller)
         'env_name': 'ALE/Pong-v5',
         'atari': True,
         'config': {
@@ -177,6 +180,7 @@ def get_env_params():
             'repeat_action_probability': 0.25,
         }
     },{
+        # Harder pong (player paddle smaller)
         'env_name': 'ALE/Pong-v5',
         'atari': True,
         'config': {

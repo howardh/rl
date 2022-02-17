@@ -92,7 +92,7 @@ class RecurrentAttention2(torch.nn.Module):
 
 
 class RecurrentAttention3(torch.nn.Module):
-    # Output to next block includes information from the block's input.
+    # Output to next block is gated
     def __init__(self, input_size, key_size, value_size, num_heads, ff_size):
         super(RecurrentAttention3, self).__init__()
         self.fc_query = torch.nn.Sequential(
@@ -240,6 +240,16 @@ class RecurrentAttention7(RecurrentAttention2):
         return output
 
 
+class RecurrentAttention8(RecurrentAttention3):
+    def forward(self,
+            x: TensorType['batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float]):
+        output = super().forward(x, input_keys, input_values)
+        output['value'] = output['x'].tanh()
+        return output
+
+
 class ConvPolicy(PolicyValueNetworkRecurrent):
     def __init__(self, num_actions, in_channels, input_size, key_size, value_size, num_heads, ff_size, num_blocks=1,
             recurrence_type='RecurrentAttention'):
@@ -274,6 +284,7 @@ class ConvPolicy(PolicyValueNetworkRecurrent):
                     RecurrentAttention5,
                     RecurrentAttention6,
                     RecurrentAttention7,
+                    RecurrentAttention8,
                 ]
         }
         recurrenceCls = None

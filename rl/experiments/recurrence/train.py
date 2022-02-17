@@ -184,11 +184,12 @@ def make_app():
         logger.load_state_dict(x['exp']['logger'])
         if isinstance(logger.data, experiment.logger.FileBackedList):
             logger.data.iterate_past_end = True
+        logger.load_to_memory(verbose=True)
         output_directory = x['exp']['output_directory']
         plot_directory = os.path.join(output_directory,'plots')
         os.makedirs(plot_directory,exist_ok=True)
 
-        for k in ['agent_train_state_value_target_net', 'agent_train_state_value', 'train_reward', 'reward']:
+        for k in ['agent_train_state_value_target_net', 'agent_train_state_value', 'reward']:
             try:
                 filename = os.path.abspath(os.path.join(plot_directory,f'plot-{k}.png'))
                 eplt.plot(logger,

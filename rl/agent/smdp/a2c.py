@@ -246,15 +246,6 @@ class PolicyValueNetworkRecurrentFCNN(PolicyValueNetworkRecurrent):
                 torch.zeros([batch_size,self.hidden_size]),
         )
 
-class PolicyValueNetworkRecurrentCNNNotRecurrent(PolicyValueNetworkRecurrentCNN):
-    """ A model which acts both as a policy network and a state-value estimator.
-    Same architecture as the recurrent network, but the hidden state is always 0.
-    """
-    def forward(self, x, hidden=None) -> PolicyValueNetworkOutput:
-        batch_size = x.size(0)
-        hidden = self.init_hidden(batch_size)
-        return super().forward(x,hidden)
-
 def compute_mc_state_value_loss(
         state_values : Union[torch.Tensor,List[torch.Tensor]],
         last_state_target_value: float,
@@ -1324,13 +1315,8 @@ class A2CAgentVec(DeployableAgent):
                         shared_std=False
                 ).to(device)
             if len(observation_space.shape) == 3: # Atari
-                #return PolicyValueNetworkCNN(
-                #        action_space.n
-                #).to(device)
-                return PolicyValueNetworkRecurrentCNNNotRecurrent(
-                        num_actions=action_space.n,
-                        hidden_size=512,
-                        in_channels=4,
+                return PolicyValueNetworkCNN(
+                        action_space.n
                 ).to(device)
         raise Exception('Unsupported observation space or action space.')
 

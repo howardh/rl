@@ -132,6 +132,14 @@ def get_params():
         },
     })
 
+    params.add_change('exp-008', {
+        'agent': {
+            'parameters': {
+                'recurrence_type': 'RecurrentAttention8',
+            },
+        },
+    })
+
     return params
 
 
@@ -187,6 +195,7 @@ def make_app():
         logger.load_state_dict(x['exp']['logger'])
         if isinstance(logger.data, experiment.logger.FileBackedList):
             logger.data.iterate_past_end = True
+        logger.load_to_memory(verbose=True)
         output_directory = x['exp']['output_directory']
         plot_directory = os.path.join(output_directory,'plots')
         os.makedirs(plot_directory,exist_ok=True)
