@@ -16,6 +16,7 @@ from torch.utils.data.dataloader import default_collate
 
 from experiment.logger import Logger, SubLogger
 
+from frankenstein.algorithms import option_critic
 from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, advantage_policy_gradient_loss_batch
 from frankenstein.value.monte_carlo import monte_carlo_return_iterative, monte_carlo_return_iterative_batch
 from frankenstein.buffer.history import HistoryBuffer
@@ -555,7 +556,7 @@ class OptionCriticAgentVec(OptionCriticAgent):
             discount_factor : float = 0.99,
             learning_rate : float = 2.5e-4,
             update_frequency : int = 4,
-            batch_size : int = 16*16,
+            max_rollout_length : int = 8,
             target_update_frequency : int = 100,
             polyak_rate : float = 1.,
             num_train_envs : int = 16,
@@ -578,7 +579,7 @@ class OptionCriticAgentVec(OptionCriticAgent):
                 discount_factor=discount_factor,
                 learning_rate=learning_rate,
                 update_frequency=update_frequency,
-                batch_size=batch_size,
+                batch_size=max_rollout_length*num_train_envs,
                 target_update_frequency=target_update_frequency,
                 polyak_rate=polyak_rate,
                 device=device,
@@ -595,8 +596,9 @@ class OptionCriticAgentVec(OptionCriticAgent):
         )
         self.num_train_envs = num_train_envs
         self.num_test_envs = num_test_envs
+        self.max_rollout_length = max_rollout_length
         self.train_history_buffer = VecHistoryBuffer(
-                max_len=batch_size, num_envs=self.num_train_envs, device=device)
+                max_len=max_rollout_length, num_envs=self.num_train_envs, device=device)
         self.test_history_buffer = VecHistoryBuffer(
                 max_len=1, num_envs=self.num_test_envs, device=device)
 
@@ -625,12 +627,8 @@ class OptionCriticAgentVec(OptionCriticAgent):
             #self._current_option[env_key] = None
             pass
         if not testing:
-            # Count the number of transitions available for training
             history = self.train_history_buffer
-            if len(history.obs_history) != 0:
-                self._num_training_transitions += 1
         else:
-            # Make sure we're not reusing the same key for testing and training
             history = self.test_history_buffer
 
         # Reward clipping
@@ -659,7 +657,7 @@ class OptionCriticAgentVec(OptionCriticAgent):
                 self.logger.log(option_choice_count=counts.cpu().numpy().tolist())
 
         # Train if appropriate
-        if self._num_training_transitions >= self.batch_size:
+        if len(history.obs_history) >= self.max_rollout_length:
             self._train()
     def _train(self):
         all_losses = self._compute_loss()
@@ -692,7 +690,7 @@ class OptionCriticAgentVec(OptionCriticAgent):
         )
     def _compute_loss(self):
         history = self.train_history_buffer
-        n = len(history.obs_history)
+        n = len(history.obs_history)-1
         target_eps = self.eps[True]
 
         obs = history.obs.float()/self.obs_scale
@@ -710,22 +708,19 @@ class OptionCriticAgentVec(OptionCriticAgent):
         beta1 = net_output['beta'][1:,:,:].gather(2,option.unsqueeze(2)).squeeze(2)
         last_beta = beta1[-1,:]
         #last_beta = net_output['beta'][-1,:,option[-1]] # Probability of terminating option n-2 at state n-1. Note that there is no distinct option associated with the last state. It is not a mistake that the indices are misaligned.
-        def compute_target_state_value(beta, q, option, target_eps, deliberation_cost=0):
-            current_option_val = q.gather(1, option.unsqueeze(1)).squeeze(1)
-            best_option_val = (1 - target_eps) * q.max(1)[0] + target_eps  * q.mean(1)
-            return (1-beta) * current_option_val \
-                    + beta  * (best_option_val - deliberation_cost)
-        target_state_value_last = compute_target_state_value(
-                beta=last_beta,
-                q=qt[-1,:], 
-                option=option[-1,:],
-                target_eps=target_eps,
+        target_state_value_last = option_critic.compute_expected_state_value_batch(
+                state_option_value=qt[n,:], 
+                termination_prob=last_beta,
+                option=option[n-1,:],
+                eps=target_eps,
                 deliberation_cost=self.deliberation_cost
         )
         target_state_values = torch.cat([
-            net_output_target['q'][:-1,:,:].gather(2,option.unsqueeze(2)).squeeze(2),
+            net_output_target['q'][:n,:,:].gather(2,option.unsqueeze(2)).squeeze(2),
             target_state_value_last.unsqueeze(0) # Compute as an expectation because we don't know yet if the option will be terminated
         ])
+        #if (target_state_values.abs() > 2).any():
+        #    breakpoint()
         if isinstance(self.action_space,gym.spaces.Discrete):
             #def gather2(x,i0,i1):
             #    shape = list(x.shape)
@@ -745,7 +740,8 @@ class OptionCriticAgentVec(OptionCriticAgent):
             #        option.unsqueeze(2),
             #        action.unsqueeze(2),
             #)
-            log_action_probs = net_output['iop'].log_softmax(2)[:-1,:,:,:].gather(2,option.unsqueeze(2).unsqueeze(3).expand(n-1,self.num_train_envs,1,self.action_space.n)).gather(3,action.unsqueeze(2).unsqueeze(3)).squeeze(3).squeeze(2)
+            #log_action_probs = net_output['iop'].log_softmax(3)[:-1,:,:,:].gather(2,option.unsqueeze(2).unsqueeze(3).expand(n,self.num_train_envs,1,self.action_space.n)).gather(3,action.unsqueeze(2).unsqueeze(3)).squeeze(3).squeeze(2)
+            log_action_probs = option_critic.gather_option_action_batch(net_output['iop'].log_softmax(3)[:-1,:,:,:],option,action)
             #entropy = [
             #        compute_entropy(iop.log_softmax(1))
             #        for iop in net_output['iop']
@@ -755,13 +751,13 @@ class OptionCriticAgentVec(OptionCriticAgent):
             raise NotImplementedError()
         # Policy loss
         loss_policy = advantage_policy_gradient_loss_batch(
-                log_action_probs = log_action_probs[:n-1,:],
-                state_values = target_state_values[:n-1,:].detach(),
+                log_action_probs = log_action_probs[:n,:],
+                state_values = target_state_values[:n,:].detach(),
                 next_state_values = target_state_values[1:,:].detach(),
                 rewards = reward[1:,:],
                 terminals = terminal[1:,:],
-                prev_terminals = terminal[:n-1,:],
-                discounts=torch.ones([n-1,self.num_train_envs],device=self.device)*self.discount_factor,
+                prev_terminals = terminal[:n,:],
+                discounts=torch.ones([n,self.num_train_envs],device=self.device)*self.discount_factor,
         )
         loss_policy = loss_policy.mean()
         # Entropy loss
@@ -780,11 +776,20 @@ class OptionCriticAgentVec(OptionCriticAgent):
                 state_values = target_state_values[1:,:].detach(),
                 rewards = reward[1:,:],
                 terminals = terminal[1:,:],
-                discounts=torch.ones([n-1,self.num_train_envs],device=self.device)*self.discount_factor,
+                discounts=torch.ones([n,self.num_train_envs],device=self.device)*self.discount_factor,
         )
         #loss_q = (q[batch0,option.squeeze()]-state_value_estimates)**2
         loss_q = (q[:-1,:,:].gather(2,option.unsqueeze(2)).squeeze(2)-state_value_estimates)**2
         loss_q = loss_q.mean()
+        #if (q.abs() > 2).any():
+        #    breakpoint()
+        #if (state_value_estimates.abs() > 2).any():
+        #    breakpoint()
+        # Logging
+        #self.logger.log(
+        #        train_state_value_estimates=state_value_estimates.mean().item(),
+        #        train_initial_q=q[:-1,:,:].gather(2,option.unsqueeze(2)).squeeze(2).mean().item(),
+        #)
         # Output
         return {
                 'policy': loss_policy,
@@ -809,30 +814,23 @@ class OptionCriticAgentVec(OptionCriticAgent):
         else:
             obs = torch.tensor(obs).to(self.device).float()/self.obs_scale
 
-        if isinstance(self.observation_space,gym.spaces.Discrete):
-            # obs = obs.unsqueeze(0).unsqueeze(0)
-            raise NotImplementedError()
-        elif isinstance(self.observation_space,gym.spaces.Box):
-            pass
-        else:
-            raise NotImplementedError()
-
         curr_option = self._current_option[testing]
         pi = self.net(obs)
+
         # Choose an option
-        terminate_probs = pi['beta'].gather(1,curr_option.unsqueeze(1)).squeeze()
-        terminate_option = terminate_probs > torch.rand(num_envs,device=self.device)
+        terminate_probs = pi['beta'][range(num_envs),curr_option]
+        terminate_option = torch.rand(num_envs,device=self.device) < terminate_probs
         best_option = pi['q'].max(dim=1)[1]
         rand_option = torch.randint(0,self.num_options,(num_envs,),device=self.device)
         rand_option_prob = torch.rand(num_envs,device=self.device) < eps
-        option = terminate_option.long()*curr_option  \
-               + (1-terminate_option.long())*(
-                    rand_option_prob.long()*rand_option + 
-                    (1-rand_option_prob.long())*best_option
-               )
+        option = (1-terminate_option.long())*curr_option  \
+                  + terminate_option.long()*(
+                        rand_option_prob.long()*rand_option + 
+                        (1-rand_option_prob.long())*best_option
+                  )
         self._option_term_history[testing].append(terminate_option.cpu().numpy().tolist())
         # Choose an action
-        action_probs = pi['iop'][0,option,:].softmax(dim=0)
+        action_probs = pi['iop'][range(num_envs),option,:].softmax(1)
         dist = torch.distributions.Categorical(probs=action_probs)
         action = dist.sample()
 
@@ -857,6 +855,11 @@ class OptionCriticAgentVec(OptionCriticAgent):
         #    self._current_option_duration[env_key] = 1
         #else:
         #    self._current_option_duration[env_key] += 1
+        #if terminate_option.any():
+        #    breakpoint()
+
+        self._current_option[testing] = option
+
         self._current_option_duration[testing] = terminate_option*self._current_option_duration[testing]+1
 
         self._option_choice_count[testing][range(num_envs),option] += 1
@@ -1122,19 +1125,29 @@ def run_atari_envpool():
     from tqdm import tqdm
     import itertools
 
-    device = torch.device('cuda')
-    #device = torch.device('cpu')
+    #device = torch.device('cuda')
+    device = torch.device('cpu')
     num_envs = 16
     env_name = 'Pong-v5'
+
+    params_pong = {
+        'discount_factor': 0.99,
+        'behaviour_eps': 0.02,
+        'learning_rate': 1e-4,
+        'max_rollout_length': 2,
+        'update_frequency': 1,
+        'target_update_frequency': 400,
+        'polyak_rate': 1,
+        'num_options': 1,
+        'entropy_reg': 0.01,
+        #'optimizer': 'rmsprop',
+    }
 
     env = envpool.make(env_name, env_type="gym", num_envs=num_envs)
     agent = OptionCriticAgentVec(
         observation_space=env.observation_space,
         action_space=env.action_space,
-        target_update_frequency=32_000,
-        num_train_envs=num_envs,
-        num_test_envs=5,
-        batch_size=8*num_envs,
+        **params_pong,
         device=device,
     )
     agent.logger.init_wandb({
@@ -1144,7 +1157,7 @@ def run_atari_envpool():
     total_reward = 0
     obs = env.reset()
     agent.observe(obs)
-    for _ in tqdm(itertools.count()):
+    for i in tqdm(itertools.count()):
         action = agent.act()
         obs, reward, done, _ = env.step(action)
         agent.observe(obs, reward, done)
@@ -1153,7 +1166,7 @@ def run_atari_envpool():
 
         if done.any():
             agent.logger.log(reward=total_reward[done].mean().item())
-            tqdm.write(str(total_reward[done].tolist()))
+            tqdm.write(f'Iteration {i*num_envs:,}\t Training Rewards: {str(total_reward[done].tolist())}')
             total_reward = total_reward*(1-done)
 
 if __name__ == "__main__":
