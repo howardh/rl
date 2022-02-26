@@ -1516,6 +1516,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             reward_scale : float = 1,
             hidden_reset_min_prob : float = 0,
             hidden_reset_max_prob : float = 0,
+            target_net_hidden_state_forcing : bool = False,
             device : torch.device = torch.device('cpu'),
             optimizer : str = 'rmsprop', # adam or rmsprop
             net : PolicyValueNetworkRecurrent = None,
@@ -1538,6 +1539,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 net = net,
                 logger = logger,
         )
+        self.target_net_hidden_state_forcing = target_net_hidden_state_forcing
         self.hidden_reset_min_prob = hidden_reset_min_prob
         self.hidden_reset_max_prob = hidden_reset_max_prob
         self._prev_hidden = None
@@ -1578,7 +1580,11 @@ class A2CAgentRecurrentVec(A2CAgentVec):
 
         hidden_reset_prob = self._compute_annealed_epsilon(
                 max_eps=self.hidden_reset_max_prob, min_eps=self.hidden_reset_min_prob, max_steps=1_000_000)
-        hidden_reset = not testing and np.random.rand(batch_size) < hidden_reset_prob
+        #hidden_reset = not testing and np.random.rand(batch_size) < hidden_reset_prob
+        hidden_reset = torch.logical_and(
+                torch.tensor([not testing], device=self.device),
+                torch.rand(batch_size, device=self.device) < hidden_reset_prob
+        )
         if terminal is not None:
             hidden_reset = hidden_reset | terminal
         hidden_reset = torch.tensor(hidden_reset,device=self.device).unsqueeze(1)
@@ -1619,7 +1625,6 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             action = action_dist.sample().cpu().numpy()
         else:
             raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
-        self.logger.log(train_entropy=action_dist.entropy().mean().item())
 
         assert 'value' in net_output
         state_value = net_output['value']
@@ -1636,6 +1641,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             self.logger.log(
                     debug_state_value=state_value.mean().item(),
                     hidden_reset_prob=hidden_reset_prob,
+                    train_entropy=action_dist.entropy().mean().item()
             )
 
             self._train()
@@ -1674,16 +1680,27 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 net_output = default_collate(net_output)
 
                 target_net_output = []
-                h = (hidden[0][0,:,:],hidden[1][0,:,:])
-                for o,hr in zip(obs,hidden_reset):
-                    # FIXME: This assumes that the initial hidden state is 0.
-                    h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
-                            h[0]*hr.logical_not(),
-                            h[1]*hr.logical_not(),
-                    )
-                    no = self.target_net(o,h)
-                    h = no['hidden']
-                    target_net_output.append(no)
+                if self.target_net_hidden_state_forcing:
+                    h = (hidden[0][0,:,:],hidden[1][0,:,:])
+                    for i,(o,hr) in enumerate(zip(obs,hidden_reset)):
+                        # FIXME: This assumes that the initial hidden state is 0.
+                        h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
+                                hidden[0][i,:,:]*hr.logical_not(),
+                                hidden[1][i,:,:]*hr.logical_not(),
+                        )
+                        no = self.target_net(o,h)
+                        target_net_output.append(no)
+                else:
+                    h = (hidden[0][0,:,:],hidden[1][0,:,:])
+                    for o,hr in zip(obs,hidden_reset):
+                        # FIXME: This assumes that the initial hidden state is 0.
+                        h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
+                                h[0]*hr.logical_not(),
+                                h[1]*hr.logical_not(),
+                        )
+                        no = self.target_net(o,h)
+                        h = no['hidden']
+                        target_net_output.append(no)
                 target_net_output = default_collate(target_net_output)
 
                 state_values = net_output['value'].squeeze(2)

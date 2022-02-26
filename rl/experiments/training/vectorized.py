@@ -13,14 +13,14 @@ from rl.utils import default_state_dict, default_load_state_dict
 from rl.experiments.training._utils import make_env
 
 
-def make_vec_env(env_name, atari=False, atari_config={}):
-    if atari:
-        env = envpool.make(env_name, env_type="gym", **atari_config)
-        return env
-    else:
-        raise NotImplementedError()
+#def make_vec_env(env_name, atari=False, atari_config={}):
+#    if atari:
+#        env = envpool.make(env_name, env_type="gym", **atari_config)
+#        return env
+#    else:
+#        raise NotImplementedError()
 
-def make_vec_env2(env_type, env_configs):
+def make_vec_env(env_type, env_configs):
     if env_type == 'envpool':
         if env_configs.get('atari',False):
             return envpool.make(env_configs['env_name'], env_type="gym", **env_configs['atari_config'])
@@ -56,8 +56,8 @@ class TrainExperiment(Experiment):
         self._num_test_envs = config['agent']['parameters'].get('num_test_envs', 8)
         #self.env_test = make_vec_env(**config['env_test'])
         #self.env_train = make_vec_env(**config['env_train'])
-        self.env_test = make_vec_env2(**config['env_test'])
-        self.env_train = make_vec_env2(**config['env_train'])
+        self.env_test = make_vec_env(**config['env_test'])
+        self.env_train = make_vec_env(**config['env_train'])
 
         self.agent = config.get('agent')
         self.agent = self._init_agent(

@@ -223,6 +223,8 @@ def get_env_state(env):
     import gym.wrappers.frame_stack
     import gym.wrappers.time_limit
     import gym.envs.atari.environment
+    if hasattr(env, 'state_dict'):
+        return env.state_dict()
     if isinstance(env, gym.wrappers.frame_stack.FrameStack):
         # See https://github.com/openai/gym/blob/master/gym/wrappers/frame_stack.py
         return {
@@ -245,6 +247,8 @@ def get_env_state(env):
         return env.clone_state(include_rng=True)
     if type(env).__name__ == 'AtariGymEnvPool':
         return None # TODO: How do I save an envpool state? I can't pickle the entire environment.
+    if type(env).__name__ == 'AsyncVectorEnv':
+        return None # Data is stored in a separate process, so I don't think we can access it.
     try:
         # This needs to be in a try block because mujoco might not be installed on the machine.
         # There's no reason to require mujoco to be installed if it's not being used, so we just ignore this.
@@ -264,6 +268,9 @@ def set_env_state(env, state):
     import gym.wrappers.frame_stack
     import gym.wrappers.time_limit
     import gym.envs.atari.environment
+    if hasattr(env,'load_state_dict'):
+        env.load_state_dict(state)
+        return
     if isinstance(env, gym.wrappers.frame_stack.FrameStack):
         # See https://github.com/openai/gym/blob/master/gym/wrappers/frame_stack.py
         env.frames = state['frames']
@@ -284,6 +291,8 @@ def set_env_state(env, state):
         return
     if type(env).__name__ == 'AtariGymEnvPool':
         return # TODO: How do I save an envpool state? I can't pickle the entire environment.
+    if type(env).__name__ == 'AsyncVectorEnv':
+        return
     try:
         # This needs to be in a try block because mujoco might not be installed on the machine.
         # There's no reason to require mujoco to be installed if it's not being used, so we just ignore this.

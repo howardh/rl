@@ -29,6 +29,8 @@ def merge(source, destination):
             # get node or create one
             node = destination.setdefault(key, {})
             destination[key] = merge(value, node)
+        elif isinstance(value, list):
+            destination[key] = [merge(s,d) for s,d in zip(source[key],destination[key])]
         else:
             destination[key] = value
 

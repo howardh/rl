@@ -2,17 +2,22 @@ import os
 from pathlib import Path
 from typing import Optional
 from pprint import pprint
+import itertools
 
+import torch
+import numpy as np
 import gym.spaces
 import dill
+from tqdm import tqdm
 import experiment.logger
 from experiment import load_checkpoint, make_experiment_runner
 from experiment.logger import Logger
 
 from rl.agent.smdp.a2c import A2CAgentRecurrentVec, PolicyValueNetworkRecurrent
-from rl.experiments.training.vectorized import TrainExperiment
+from rl.experiments.training.vectorized import TrainExperiment, make_vec_env
 from rl.experiments.recurrence.train import ExperimentConfigs
 from rl.experiments.pathways.models import ConvPolicy
+#from rl.experiments.training._utils import make_env
 
 
 class AttnRecAgent(A2CAgentRecurrentVec):
@@ -38,6 +43,28 @@ class AttnRecAgent(A2CAgentRecurrentVec):
                         num_blocks=self._num_recurrence_blocks,
                 ).to(device)
         raise Exception('Unsupported observation space or action space.')
+    def state_dict_deploy(self):
+        return {
+                **super().state_dict_deploy(),
+                'recurrence_type': self._recurrence_type,
+                'num_recurrence_blocks': self._num_recurrence_blocks,
+        }
+    @staticmethod
+    def from_deploy_state(state):
+        if isinstance(state, str):
+            with open(state, 'rb') as f:
+                state = dill.load(f)
+            return AttnRecAgent.from_deploy_state(state)
+        elif isinstance(state, dict):
+            agent = AttnRecAgent(
+                    action_space = state['action_space'],
+                    observation_space = state['observation_space'],
+                    recurrence_type=state.pop('recurrence_type'),
+                    num_recurrence_blocks=state.pop('num_recurrence_blocks'),
+                    num_test_envs=16, # TODO
+            )
+            agent.load_state_dict_deploy(state)
+            return agent
 
 
 def get_params():
@@ -45,102 +72,392 @@ def get_params():
 
     params = ExperimentConfigs()
 
-    num_envs = 16
-    env_name = 'Pong-v5'
-    #env_config = {
-    #    'frameskip': 1,
-    #    'mode': 0,
-    #    'difficulty': 0,
-    #    'repeat_action_probability': 0.25,
-    #}
-    env_config = {
-            'env_name': env_name,
-            'atari': True,
-            'atari_config': {
-                'num_envs': num_envs,
-                'stack_num': 1,
-                'repeat_action_probability': 0.25,
+    def init_train_params():
+        num_envs = 16
+        env_name = 'Pong-v5'
+        env_config = {
+            'env_type': 'envpool',
+            'env_configs': {
+                'env_name': env_name,
+                'atari': True,
+                'atari_config': {
+                    'num_envs': num_envs,
+                    'stack_num': 1,
+                    'repeat_action_probability': 0.25,
+                }
             }
-    }
+        }
 
-    params.add('exp-001', {
-        'agent': {
-            'type': Agent,
-            'parameters': {
-                'target_update_frequency': 32_000,
-                'num_train_envs': num_envs,
-                'num_test_envs': 1,
-                'max_rollout_length': 128,
-                'hidden_reset_min_prob': 0,
-                'hidden_reset_max_prob': 0,
-                'recurrence_type': 'RecurrentAttention',
-                'num_recurrence_blocks': 1,
+        params.add('exp-001', {
+            'agent': {
+                'type': Agent,
+                'parameters': {
+                    'target_update_frequency': 32_000,
+                    'num_train_envs': num_envs,
+                    'num_test_envs': 1,
+                    'max_rollout_length': 128,
+                    'hidden_reset_min_prob': 0,
+                    'hidden_reset_max_prob': 0,
+                    'recurrence_type': 'RecurrentAttention',
+                    'num_recurrence_blocks': 1,
+                },
             },
-        },
-        'env_test': env_config,
-        'env_train': env_config,
-        'test_frequency': None,
-        'save_model_frequency': None,
-        'verbose': True,
-    })
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
+        })
 
-    params.add_change('exp-002', {
-        'agent': {
-            'parameters': {
-                'recurrence_type': 'RecurrentAttention2',
+        params.add_change('exp-002', {
+            'agent': {
+                'parameters': {
+                    'recurrence_type': 'RecurrentAttention2',
+                },
             },
-        },
-    })
+        })
 
-    params.add_change('exp-003', {
-        'agent': {
-            'parameters': {
-                'recurrence_type': 'RecurrentAttention3',
+        params.add_change('exp-003', {
+            'agent': {
+                'parameters': {
+                    'recurrence_type': 'RecurrentAttention3',
+                },
             },
-        },
-    })
+        })
 
-    params.add_change('exp-004', {
-        'agent': {
-            'parameters': {
-                'recurrence_type': 'RecurrentAttention4',
+        params.add_change('exp-004', {
+            'agent': {
+                'parameters': {
+                    'recurrence_type': 'RecurrentAttention4',
+                },
             },
-        },
-    })
+        })
 
-    params.add_change('exp-005', {
-        'agent': {
-            'parameters': {
-                'recurrence_type': 'RecurrentAttention5',
+        params.add_change('exp-005', {
+            'agent': {
+                'parameters': {
+                    'recurrence_type': 'RecurrentAttention5',
+                },
             },
-        },
-    })
+        })
 
-    params.add_change('exp-006', {
-        'agent': {
-            'parameters': {
-                'recurrence_type': 'RecurrentAttention6',
+        params.add_change('exp-006', {
+            'agent': {
+                'parameters': {
+                    'recurrence_type': 'RecurrentAttention6',
+                },
             },
-        },
-    })
+        })
 
-    params.add_change('exp-007', {
-        'agent': {
-            'parameters': {
-                'recurrence_type': 'RecurrentAttention7',
+        params.add_change('exp-007', {
+            'agent': {
+                'parameters': {
+                    'recurrence_type': 'RecurrentAttention7',
+                },
             },
-        },
-    })
+        })
 
-    params.add_change('exp-008', {
-        'agent': {
-            'parameters': {
-                'recurrence_type': 'RecurrentAttention8',
+        params.add_change('exp-008', {
+            'agent': {
+                'parameters': {
+                    'recurrence_type': 'RecurrentAttention8',
+                },
             },
+        })
+
+        # This architecture is working. Now reduce rollout length to see if it still works. It takes a long time to train with the current setup.
+        params.add_change('exp-009', {
+            'agent': {
+                'parameters': {
+                    'max_rollout_length': 64,
+                },
+            },
+        }) # This works well
+
+        params.add_change('exp-010', {
+            'agent': {
+                'parameters': {
+                    'max_rollout_length': 32,
+                },
+            },
+        })
+
+        params.add_change('exp-011', {
+            'agent': {
+                'parameters': {
+                    'max_rollout_length': 16,
+                },
+            },
+        })
+
+        params.add_change('exp-012', {
+            'agent': {
+                'parameters': {
+                    'max_rollout_length': 8,
+                },
+            },
+        })
+
+    def init_meta_rl_params():
+        # Params for meta-RL experiments
+        num_envs = 16
+        env_name = 'ALE/Pong-v5'
+        env_config = {
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'env_name': env_name,
+                'atari': True,
+                'frame_stack': 1,
+                'episode_stack': 5,
+                'action_shuffle': False,
+                'config': {
+                    'frameskip': 1,
+                    'mode': 0,
+                    'difficulty': 0,
+                    'repeat_action_probability': 0.25,
+                    'full_action_space': False,
+                }
+            }] * num_envs
+        }
+
+        # Test episode stacking first to make sure it works.
+        params.add('exp-meta-001', {
+            'agent': {
+                'type': Agent,
+                'parameters': {
+                    'target_update_frequency': 32_000,
+                    'num_train_envs': num_envs,
+                    'num_test_envs': 1,
+                    'max_rollout_length': 128,
+                    'hidden_reset_min_prob': 0,
+                    'hidden_reset_max_prob': 0,
+                    'recurrence_type': 'RecurrentAttention8',
+                    'num_recurrence_blocks': 1,
+                },
+            },
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
+        })
+
+        # Test a shorter rollout length
+        params.add_change('exp-meta-002', {
+            'agent': {
+                'parameters': {
+                    'max_rollout_length': 16,
+                },
+            },
+        })
+
+        # Add action shuffle
+        env_config_diff = {
+            'env_configs': [{
+                'action_shuffle': True,
+            }] * num_envs
+        }
+        params.add_change('exp-meta-003', {
+            'env_test': env_config_diff,
+            'env_train': env_config_diff,
+        }) # It's learning something, but plateaus with the state value estimate hovering around -1.
+
+        # Increase model size
+        params.add_change('exp-meta-004', {
+            'agent': {
+                'parameters': {
+                    'num_recurrence_blocks': 2,
+                },
+            },
+        })
+
+        ## Add action shuffle
+        #env_config_diff = {
+        #    'env_configs': [{
+        #        'action_shuffle': [2,3,4,5],
+        #    }] * num_envs
+        #}
+        #params.add_change('exp-meta-005', {
+        #    'env_test': env_config_diff,
+        #    'env_train': env_config_diff,
+        #}) # It's learning something, but plateaus with the state value estimate hovering around -1.
+
+    def init_seaquest_params():
+        # Look for a set of parameters that work well for seaquest.
+        num_envs = 16
+        env_name = 'Seaquest-v5'
+        env_config = {
+            'env_type': 'envpool',
+            'env_configs': {
+                'env_name': env_name,
+                'atari': True,
+                'atari_config': {
+                    'num_envs': num_envs,
+                    'stack_num': 1,
+                    'repeat_action_probability': 0.25,
+                }
+            }
+        }
+
+        params.add('exp-seaquest-001', {
+            'agent': {
+                'type': Agent,
+                'parameters': {
+                    'target_update_frequency': 32_000,
+                    'num_train_envs': num_envs,
+                    'num_test_envs': 1,
+                    'max_rollout_length': 16,
+                    'hidden_reset_min_prob': 0,
+                    'hidden_reset_max_prob': 0,
+                    'recurrence_type': 'RecurrentAttention8',
+                    'num_recurrence_blocks': 1,
+                },
+            },
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
+        })
+
+    def init_breakout_params():
+        # Look for a set of parameters that work well for seaquest.
+        num_envs = 16
+        env_name = 'Breakout-v5'
+        env_config = {
+            'env_type': 'envpool',
+            'env_configs': {
+                'env_name': env_name,
+                'atari': True,
+                'atari_config': {
+                    'num_envs': num_envs,
+                    'stack_num': 1,
+                    'repeat_action_probability': 0.25,
+                }
+            }
+        }
+
+        params.add('exp-breakout-001', {
+            'agent': {
+                'type': Agent,
+                'parameters': {
+                    'target_update_frequency': 32_000,
+                    'num_train_envs': num_envs,
+                    'num_test_envs': 1,
+                    'max_rollout_length': 16,
+                    'hidden_reset_min_prob': 0,
+                    'hidden_reset_max_prob': 0,
+                    'recurrence_type': 'RecurrentAttention8',
+                    'num_recurrence_blocks': 1,
+                },
+            },
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
+        })
+
+    init_train_params()
+    init_meta_rl_params()
+    init_seaquest_params()
+    init_breakout_params()
+    # Breakout, Atlantis, and Skiing are envs with four actions, so they're probably more suitable for the initial action shuffling experiments
+    return params
+
+
+def get_test_params():
+    params = ExperimentConfigs()
+
+    params.add('test-001', {
+        'env': {
+            #'env_type': 'envpool',
+            #'env_configs': {
+            #    'env_name': 'Pong-v5',
+            #    'atari': True,
+            #    'atari_config': {
+            #        'num_envs': 16,
+            #        'stack_num': 1,
+            #        'repeat_action_probability': 0.25,
+            #    }
+            #}
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'env_name': 'ALE/Pong-v5',
+                'atari': True,
+                'frame_stack': 1,
+                'config': {
+                    'frameskip': 1,
+                    'mode': 0,
+                    'difficulty': 0,
+                    'repeat_action_probability': 0.25,
+                    'render_mode': 'rgb_array',
+                }
+            } for _ in range(16)],
         },
     })
 
     return params
+
+
+def _run_test(env, agent, verbose=False, total_episodes=3):
+    if type(env).__name__ == 'AtariGymEnvPool':
+        num_envs = env.config['num_envs']
+    elif type(env).__name__ == 'AsyncVectorEnv':
+        num_envs = env.num_envs
+    else:
+        raise ValueError('Unknown env type: {}'.format(type(env).__name__))
+
+    steps = itertools.count()
+    if verbose:
+        steps = tqdm(steps, desc='test episode')
+
+    rgb_array = []
+
+    dones = torch.tensor([False] * num_envs, dtype=torch.bool)
+    ep_count = torch.tensor([0] * num_envs, dtype=torch.int)
+    step_count = torch.tensor([0] * num_envs, dtype=torch.int)
+    total_reward = [[] for _ in range(num_envs)]
+    total_steps = [[] for _ in range(num_envs)]
+    ep_steps = [[] for _ in range(num_envs)]
+
+    rewards = torch.tensor([0] * num_envs, dtype=torch.float)
+
+    obs = env.reset()
+    agent.observe(obs, testing=True)
+    for step in steps:
+        obs, reward, done, info = env.step(agent.act(testing=True))
+        agent.observe(obs, reward, np.array([False] * num_envs), testing=True)
+
+        done = torch.tensor(done)
+        rewards += torch.tensor(reward)
+        ep_count += done.long()
+        step_count += 1
+        dones = dones.logical_or(ep_count >= total_episodes)
+        for i,d in enumerate(done):
+            if not d:
+                continue
+            total_reward[i].append(rewards[i].item())
+            ep_steps[i].append(step_count[i].item())
+            total_steps[i].append(step)
+            tqdm.write(f'Env {i}\t Ep {ep_count[i]-1}\t Steps {step_count[i]}\t reward: {rewards[i].item():.2f}')
+        rewards[done] = 0
+        step_count[done] = 0
+
+        if 'rgb' in info:
+            rgb_array.append(info[0]['rgb'])
+        if dones.all():
+            break
+    env.close()
+
+    return {
+        'total_steps': total_steps,
+        'episode_steps': ep_steps,
+        'total_reward': total_reward,
+        #'option_choice_history': agent._option_choice_history,
+        #'option_term_history': agent._option_term_history,
+        'rgb_array': rgb_array,
+    }
 
 
 def make_app():
@@ -162,7 +479,10 @@ def make_app():
         else:
             exp_runner = make_experiment_runner(
                     TrainExperiment,
-                    config=config,
+                    config={
+                        **config,
+                        'save_model_frequency': 100_000, # This is number of iterations, not the number of transitions experienced
+                    },
                     results_directory=results_directory,
                     trial_id=trial_id,
                     checkpoint_frequency=250_000,
@@ -219,10 +539,43 @@ def make_app():
             except KeyError:
                 print(f'Could not plot {k}. Key not found.')
 
+    @app.command()
+    def test(config_name : str,
+            model_filename : Path,
+            output_filename : Path = Path('./plot.png')):
+        # Run a number of test episodes and plot the result (return vs number of episodes)
+        #import matplotlib
+        #matplotlib.use('Agg')
+        from matplotlib import pyplot as plt
+
+        num_episodes=3
+
+        config = get_test_params()[config_name]
+        agent = AttnRecAgent.from_deploy_state(str(model_filename))
+        env = make_vec_env(**config['env'])
+        results = _run_test(env, agent, verbose=True, total_episodes=num_episodes)
+        #steps = np.array([x[:num_episodes] for x in results['total_steps']])
+        rewards = np.array([x[:num_episodes] for x in results['total_reward']]).mean(0)
+        plt.plot(rewards)
+        #for x,y in zip(results['total_steps'], results['total_reward']):
+        #    plt.plot(x,y)
+        plt.show()
+        plt.savefig(str(output_filename))
+        print(f'Saving plot to {os.path.abspath(output_filename)}')
+
+    #@app.command()
+    #def video(config_name : str,
+    #        model_filename : Path,
+    #        output_filename : Path = Path('./output.avi')):
+    #    # Test the given model and save a video
+    #    # Include in the video: visuzliation of action choice, action values, neural network gating patterns
+    #    raise NotImplementedError()
+
     commands = {
             'run': run,
             'checkpoint': checkpoint,
             'plot': plot,
+            'test': test,
     }
 
     return app, commands
