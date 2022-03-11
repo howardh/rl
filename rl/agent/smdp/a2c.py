@@ -1586,8 +1586,8 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 torch.rand(batch_size, device=self.device) < hidden_reset_prob
         )
         if terminal is not None:
-            hidden_reset = hidden_reset | terminal
-        hidden_reset = torch.tensor(hidden_reset,device=self.device).unsqueeze(1)
+            hidden_reset = hidden_reset | torch.tensor(terminal, device=self.device)
+        hidden_reset = hidden_reset.unsqueeze(1)
         if self._prev_hidden is None:
             self._prev_hidden = self.net.init_hidden(batch_size=batch_size)
         else:

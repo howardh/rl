@@ -15,7 +15,7 @@ from experiment.logger import Logger
 
 from rl.agent.smdp.a2c import A2CAgentRecurrentVec, PolicyValueNetworkRecurrent
 from rl.experiments.training.vectorized import TrainExperiment, make_vec_env
-from rl.experiments.recurrence.train import ExperimentConfigs
+from rl.experiments.training._utils import ExperimentConfigs
 from rl.experiments.pathways.models import ConvPolicy
 #from rl.experiments.training._utils import make_env
 
@@ -271,16 +271,24 @@ def get_params():
             },
         })
 
-        ## Add action shuffle
-        #env_config_diff = {
-        #    'env_configs': [{
-        #        'action_shuffle': [2,3,4,5],
-        #    }] * num_envs
-        #}
-        #params.add_change('exp-meta-005', {
-        #    'env_test': env_config_diff,
-        #    'env_train': env_config_diff,
-        #}) # It's learning something, but plateaus with the state value estimate hovering around -1.
+        env_config_diff = {
+            'env_configs': [{
+                'action_shuffle': [2,3,4,5],
+            }] * num_envs
+        }
+        params.add_change('exp-meta-005', {
+            'env_test': env_config_diff,
+            'env_train': env_config_diff,
+        })
+
+        # Increase model size further
+        params.add_change('exp-meta-006', {
+            'agent': {
+                'parameters': {
+                    'num_recurrence_blocks': 4,
+                },
+            },
+        })
 
     def init_seaquest_params():
         # Look for a set of parameters that work well for seaquest.
@@ -356,12 +364,78 @@ def get_params():
             'test_frequency': None,
             'save_model_frequency': None,
             'verbose': True,
+        }) # This is hitting the ~300 return that DQN gets, but only briefly.
+
+        # Test with frame stacking. The A3C paper's LSTM experiments keep the frame stacking and they get returns in the 700s (See table S3 https://arxiv.org/pdf/1602.01783.pdf).
+        params.add_change('exp-breakout-002', {
+            'env_test': {
+                'env_configs': {
+                    'atari_config': {
+                        'stack_num': 4,
+                    }
+                }
+            },
+            'env_train': {
+                'env_configs': {
+                    'atari_config': {
+                        'stack_num': 4,
+                    }
+                }
+            },
+        })
+
+        # Add hidden state forcing on the target network
+        params.add_change('exp-breakout-003', {
+            'agent': {
+                'parameters': {
+                    'target_net_hidden_state_forcing': True,
+                },
+            },
+        })
+
+    def init_atlantis_params():
+        # Look for a set of parameters that work well for seaquest.
+        num_envs = 16
+        env_name = 'Atlantis-v5'
+        env_config = {
+            'env_type': 'envpool',
+            'env_configs': {
+                'env_name': env_name,
+                'atari': True,
+                'atari_config': {
+                    'num_envs': num_envs,
+                    'stack_num': 1,
+                    'repeat_action_probability': 0.25,
+                }
+            }
+        }
+
+        params.add('exp-atlantis-001', {
+            'agent': {
+                'type': Agent,
+                'parameters': {
+                    'target_update_frequency': 32_000,
+                    'num_train_envs': num_envs,
+                    'num_test_envs': 1,
+                    'max_rollout_length': 16,
+                    'hidden_reset_min_prob': 0,
+                    'hidden_reset_max_prob': 0,
+                    'recurrence_type': 'RecurrentAttention8',
+                    'num_recurrence_blocks': 1,
+                },
+            },
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
         })
 
     init_train_params()
     init_meta_rl_params()
     init_seaquest_params()
     init_breakout_params()
+    init_atlantis_params()
     # Breakout, Atlantis, and Skiing are envs with four actions, so they're probably more suitable for the initial action shuffling experiments
     return params
 
@@ -371,16 +445,6 @@ def get_test_params():
 
     params.add('test-001', {
         'env': {
-            #'env_type': 'envpool',
-            #'env_configs': {
-            #    'env_name': 'Pong-v5',
-            #    'atari': True,
-            #    'atari_config': {
-            #        'num_envs': 16,
-            #        'stack_num': 1,
-            #        'repeat_action_probability': 0.25,
-            #    }
-            #}
             'env_type': 'gym_async',
             'env_configs': [{
                 'env_name': 'ALE/Pong-v5',

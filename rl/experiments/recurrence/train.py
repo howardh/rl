@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 from typing import Optional
-import copy
 
 import dill
 import experiment.logger
@@ -10,46 +9,7 @@ from experiment.logger import Logger
 
 from rl.agent.smdp.a2c import A2CAgentRecurrentVec
 from rl.experiments.training.vectorized import TrainExperiment
-
-
-def merge(source, destination):
-    """
-    (Source: https://stackoverflow.com/a/20666342/382388)
-
-    run me with nosetests --with-doctest file.py
-
-    >>> a = { 'first' : { 'all_rows' : { 'pass' : 'dog', 'number' : '1' } } }
-    >>> b = { 'first' : { 'all_rows' : { 'fail' : 'cat', 'number' : '5' } } }
-    >>> merge(b, a) == { 'first' : { 'all_rows' : { 'pass' : 'dog', 'fail' : 'cat', 'number' : '5' } } }
-    True
-    """
-    destination = copy.deepcopy(destination)
-    for key, value in source.items():
-        if isinstance(value, dict):
-            # get node or create one
-            node = destination.setdefault(key, {})
-            destination[key] = merge(value, node)
-        elif isinstance(value, list):
-            destination[key] = [merge(s,d) for s,d in zip(source[key],destination[key])]
-        else:
-            destination[key] = value
-
-    return destination
-
-
-class ExperimentConfigs(dict):
-    def __init__(self):
-        self._last_key = None
-    def add(self, key, config, inherit=None):
-        if key in self:
-            raise Exception(f'Key {key} already exists.')
-        if inherit is None:
-            self[key] = config
-        else:
-            self[key] = merge(config,self[inherit])
-        self._last_key = key
-    def add_change(self, key, config):
-        self.add(key, config, inherit=self._last_key)
+from rl.experiments.training._utils import ExperimentConfigs
 
 
 def get_params():
