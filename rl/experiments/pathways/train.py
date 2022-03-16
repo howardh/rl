@@ -17,6 +17,7 @@ from rl.agent.smdp.a2c import A2CAgentRecurrentVec, PolicyValueNetworkRecurrent
 from rl.experiments.training.vectorized import TrainExperiment, make_vec_env
 from rl.experiments.training._utils import ExperimentConfigs
 from rl.experiments.pathways.models import ConvPolicy
+from rl.experiments.pathways.models import ModularPolicy
 #from rl.experiments.training._utils import make_env
 
 
@@ -42,6 +43,29 @@ class AttnRecAgent(A2CAgentRecurrentVec):
                         recurrence_type=self._recurrence_type,
                         num_blocks=self._num_recurrence_blocks,
                 ).to(device)
+        if isinstance(observation_space, gym.spaces.Dict):
+            assert len(observation_space['obs'].shape) == 3 # Atari
+            return ModularPolicy(
+                    inputs={
+                        'obs': {
+                            'type': 'GreyscaleImageInput',
+                            'config': {
+                                'in_channels': observation_space['obs'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                    },
+                    num_actions=action_space.n,
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size = 1024,
+                    recurrence_type=self._recurrence_type,
+                    num_blocks=self._num_recurrence_blocks,
+            ).to(device)
         raise Exception('Unsupported observation space or action space.')
     def state_dict_deploy(self):
         return {
@@ -288,6 +312,27 @@ def get_params():
                     'num_recurrence_blocks': 4,
                 },
             },
+        })
+
+        # Disable action shuffle for now. Use dict observations.
+        env_config_diff = {
+            'env_configs': [{
+                'action_shuffle': False,
+                'dict_obs': True,
+                'episode_stack': 2, # Reduced from 5
+            }] * num_envs
+        }
+        params.add_change('exp-meta-007', {
+            'agent': {
+                'parameters': {
+                    'num_recurrence_blocks': 1,
+                    'obs_scale': {
+                        'obs': 1/255,
+                    }
+                },
+            },
+            'env_test': env_config_diff,
+            'env_train': env_config_diff,
         })
 
     def init_seaquest_params():
@@ -545,11 +590,12 @@ def make_app():
                     TrainExperiment,
                     config={
                         **config,
-                        'save_model_frequency': 100_000, # This is number of iterations, not the number of transitions experienced
+                        #'save_model_frequency': 100_000, # This is number of iterations, not the number of transitions experienced
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    checkpoint_frequency=250_000,
+                    #checkpoint_frequency=250_000,
+                    checkpoint_frequency=None,
                     max_iterations=max_iterations,
                     slurm_split=slurm,
                     verbose=True,

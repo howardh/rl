@@ -1,5 +1,7 @@
 import copy
+from typing import Sequence, Iterable, Tuple, Mapping, Union
 
+import torch
 import numpy as np
 import gym
 import gym.spaces
@@ -17,6 +19,7 @@ def make_env(env_name: str,
         atari_config={},
         frame_stack=4,
         episode_stack=None,
+        dict_obs=False,
         action_shuffle=False):
     env = gym.make(env_name, **config)
     if atari:
@@ -25,7 +28,7 @@ def make_env(env_name: str,
     if one_hot_obs:
         env = rl.debug_tools.frozenlake.OnehotObs(env)
     if episode_stack is not None:
-        env = EpisodeStack(env, episode_stack)
+        env = EpisodeStack(env, episode_stack, dict_obs=dict_obs)
     if action_shuffle:
         env = ActionShuffle(env)
     return env
@@ -192,10 +195,18 @@ class AtariPreprocessing(gym.Wrapper):
 
 
 class EpisodeStack(gym.Wrapper):
-    def __init__(self, env, num_episodes : int):
+    def __init__(self, env, num_episodes : int, dict_obs: bool = False):
         super().__init__(env)
         self.num_episodes = num_episodes
         self.episode_count = 0
+        self.dict_obs = dict_obs
+
+        if dict_obs:
+            self.observation_space = gym.spaces.Dict([
+                ('reward', gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)),
+                ('done', gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)),
+                ('obs', self.env.observation_space),
+            ])
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
@@ -206,21 +217,37 @@ class EpisodeStack(gym.Wrapper):
                 return obs, reward, done, info
             else:
                 return self.env.reset(), 0, False, info
-        return obs, reward, done, info
+        if self.dict_obs:
+            return {
+                'reward': np.array([reward], dtype=np.float32),
+                'done': np.array([done], dtype=np.float32),
+                'obs': obs,
+            }, reward, done, info
+        else:
+            return obs, reward, done, info
 
     def reset(self, **kwargs):
         self.episode_count = 0
-        return self.env.reset(**kwargs)
+        if self.dict_obs:
+            return {
+                'reward': np.array([0], dtype=np.float32),
+                'done': np.array([False], dtype=np.float32),
+                'obs': self.env.reset(**kwargs),
+            }
+        else:
+            return self.env.reset(**kwargs)
 
     def state_dict(self):
         return {
             'episode_count': self.episode_count,
             'env': get_env_state(self.env),
+            'dict_obs': self.dict_obs,
         }
 
     def load_state_dict(self, state_dict):
         self.episode_count = state_dict['episode_count']
         set_env_state(self.env, state_dict['env'])
+        self.dict_obs = state_dict['dict_obs']
 
 
 class ActionShuffle(gym.Wrapper):
@@ -290,6 +317,34 @@ def merge(source, destination):
             destination[key] = value
 
     return destination
+
+
+def zip2(*args) -> Iterable[Union[Tuple,Mapping]]:
+    """
+    Zip objects together. If dictionaries are provided, the lists within the dictionary are zipped together.
+
+    >>> list(zip2([1,2,3], [4,5,6]))
+    [(1, 4), (2, 5), (3, 6)]
+
+    >>> list(zip2({'a': [4,5,6], 'b': [7,8,9]}))
+    [{'a': 4, 'b': 7}, {'a': 5, 'b': 8}, {'a': 6, 'b': 9}]
+
+    >>> list(zip2([1,2,3], {'a': [4,5,6], 'b': [7,8,9]}))
+    [(1, {'a': 4, 'b': 7}), (2, {'a': 5, 'b': 8}), (3, {'a': 6, 'b': 9})]
+
+    >>> import torch
+    >>> list(zip2(torch.tensor([1,2,3]), torch.tensor([4,5,6])))
+    [(tensor(1), tensor(4)), (tensor(2), tensor(5)), (tensor(3), tensor(6))]
+    """
+    if len(args) == 1:
+        if isinstance(args[0],(Sequence)):
+            return args[0]
+        if isinstance(args[0],torch.Tensor):
+            return (x for x in args[0])
+        if isinstance(args[0], dict):
+            keys = args[0].keys()
+            return (dict(zip(keys, vals)) for vals in zip(*(args[0][k] for k in keys)))
+    return zip(*[zip2(a) for a in args])
 
 
 class ExperimentConfigs(dict):

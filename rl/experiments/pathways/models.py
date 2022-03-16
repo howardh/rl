@@ -1,3 +1,5 @@
+from typing import List, Dict
+
 import torch
 from torchtyping.tensor_type import TensorType
 from torch.utils.data.dataloader import default_collate
@@ -305,17 +307,166 @@ class ConvPolicy(PolicyValueNetworkRecurrent):
         self.v = torch.nn.Linear(in_features=512,out_features=1)
         self.pi = torch.nn.Linear(in_features=512,out_features=num_actions)
 
-    def forward(self, x: TensorType['batch_size','observation_shape'], hidden):
+    def forward(self,
+            x: TensorType['batch_size','observation_shape'],
+            hidden: List[TensorType['num_blocks','batch_size','hidden_size']]):
+        assert len(hidden) == 2
         batch_size = x.shape[0]
         device = next(self.parameters()).device
 
-        x = self.conv(x)
+        x = self.conv(x) # (batch_size, 512)
         keys = torch.cat([
             self.fc_key(x).unsqueeze(0),
             hidden[0]
         ], dim=0)
         values = torch.cat([
             self.fc_value(x).unsqueeze(0),
+            hidden[1]
+        ], dim=0)
+
+        new_hidden = []
+        x = torch.zeros([batch_size, self.input_size], device=device)
+        for attention in self.attention:
+            output = attention(x, keys, values)
+            x = output['x']
+            new_hidden.append((output['key'], output['value']))
+        x = self.fc_output(x)
+
+        return {
+            'value': self.v(x),
+            'action': self.pi(x),
+            'hidden': default_collate(new_hidden)
+        }
+
+    def init_hidden(self, batch_size: int = 1):
+        device = next(self.parameters()).device
+        return (
+                torch.zeros([len(self.attention), batch_size, self.key_size], device=device), # Key
+                torch.zeros([len(self.attention), batch_size, self.key_size], device=device), # Query
+        )
+
+
+class GreyscaleImageInput(torch.nn.Module):
+    def __init__(self, key_size: int, value_size: int, in_channels: int):
+        super().__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=in_channels,out_channels=32,kernel_size=8,stride=4),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=32,out_channels=64,kernel_size=4,stride=2),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=64,out_channels=64,kernel_size=3,stride=1),
+            torch.nn.Flatten(),
+            torch.nn.LeakyReLU(),
+            torch.nn.Linear(in_features=64*7*7,out_features=512),
+            torch.nn.LeakyReLU(),
+        )
+        self.fc_key = torch.nn.Linear(in_features=512, out_features=key_size)
+        self.fc_value = torch.nn.Linear(in_features=512, out_features=value_size)
+    def forward(self, x: TensorType['batch_size','frame_stack','height','width',float]):
+        x = self.conv(x)
+        return {
+            'key': self.fc_key(x),
+            'value': self.fc_value(x),
+        }
+
+
+class ScalarInput(torch.nn.Module):
+    def __init__(self, key_size: int, value_size: int):
+        super().__init__()
+        self.value_size = value_size
+        self.key = torch.nn.Parameter(torch.rand([key_size]))
+    def forward(self, value: TensorType['batch_size',float]):
+        batch_size = value.shape[0]
+        return {
+            'key': self.key.expand(batch_size, -1),
+            'value': value.expand(batch_size,self.value_size)
+        }
+
+
+class ModularPolicy(PolicyValueNetworkRecurrent):
+    def __init__(self, inputs, num_actions, input_size, key_size, value_size, num_heads, ff_size, num_blocks=1,
+            recurrence_type='RecurrentAttention'):
+        super().__init__()
+        self.key_size = key_size
+        self.input_size = input_size
+        self.value_size = value_size
+
+        self.input_modules = self._init_input_modules(inputs)
+
+        recurrenceClasses = {
+                cls.__name__: cls
+                for cls in [
+                    RecurrentAttention,
+                    RecurrentAttention2,
+                    RecurrentAttention3,
+                    RecurrentAttention4,
+                    RecurrentAttention5,
+                    RecurrentAttention6,
+                    RecurrentAttention7,
+                    RecurrentAttention8,
+                ]
+        }
+        recurrenceCls = None
+        if recurrence_type in recurrenceClasses:
+            recurrenceCls = recurrenceClasses[recurrence_type]
+        else:
+            raise ValueError('Unknown recurrence type: {}'.format(recurrence_type))
+        self.attention = torch.nn.ModuleList([
+                recurrenceCls(input_size, key_size, value_size, num_heads, ff_size)
+                for _ in range(num_blocks)
+        ])
+
+        self.fc_output = torch.nn.Sequential(
+                torch.nn.LeakyReLU(),
+                torch.nn.Linear(input_size, 512),
+                torch.nn.LeakyReLU(),
+        )
+        self.v = torch.nn.Linear(in_features=512,out_features=1)
+        self.pi = torch.nn.Linear(in_features=512,out_features=num_actions)
+
+    def _init_input_modules(self, input_configs: Dict[str,Dict]):
+        input_modules: Dict[str,torch.nn.Module] = {}
+        for k,v in input_configs.items():
+            if v['type'] == 'ScalarInput':
+                input_modules[k] = ScalarInput(
+                        key_size = self.key_size,
+                        value_size = self.value_size
+                )
+            elif v['type'] == 'GreyscaleImageInput':
+                input_modules[k] = GreyscaleImageInput(
+                        key_size = self.key_size,
+                        value_size = self.value_size,
+                        **v['config']
+                )
+            else:
+                raise NotImplementedError()
+        return torch.nn.ModuleDict(input_modules)
+
+    def forward(self,
+            inputs: Dict[str,TensorType['batch_size','observation_shape']],
+            hidden: List[TensorType['num_blocks','batch_size','hidden_size']]):
+        assert len(hidden) == 2
+        batch_size = hidden[0].shape[1]
+        device = next(self.parameters()).device
+
+        input_keys = []
+        input_vals = []
+        for k,x in inputs.items():
+            if k not in self.input_modules:
+                continue
+            y = self.input_modules[k](x)
+            input_keys.append(y['key'].unsqueeze(0))
+            input_vals.append(y['value'].unsqueeze(0))
+
+        keys = torch.cat([
+            *input_keys,
+            hidden[0]
+        ], dim=0)
+        values = torch.cat([
+            *input_vals,
             hidden[1]
         ], dim=0)
 

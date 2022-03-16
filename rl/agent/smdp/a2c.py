@@ -1,6 +1,6 @@
 import copy
 from collections import defaultdict
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Tuple, List, Union, Mapping
 from typing_extensions import TypedDict
 
 import numpy as np
@@ -20,6 +20,7 @@ from frankenstein.buffer.vec_history import VecHistoryBuffer
 from experiment.logger import Logger, SubLogger
 from rl.utils import default_state_dict, default_load_state_dict
 from rl.agent.agent import DeployableAgent
+from rl.experiments.training._utils import zip2
 
 class PolicyValueNetworkOutput(TypedDict, total=False):
     """ Discrete action space """
@@ -1245,7 +1246,7 @@ class A2CAgentVec(DeployableAgent):
             max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
             num_train_envs : int = 16,
             num_test_envs : int = 4,
-            obs_scale : float = 1/255,
+            obs_scale : Union[dict,float] = 1/255,
             reward_scale : float = 1,
             device : torch.device = torch.device('cpu'),
             optimizer : str = 'rmsprop', # adam or rmsprop
@@ -1269,6 +1270,8 @@ class A2CAgentVec(DeployableAgent):
             raise ValueError(f'Rollout length must be >= 2. Received {max_rollout_length}. Note that a rollout length of n consists of n-1 transitions.')
         if target_update_frequency % num_train_envs != 0:
             raise ValueError(f'Target update frequency must be a multiple of the number of training environments. Received {target_update_frequency} and {num_train_envs}.')
+        if isinstance(observation_space,gym.spaces.Dict) and not isinstance(obs_scale,dict):
+            raise ValueError(f'If observation space is a dictionary, obs_scale must be a dictionary. Received {obs_scale}.')
 
         # State (training)
         self.train_history_buffer = VecHistoryBuffer(
@@ -1512,7 +1515,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
             num_train_envs : int = 16,
             num_test_envs : int = 4,
-            obs_scale : float = 1/255,
+            obs_scale : Union[dict,float] = 1/255,
             reward_scale : float = 1,
             hidden_reset_min_prob : float = 0,
             hidden_reset_max_prob : float = 0,
@@ -1566,7 +1569,12 @@ class A2CAgentRecurrentVec(A2CAgentVec):
         raise Exception('Unsupported observation space or action space.')
     def observe(self, obs, reward=None, terminal=None, testing=False, time=1, discount=None):
         assert isinstance(self.net, PolicyValueNetworkRecurrent)
-        batch_size = obs.shape[0]
+
+        if isinstance(self.observation_space,gym.spaces.Dict):
+            batch_size = obs[next(iter(obs.keys()))].shape[0]
+        else:
+            batch_size = obs.shape[0]
+
         if discount is None:
             discount = self.discount_factor
 
@@ -1605,10 +1613,20 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 })
 
         # Choose next action
-        net_output = self.net(
-                torch.tensor(obs,device=self.device).float()*self.obs_scale,
-                hidden=self._prev_hidden
-        )
+        if isinstance(self.observation_space,gym.spaces.Dict):
+            assert isinstance(self.obs_scale,Mapping)
+            net_output = self.net(
+                    {
+                        k: torch.tensor(v, device=self.device).float() * self.obs_scale.get(k,1)
+                        for k,v in obs.items()
+                    },
+                    hidden=self._prev_hidden
+            )
+        else:
+            net_output = self.net(
+                    torch.tensor(obs,device=self.device).float()*self.obs_scale,
+                    hidden=self._prev_hidden
+            )
         assert 'hidden' in net_output
         self._prev_hidden = tuple([x.detach() for x in net_output['hidden']])
         if isinstance(self.action_space, gym.spaces.Discrete):
@@ -1661,14 +1679,21 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 hidden_reset = misc['hidden_reset']
                 discount = misc['discount']
 
-                obs = history.obs.float()*self.obs_scale
+                if isinstance(self.observation_space,gym.spaces.Dict):
+                    assert isinstance(self.obs_scale,Mapping)
+                    obs = {
+                            k: v.float()*self.obs_scale.get(k,1)
+                            for k,v in history.obs.items()
+                    }
+                else:
+                    obs = history.obs.float()*self.obs_scale
                 action = history.action
                 reward = history.reward
                 terminal = history.terminal
 
                 net_output = []
                 h = (hidden[0][0],hidden[1][0])
-                for o,hr in zip(obs,hidden_reset):
+                for o,hr in zip2(obs,hidden_reset):
                     # FIXME: This assumes that the initial hidden state is 0.
                     h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
                             h[0]*hr.logical_not(),
@@ -1682,7 +1707,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 target_net_output = []
                 if self.target_net_hidden_state_forcing:
                     h = (hidden[0][0,:,:],hidden[1][0,:,:])
-                    for i,(o,hr) in enumerate(zip(obs,hidden_reset)):
+                    for i,(o,hr) in enumerate(zip2(obs,hidden_reset)):
                         # FIXME: This assumes that the initial hidden state is 0.
                         h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
                                 hidden[0][i,:,:]*hr.logical_not(),
@@ -1692,7 +1717,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                         target_net_output.append(no)
                 else:
                     h = (hidden[0][0,:,:],hidden[1][0,:,:])
-                    for o,hr in zip(obs,hidden_reset):
+                    for o,hr in zip2(obs,hidden_reset):
                         # FIXME: This assumes that the initial hidden state is 0.
                         h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
                                 h[0]*hr.logical_not(),
