@@ -200,6 +200,7 @@ class EpisodeStack(gym.Wrapper):
         self.num_episodes = num_episodes
         self.episode_count = 0
         self.dict_obs = dict_obs
+        self._done = True
 
         if dict_obs:
             self.observation_space = gym.spaces.Dict([
@@ -209,22 +210,28 @@ class EpisodeStack(gym.Wrapper):
             ])
 
     def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        if done:
+        if self._done:
             self.episode_count += 1
+            self._done = False
+            obs, reward, done, info = self.env.reset(), 0, False, {}
+        else:
+            obs, reward, done, info = self.env.step(action)
+        self._done = done
+
+        if self.dict_obs:
+            obs = {
+                'reward': np.array([reward], dtype=np.float32),
+                'done': np.array([done], dtype=np.float32),
+                'obs': obs,
+            }
+
+        if done:
             if self.episode_count >= self.num_episodes:
                 self.episode_count = 0
                 return obs, reward, done, info
             else:
-                return self.env.reset(), 0, False, info
-        if self.dict_obs:
-            return {
-                'reward': np.array([reward], dtype=np.float32),
-                'done': np.array([done], dtype=np.float32),
-                'obs': obs,
-            }, reward, done, info
-        else:
-            return obs, reward, done, info
+                return obs, reward, False, info
+        return obs, reward, done, info
 
     def reset(self, **kwargs):
         self.episode_count = 0
@@ -242,12 +249,14 @@ class EpisodeStack(gym.Wrapper):
             'episode_count': self.episode_count,
             'env': get_env_state(self.env),
             'dict_obs': self.dict_obs,
+            '_done': self._done,
         }
 
     def load_state_dict(self, state_dict):
         self.episode_count = state_dict['episode_count']
         set_env_state(self.env, state_dict['env'])
         self.dict_obs = state_dict['dict_obs']
+        self._done = state_dict['_done']
 
 
 class ActionShuffle(gym.Wrapper):
