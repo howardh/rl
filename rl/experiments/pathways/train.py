@@ -335,6 +335,17 @@ def get_params():
             'env_train': env_config_diff,
         })
 
+        # Try with action shuffle again
+        env_config_diff = {
+            'env_configs': [{
+                'action_shuffle': [2,3,4,5],
+            }] * num_envs
+        }
+        params.add_change('exp-meta-008', {
+            'env_test': env_config_diff,
+            'env_train': env_config_diff,
+        })
+
     def init_seaquest_params():
         # Look for a set of parameters that work well for seaquest.
         num_envs = 16
@@ -590,12 +601,12 @@ def make_app():
                     TrainExperiment,
                     config={
                         **config,
-                        #'save_model_frequency': 100_000, # This is number of iterations, not the number of transitions experienced
+                        'save_model_frequency': 100_000, # This is number of iterations, not the number of transitions experienced
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    #checkpoint_frequency=250_000,
-                    checkpoint_frequency=None,
+                    checkpoint_frequency=250_000,
+                    #checkpoint_frequency=None,
                     max_iterations=max_iterations,
                     slurm_split=slurm,
                     verbose=True,
