@@ -17,12 +17,13 @@ from rl.agent.smdp.a2c import A2CAgentRecurrentVec, PolicyValueNetworkRecurrent
 from rl.experiments.training.vectorized import TrainExperiment, make_vec_env
 from rl.experiments.training._utils import ExperimentConfigs
 from rl.experiments.pathways.models import ConvPolicy
-from rl.experiments.pathways.models import ModularPolicy
+from rl.experiments.pathways.models import ModularPolicy, ModularPolicy2
 #from rl.experiments.training._utils import make_env
 
 
 class AttnRecAgent(A2CAgentRecurrentVec):
-    def __init__(self, recurrence_type='RecurrentAttention', num_recurrence_blocks=1, **kwargs):
+    def __init__(self, recurrence_type='RecurrentAttention', model_type='ModularPolicy', num_recurrence_blocks=1, **kwargs):
+        self._model_type = model_type
         self._recurrence_type = recurrence_type
         self._num_recurrence_blocks = num_recurrence_blocks
         super().__init__(**kwargs)
@@ -45,31 +46,74 @@ class AttnRecAgent(A2CAgentRecurrentVec):
                 ).to(device)
         if isinstance(observation_space, gym.spaces.Dict):
             assert len(observation_space['obs'].shape) == 3 # Atari
-            return ModularPolicy(
-                    inputs={
-                        'obs': {
-                            'type': 'GreyscaleImageInput',
-                            'config': {
-                                'in_channels': observation_space['obs'].shape[0]
+            if self._model_type == 'ModularPolicy':
+                return ModularPolicy(
+                        inputs={
+                            'obs': {
+                                'type': 'GreyscaleImageInput',
+                                'config': {
+                                    'in_channels': observation_space['obs'].shape[0]
+                                },
+                            },
+                            'reward': {
+                                'type': 'ScalarInput',
                             },
                         },
-                        'reward': {
-                            'type': 'ScalarInput',
+                        num_actions=action_space.n,
+                        input_size=512,
+                        key_size=512,
+                        value_size=512,
+                        num_heads=8,
+                        ff_size = 1024,
+                        recurrence_type=self._recurrence_type,
+                        num_blocks=self._num_recurrence_blocks,
+                ).to(device)
+            elif self._model_type == 'ModularPolicy2':
+                return ModularPolicy2(
+                        inputs={
+                            'obs': {
+                                'type': 'GreyscaleImageInput',
+                                'config': {
+                                    'in_channels': observation_space['obs'].shape[0]
+                                },
+                            },
+                            'reward': {
+                                'type': 'ScalarInput',
+                            },
+                            'action': {
+                                'type': 'DiscreteInput' if isinstance(action_space, gym.spaces.Discrete) else 'LinearInput',
+                                'config': {
+                                    'input_size': action_space.n
+                                },
+                            },
                         },
-                    },
-                    num_actions=action_space.n,
-                    input_size=512,
-                    key_size=512,
-                    value_size=512,
-                    num_heads=8,
-                    ff_size = 1024,
-                    recurrence_type=self._recurrence_type,
-                    num_blocks=self._num_recurrence_blocks,
-            ).to(device)
+                        outputs = {
+                            'value': {
+                                'type': 'LinearOutput',
+                                'config': {
+                                    'output_size': 1,
+                                }
+                            },
+                            'action': {
+                                'type': 'LinearOutput',
+                                'config': {
+                                    'output_size': action_space.n,
+                                }
+                            },
+                        },
+                        input_size=512,
+                        key_size=512,
+                        value_size=512,
+                        num_heads=8,
+                        ff_size = 1024,
+                        recurrence_type=self._recurrence_type,
+                        num_blocks=self._num_recurrence_blocks,
+                ).to(device)
         raise Exception('Unsupported observation space or action space.')
     def state_dict_deploy(self):
         return {
                 **super().state_dict_deploy(),
+                '_model_type': self._model_type,
                 'recurrence_type': self._recurrence_type,
                 'num_recurrence_blocks': self._num_recurrence_blocks,
         }
@@ -83,8 +127,10 @@ class AttnRecAgent(A2CAgentRecurrentVec):
             agent = AttnRecAgent(
                     action_space = state['action_space'],
                     observation_space = state['observation_space'],
+                    model_type=state['_model_type'],
                     recurrence_type=state.pop('recurrence_type'),
                     num_recurrence_blocks=state.pop('num_recurrence_blocks'),
+                    obs_scale=state.pop('obs_scale'),
                     num_test_envs=16, # TODO
             )
             agent.load_state_dict_deploy(state)
@@ -346,6 +392,24 @@ def get_params():
             'env_train': env_config_diff,
         })
 
+        # The previous version likely doesn't work because it's outputting a distribution over actions, so the agent has no idea what action was action taken from that distribution and has no way to know what action led to any given transition.
+        # Added the action as an input and testing without action shuffle to make sure this works.
+        env_config_diff = {
+            'env_configs': [{
+                'action_shuffle': False,
+            }] * num_envs
+        }
+        params.add_change('exp-meta-009', {
+            'agent': {
+                'parameters': {
+                    'model_type': 'ModularPolicy2',
+                    'recurrence_type': 'RecurrentAttention9',
+                },
+            },
+            'env_test': env_config_diff,
+            'env_train': env_config_diff,
+        })
+
     def init_seaquest_params():
         # Look for a set of parameters that work well for seaquest.
         num_envs = 16
@@ -517,6 +581,37 @@ def get_test_params():
         },
     })
 
+    params.add('test-002', {
+        'env': {
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'env_name': 'ALE/Pong-v5',
+                'atari': True,
+                'frame_stack': 1,
+                'dict_obs': True,
+                'episode_stack': 1,
+                'config': {
+                    'frameskip': 1,
+                    'mode': 0,
+                    'difficulty': 0,
+                    'repeat_action_probability': 0.25,
+                    'render_mode': 'rgb_array',
+                }
+            } for _ in range(16)],
+        },
+    })
+
+    params.add_change('test-003', {
+        'env': {
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'config': {
+                    'full_action_space': False,
+                }
+            } for _ in range(16)],
+        },
+    })
+
     return params
 
 
@@ -533,6 +628,8 @@ def _run_test(env, agent, verbose=False, total_episodes=3):
         steps = tqdm(steps, desc='test episode')
 
     rgb_array = []
+    attention = []
+    ff_gate = []
 
     dones = torch.tensor([False] * num_envs, dtype=torch.bool)
     ep_count = torch.tensor([0] * num_envs, dtype=torch.int)
@@ -545,9 +642,13 @@ def _run_test(env, agent, verbose=False, total_episodes=3):
 
     obs = env.reset()
     agent.observe(obs, testing=True)
+    attention.append(agent.net.last_attention)
+    ff_gate.append(agent.net.last_ff_gating)
     for step in steps:
         obs, reward, done, info = env.step(agent.act(testing=True))
         agent.observe(obs, reward, np.array([False] * num_envs), testing=True)
+        attention.append(agent.net.last_attention)
+        ff_gate.append(agent.net.last_ff_gating)
 
         done = torch.tensor(done)
         rewards += torch.tensor(reward)
@@ -577,6 +678,8 @@ def _run_test(env, agent, verbose=False, total_episodes=3):
         #'option_choice_history': agent._option_choice_history,
         #'option_term_history': agent._option_term_history,
         'rgb_array': rgb_array,
+        'attention': attention,
+        'ff_gate': ff_gate,
     }
 
 
@@ -595,7 +698,21 @@ def make_app():
         config = get_params()[exp_name]
         pprint(config)
         if debug:
-            raise NotImplementedError()
+            exp_runner = make_experiment_runner(
+                    TrainExperiment,
+                    config={
+                        **config,
+                        #'save_model_frequency': 100_000, # This is number of iterations, not the number of transitions experienced
+                    },
+                    results_directory=results_directory,
+                    trial_id=trial_id,
+                    #checkpoint_frequency=250_000,
+                    checkpoint_frequency=None,
+                    max_iterations=max_iterations,
+                    slurm_split=slurm,
+                    verbose=True,
+                    modifiable=True,
+            )
         else:
             exp_runner = make_experiment_runner(
                     TrainExperiment,
@@ -612,10 +729,10 @@ def make_app():
                     verbose=True,
                     modifiable=True,
             )
-            if wandb:
-                exp_runner.exp.logger.init_wandb({
-                    'project': f'A2C-pathways-{exp_name}'
-                })
+        if wandb:
+            exp_runner.exp.logger.init_wandb({
+                'project': f'A2C-pathways-{exp_name}'
+            })
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
 
@@ -665,8 +782,8 @@ def make_app():
             model_filename : Path,
             output_filename : Path = Path('./plot.png')):
         # Run a number of test episodes and plot the result (return vs number of episodes)
-        #import matplotlib
-        #matplotlib.use('Agg')
+        import matplotlib
+        matplotlib.use('Agg')
         from matplotlib import pyplot as plt
 
         num_episodes=3
@@ -680,9 +797,11 @@ def make_app():
         plt.plot(rewards)
         #for x,y in zip(results['total_steps'], results['total_reward']):
         #    plt.plot(x,y)
-        plt.show()
+        #plt.show()
         plt.savefig(str(output_filename))
         print(f'Saving plot to {os.path.abspath(output_filename)}')
+
+        breakpoint()
 
     #@app.command()
     #def video(config_name : str,

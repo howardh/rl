@@ -145,7 +145,7 @@ class TrainExperiment(Experiment):
             dill.dump(model, f)
         # Verbose
         if self.verbose:
-            tqdm.write(f'Trained model saved to {model_file_name}')
+            tqdm.write(f'Trained model saved to {os.path.abspath(model_file_name)}')
     def state_dict(self):
         """ Return the experiment state as a dictionary. """
         return default_state_dict(self, [

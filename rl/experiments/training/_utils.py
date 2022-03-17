@@ -29,6 +29,8 @@ def make_env(env_name: str,
         env = rl.debug_tools.frozenlake.OnehotObs(env)
     if episode_stack is not None:
         env = EpisodeStack(env, episode_stack, dict_obs=dict_obs)
+    elif dict_obs:
+        raise Exception('dict_obs requires episode_stack')
     if action_shuffle:
         env = ActionShuffle(env)
     return env
@@ -207,6 +209,7 @@ class EpisodeStack(gym.Wrapper):
                 ('reward', gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)),
                 ('done', gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)),
                 ('obs', self.env.observation_space),
+                ('action', self.env.action_space),
             ])
 
     def step(self, action):
@@ -223,6 +226,7 @@ class EpisodeStack(gym.Wrapper):
                 'reward': np.array([reward], dtype=np.float32),
                 'done': np.array([done], dtype=np.float32),
                 'obs': obs,
+                'action': action,
             }
 
         if done:
@@ -240,6 +244,7 @@ class EpisodeStack(gym.Wrapper):
                 'reward': np.array([0], dtype=np.float32),
                 'done': np.array([False], dtype=np.float32),
                 'obs': self.env.reset(**kwargs),
+                'action': self.env.action_space.sample(),
             }
         else:
             return self.env.reset(**kwargs)

@@ -1499,6 +1499,7 @@ class A2CAgentVec(DeployableAgent):
             'action_space',
             'observation_space',
             'net',
+            'obs_scale',
         ])
     def load_state_dict_deploy(self, state):
         default_load_state_dict(self,state)
