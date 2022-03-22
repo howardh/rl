@@ -13,7 +13,7 @@ import gym.spaces
 from torchtyping import TensorType
 from torch.utils.data.dataloader import default_collate
 
-from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss, advantage_policy_gradient_loss_batch
+from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss, advantage_policy_gradient_loss_batch, clipped_advantage_policy_gradient_loss_batch
 from frankenstein.value.monte_carlo import monte_carlo_return_iterative, monte_carlo_return_iterative_batch
 from frankenstein.buffer.history import HistoryBuffer
 from frankenstein.buffer.vec_history import VecHistoryBuffer
@@ -932,14 +932,25 @@ class PPOAgent(A2CAgent):
                 ) for ek in self.training_env_keys]
             loss_pi = torch.stack(loss_pi).mean()
             # Train value network
-            loss_v = [compute_mc_state_value_loss(
-                        state_values = state_values[ek],
-                        last_state_target_value = float(target_state_values[ek][-1].item()),
-                        rewards = reward_history[ek],
-                        terminals = terminal_history[ek],
-                        discounts = discount_history[ek],
-                ) for ek in self.training_env_keys]
+            state_value_estimate = {ek: monte_carlo_return_iterative(
+                        state_values = target_state_values[ek][1:n],
+                        rewards = reward_history[ek][1:n],
+                        terminals = terminal_history[ek][1:n],
+                        discounts = discount_history[ek][1:n],
+                ) for ek in self.training_env_keys}
+            loss_v = [
+                    (state_values[ek][:-1]-state_value_estimate[ek])**2
+                    for ek in self.training_env_keys
+            ]
             loss_v = torch.stack(loss_v).mean()
+            #loss_v = [compute_mc_state_value_loss(
+            #            state_values = state_values[ek],
+            #            last_state_target_value = float(target_state_values[ek][-1].item()),
+            #            rewards = reward_history[ek],
+            #            terminals = terminal_history[ek],
+            #            discounts = discount_history[ek],
+            #    ) for ek in self.training_env_keys]
+            #loss_v = torch.stack(loss_v).mean()
             # Entropy
             loss_entropy = -torch.stack([ e.mean() for e in entropy.values() ]).mean()
             # Take a gradient step
@@ -1248,6 +1259,8 @@ class A2CAgentVec(DeployableAgent):
             num_test_envs : int = 4,
             obs_scale : Union[dict,float] = 1/255,
             reward_scale : float = 1,
+            vf_loss_coeff : float = 1.,
+            entropy_loss_coeff : float = 0.01,
             device : torch.device = torch.device('cpu'),
             optimizer : str = 'rmsprop', # adam or rmsprop
             net : PolicyValueNetwork = None,
@@ -1262,6 +1275,8 @@ class A2CAgentVec(DeployableAgent):
         self.max_rollout_length = max_rollout_length
         self.obs_scale = obs_scale
         self.reward_scale = reward_scale
+        self.vf_loss_coeff = vf_loss_coeff
+        self.entropy_loss_coeff = entropy_loss_coeff
         self.device = device
         self.num_training_envs = num_train_envs
 
@@ -1396,16 +1411,7 @@ class A2CAgentVec(DeployableAgent):
                 target_state_values = target_net_output['value'].squeeze(2)
                 if isinstance(self.action_space,gym.spaces.Discrete):
                     log_action_probs = net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
-                    #log_action_probs2 = torch.stack([
-                    #        out[range(len(out)),a]
-                    #        for out,a in zip(net_output['action'].log_softmax(2),action)
-                    #], dim=0)
-                    #assert (log_action_probs == log_action_probs2).all()
                     entropy = -(net_output['action'].log_softmax(2)*net_output['action'].softmax(2)).sum(2).mean()
-                    #entropy = {
-                    #    ek: compute_entropy(outputs['action'].log_softmax(1).squeeze())
-                    #    for ek,outputs in net_output.items()
-                    #}
                 else:
                     raise NotImplementedError()
             except:
@@ -1433,7 +1439,7 @@ class A2CAgentVec(DeployableAgent):
             # Entropy
             loss_entropy = -entropy.mean()
             # Take a gradient step
-            loss = loss_pi+loss_v+0.01*loss_entropy
+            loss = loss_pi+self.vf_loss_coeff*loss_v+self.entropy_loss_coeff*loss_entropy
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -1505,6 +1511,123 @@ class A2CAgentVec(DeployableAgent):
         default_load_state_dict(self,state)
 
 
+class PPOAgentVec(A2CAgentVec):
+    def __init__(self,
+            action_space : gym.spaces.Box,
+            observation_space : gym.spaces.Box,
+            discount_factor : float = 0.99,
+            learning_rate : float = 1e-4,
+            target_update_frequency : int = 40_000, # Mnih 2016 - section 8
+            polyak_rate : float = 1.0,              # Mnih 2016 - section 8
+            max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
+            num_train_envs : int = 16,
+            num_test_envs : int = 4,
+            obs_scale : Union[dict,float] = 1/255,
+            reward_scale : float = 1,
+            vf_loss_coeff : float = 1.,
+            entropy_loss_coeff : float = 0.01,
+            device : torch.device = torch.device('cpu'),
+            optimizer : str = 'rmsprop', # adam or rmsprop
+            net : PolicyValueNetwork = None,
+            logger : Logger = None,
+            # PPO-specific stuff
+            num_minibatches : int = 5,
+        ):
+        super().__init__(
+                action_space = action_space,
+                observation_space = observation_space,
+                discount_factor = discount_factor,
+                learning_rate = learning_rate,
+                target_update_frequency = target_update_frequency,
+                polyak_rate = polyak_rate,
+                max_rollout_length = max_rollout_length,
+                num_train_envs = num_train_envs,
+                num_test_envs = num_test_envs,
+                obs_scale = obs_scale,
+                reward_scale = reward_scale,
+                vf_loss_coeff = vf_loss_coeff,
+                entropy_loss_coeff = entropy_loss_coeff,
+                device = device,
+                optimizer = optimizer,
+                net = net,
+                logger = logger,
+        )
+        self.num_minibatches = num_minibatches
+    def _train(self):
+        history = self.train_history_buffer
+        t_max = self.max_rollout_length
+        log_action_probs_old = None
+
+        # Check if we've accumulated enough data
+        n = len(history.obs_history)
+        if n < t_max:
+            return
+        for _ in range(self.num_minibatches):
+            try:
+                obs = history.obs.float()*self.obs_scale
+                action = history.action
+                reward = history.reward
+                terminal = history.terminal
+                misc = history.misc
+                assert isinstance(misc, dict)
+                assert 'discount' in misc
+                discount = misc['discount']
+                net_output = default_collate([self.net(o) for o in obs])
+                target_net_output = default_collate([self.target_net(o) for o in obs])
+                state_values = net_output['value'].squeeze(2)
+                target_state_values = target_net_output['value'].squeeze(2)
+                if isinstance(self.action_space,gym.spaces.Discrete):
+                    log_action_probs = net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
+                    entropy = -(net_output['action'].log_softmax(2)*net_output['action'].softmax(2)).sum(2).mean()
+                else:
+                    raise NotImplementedError()
+                if log_action_probs_old is None:
+                    log_action_probs_old = log_action_probs.clone().detach()
+            except:
+                raise
+            # Train policy
+            loss_pi = clipped_advantage_policy_gradient_loss_batch(
+                    log_action_probs = log_action_probs[:n-1,:],
+                    old_log_action_probs = log_action_probs_old[:n-1,:],
+                    state_values = state_values[:n-1,:].detach(),
+                    next_state_values = target_state_values[1:,:],
+                    rewards = reward[1:,:],
+                    terminals = terminal[1:,:],
+                    prev_terminals = terminal[:n-1,:],
+                    discounts = discount[1:,:],
+                    epsilon=0.1
+            )
+            loss_pi = loss_pi.mean()
+            # Train value network
+            state_value_estimate = monte_carlo_return_iterative_batch(
+                    state_values = target_state_values[1:,:].detach(),
+                    rewards = reward[1:,:],
+                    terminals = terminal[1:,:],
+                    discounts = discount[1:,:],
+            )
+            loss_v = (state_values[:-1,:]-state_value_estimate)**2
+            loss_v = loss_v.mean()
+            # Entropy
+            loss_entropy = -entropy.mean()
+            # Take a gradient step
+            loss = loss_pi+self.vf_loss_coeff*loss_v+self.entropy_loss_coeff*loss_entropy
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            # Clear data
+            self.train_history_buffer.clear()
+            # Log
+            self._training_steps += 1
+            self.logger.log(
+                    loss_pi=loss_pi.item(),
+                    loss_v=loss_v.item(),
+                    loss_entropy=loss_entropy.item(),
+                    loss_total=loss.item(),
+                    train_state_value=state_values.mean().item(),
+                    train_state_value_target_net=target_state_values.mean().item(),
+            )
+
+
 class A2CAgentRecurrentVec(A2CAgentVec):
     def __init__(self,
             action_space : gym.spaces.Box,
@@ -1518,6 +1641,8 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             num_test_envs : int = 4,
             obs_scale : Union[dict,float] = 1/255,
             reward_scale : float = 1,
+            vf_loss_coeff : float = 1.,
+            entropy_loss_coeff : float = 0.01,
             hidden_reset_min_prob : float = 0,
             hidden_reset_max_prob : float = 0,
             target_net_hidden_state_forcing : bool = False,
@@ -1538,6 +1663,8 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 num_test_envs = num_test_envs,
                 obs_scale = obs_scale,
                 reward_scale = reward_scale,
+                vf_loss_coeff = vf_loss_coeff,
+                entropy_loss_coeff = entropy_loss_coeff,
                 device = device,
                 optimizer = optimizer,
                 net = net,
@@ -1772,7 +1899,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             # Entropy
             loss_entropy = -entropy.mean()
             # Take a gradient step
-            loss = loss_pi+loss_v+0.01*loss_entropy
+            loss = loss_pi+self.vf_loss_coeff*loss_v+self.entropy_loss_coeff*loss_entropy
             self.optimizer.zero_grad()
             loss.backward()
             if __debug__:
@@ -1824,6 +1951,7 @@ if __name__ == "__main__":
     #import pybullet_envs
 
     from rl.experiments.training.basic import TrainExperiment
+    from rl.experiments.training.vectorized import TrainExperiment as TrainExperimentVec
     from experiment import make_experiment_runner
 
     def run_atari():
@@ -1946,9 +2074,55 @@ if __name__ == "__main__":
                 max_iterations=50_000_000,
                 verbose=True,
         )
-        #exp_runner.exp.logger.init_wandb({
-        #    'project': 'PPO-%s' % env_name.replace('/','_')
-        #})
+        exp_runner.exp.logger.init_wandb({
+            'project': 'PPO-%s' % env_name.replace('/','_')
+        })
+        exp_runner.run()
+
+    def run_atari_ppo_vec():
+        from rl.agent.smdp.a2c import PPOAgentVec
+
+        num_envs = 16
+        env_name = 'Pong-v5'
+        env_config = {
+            'env_type': 'envpool',
+            'env_configs': {
+                'env_name': env_name,
+                'atari': True,
+                'atari_config': {
+                    'num_envs': num_envs,
+                    'stack_num': 4,
+                    'repeat_action_probability': 0.25,
+                }
+            }
+        }
+
+        exp_runner = make_experiment_runner(
+                TrainExperimentVec,
+                config={
+                    'agent': {
+                        'type': PPOAgentVec,
+                        'parameters': {
+                            'num_train_envs': num_envs,
+                            'num_test_envs': num_envs,
+                            'num_minibatches': 1,
+                        },
+                    },
+                    'env_test': env_config,
+                    'env_train': env_config,
+                    'test_frequency': None,
+                    'save_model_frequency': None,
+                    'verbose': True,
+                },
+                #trial_id='checkpointtest',
+                #checkpoint_frequency=250_000,
+                checkpoint_frequency=None,
+                max_iterations=50_000_000,
+                verbose=True,
+        )
+        exp_runner.exp.logger.init_wandb({
+            'project': 'PPOAgentVec-%s' % env_name.replace('/','_')
+        })
         exp_runner.run()
 
     def run_atari_recurrent():
@@ -2035,5 +2209,6 @@ if __name__ == "__main__":
     #run_mujoco()
     #run_atari()
     #run_atari_ppo()
+    run_atari_ppo_vec()
     #run_atari_recurrent()
-    run_atari_envpool()
+    #run_atari_envpool()
