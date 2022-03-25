@@ -8,6 +8,7 @@ import gym.spaces
 from gym.wrappers import FrameStack#, AtariPreprocessing
 from gym.spaces import Box
 import cv2
+from permutation import Permutation
 
 import rl.debug_tools.frozenlake
 from rl.utils import get_env_state, set_env_state
@@ -265,17 +266,26 @@ class EpisodeStack(gym.Wrapper):
 
 
 class ActionShuffle(gym.Wrapper):
-    def __init__(self, env, actions=None):
+    def __init__(self, env, actions=None, permutation=None):
         """
         Args:
             env: gym.Env
             actions: list of ints, indices of actions to shuffle. Alternatively, if set to True, then all actions are shuffled.
+            permutation: list of ints, indices of the permutation to use. If not set, then a new permutation is randomly generated at the start of each episode.
         """
         super().__init__(env)
         if actions is None:
             self._actions = list(range(self.env.action_space.n))
         else:
             self._actions = actions
+
+        if isinstance(permutation, list):
+            self.permutation = permutation
+        elif isinstance(permutation, int):
+            self.permutation = Permutation.from_lehmer(permutation, len(self._actions)).to_image()
+        else:
+            self.permutation = None
+
         self._init_mapping()
 
     def _init_mapping(self):

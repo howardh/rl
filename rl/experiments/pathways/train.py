@@ -70,7 +70,7 @@ class AttnRecAgent(A2CAgentRecurrentVec):
                 ).to(device)
             elif self._model_type == 'ModularPolicy2':
                 return ModularPolicy2(
-                        inputs={
+                        inputs = {
                             'obs': {
                                 'type': 'GreyscaleImageInput',
                                 'config': {
@@ -406,6 +406,17 @@ def get_params():
                     'recurrence_type': 'RecurrentAttention9',
                 },
             },
+            'env_test': env_config_diff,
+            'env_train': env_config_diff,
+        }) # This model works
+
+        # Try again with action shuffle
+        env_config_diff = {
+            'env_configs': [{
+                'action_shuffle': [2,3,4,5],
+            }] * num_envs
+        }
+        params.add_change('exp-meta-010', {
             'env_test': env_config_diff,
             'env_train': env_config_diff,
         })
