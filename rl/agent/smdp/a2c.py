@@ -507,6 +507,10 @@ def compute_normal_entropy(mean,std):
 #    entropy = 0.5*np.log(2*np.pi)+0.5+torch.log(std)
 #    return entropy
 
+def sample_minibatch(shape, minibatch_size):
+    indices = np.random.choice(np.prod(shape), minibatch_size, replace=False)
+    return torch.tensor(np.unravel_index(indices, shape))
+
 def zip_dict(*dcts):
     if not dcts:
         return
@@ -852,6 +856,7 @@ class PPOAgent(A2CAgent):
         ):
         super().__init__(action_space, observation_space, discount_factor=discount_factor, learning_rate=learning_rate, target_update_frequency=target_update_frequency, polyak_rate=polyak_rate, max_rollout_length=max_rollout_length, training_env_keys=training_env_keys, obs_scale=obs_scale, reward_scale=reward_scale, device=device, net=net, logger=logger)
         self.num_minibatches = num_minibatches
+        raise NotImplementedError('This implementation doesn\'t work yet.')
     def _train(self):
         history = self.train_history_buffer
         t_max = self.max_rollout_length
@@ -1532,6 +1537,7 @@ class PPOAgentVec(A2CAgentVec):
             logger : Logger = None,
             # PPO-specific stuff
             num_minibatches : int = 5,
+            minibatch_size : int = None,
         ):
         super().__init__(
                 action_space = action_space,
@@ -1553,38 +1559,47 @@ class PPOAgentVec(A2CAgentVec):
                 logger = logger,
         )
         self.num_minibatches = num_minibatches
+        self.minibatch_size = minibatch_size
     def _train(self):
         history = self.train_history_buffer
         t_max = self.max_rollout_length
-        log_action_probs_old = None
 
         # Check if we've accumulated enough data
         n = len(history.obs_history)
         if n < t_max:
             return
+
+        obs = history.obs.float()*self.obs_scale
+        action = history.action
+        reward = history.reward
+        terminal = history.terminal
+        misc = history.misc
+        assert isinstance(misc, dict)
+        assert 'discount' in misc
+        discount = misc['discount']
+        target_net_output = default_collate([self.target_net(o) for o in obs])
+        log_action_probs_old = None
+
         for _ in range(self.num_minibatches):
-            try:
-                obs = history.obs.float()*self.obs_scale
-                action = history.action
-                reward = history.reward
-                terminal = history.terminal
-                misc = history.misc
-                assert isinstance(misc, dict)
-                assert 'discount' in misc
-                discount = misc['discount']
-                net_output = default_collate([self.net(o) for o in obs])
-                target_net_output = default_collate([self.target_net(o) for o in obs])
-                state_values = net_output['value'].squeeze(2)
-                target_state_values = target_net_output['value'].squeeze(2)
-                if isinstance(self.action_space,gym.spaces.Discrete):
-                    log_action_probs = net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
-                    entropy = -(net_output['action'].log_softmax(2)*net_output['action'].softmax(2)).sum(2).mean()
-                else:
-                    raise NotImplementedError()
-                if log_action_probs_old is None:
-                    log_action_probs_old = log_action_probs.clone().detach()
-            except:
-                raise
+            # Sample minibatch
+            if self.minibatch_size is not None:
+                minibatch_indices = sample_minibatch([n-1,self.num_training_envs], self.minibatch_size)
+            else:
+                minibatch_indices = None
+
+            # Re-evaluate values that depend on `self.net`
+            net_output = default_collate([self.net(o) for o in obs])
+            state_values = net_output['value'].squeeze(2)
+            target_state_values = target_net_output['value'].squeeze(2)
+            if isinstance(self.action_space,gym.spaces.Discrete):
+                log_action_probs = net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
+                entropy = -(net_output['action'].log_softmax(2)*net_output['action'].softmax(2)).sum(2)[:n-1,:] # Remove the last step to match up with minibatch indices.
+            else:
+                raise NotImplementedError()
+
+            if log_action_probs_old is None:
+                log_action_probs_old = log_action_probs.clone().detach()
+
             # Train policy
             loss_pi = clipped_advantage_policy_gradient_loss_batch(
                     log_action_probs = log_action_probs[:n-1,:],
@@ -1597,6 +1612,8 @@ class PPOAgentVec(A2CAgentVec):
                     discounts = discount[1:,:],
                     epsilon=0.1
             )
+            if minibatch_indices is not None:
+                loss_pi = loss_pi[minibatch_indices[0],minibatch_indices[1]]
             loss_pi = loss_pi.mean()
             # Train value network
             state_value_estimate = monte_carlo_return_iterative_batch(
@@ -1606,19 +1623,23 @@ class PPOAgentVec(A2CAgentVec):
                     discounts = discount[1:,:],
             )
             loss_v = (state_values[:-1,:]-state_value_estimate)**2
+            if minibatch_indices is not None:
+                loss_v = loss_v[minibatch_indices[0],minibatch_indices[1]]
             loss_v = loss_v.mean()
             # Entropy
-            loss_entropy = -entropy.mean()
+            loss_entropy = -entropy
+            if minibatch_indices is not None:
+                loss_entropy = loss_entropy[minibatch_indices[0],minibatch_indices[1]]
+            loss_entropy = loss_entropy.mean()
+
             # Take a gradient step
             loss = loss_pi+self.vf_loss_coeff*loss_v+self.entropy_loss_coeff*loss_entropy
             self.optimizer.zero_grad()
-            loss.backward()
+            loss.backward(retain_graph=True)
             self.optimizer.step()
-            # Clear data
-            self.train_history_buffer.clear()
+
             # Log
-            self._training_steps += 1
-            self.logger.log(
+            self.logger.append(
                     loss_pi=loss_pi.item(),
                     loss_v=loss_v.item(),
                     loss_entropy=loss_entropy.item(),
@@ -1626,6 +1647,10 @@ class PPOAgentVec(A2CAgentVec):
                     train_state_value=state_values.mean().item(),
                     train_state_value_target_net=target_state_values.mean().item(),
             )
+        # Clear data
+        self.train_history_buffer.clear()
+        # Keep track of number of training steps so we know when to update the target network
+        self._training_steps += 1
 
 
 class A2CAgentRecurrentVec(A2CAgentVec):
@@ -1862,6 +1887,17 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                 if isinstance(self.action_space,gym.spaces.Discrete):
                     log_action_probs = net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
                     entropy = -(net_output['action'].log_softmax(2)*net_output['action'].softmax(2)).sum(2).mean()
+                elif isinstance(self.action_space,gym.spaces.Box):
+                    log_action_probs = compute_normal_log_prob_batch(
+                            net_output['action_mean'],
+                            net_output['action_std'],
+                            action
+                    )
+                    entropy = compute_normal_entropy(
+                            net_output['action_mean'],
+                            net_output['action_std']
+                    )
+                    raise NotImplementedError('Untested code')
                 else:
                     raise NotImplementedError()
                     #log_action_probs = {
@@ -2105,7 +2141,7 @@ if __name__ == "__main__":
                         'parameters': {
                             'num_train_envs': num_envs,
                             'num_test_envs': num_envs,
-                            'num_minibatches': 1,
+                            'num_minibatches': 5,
                         },
                     },
                     'env_test': env_config,
