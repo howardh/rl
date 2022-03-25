@@ -397,6 +397,33 @@ class GreyscaleImageInput(torch.nn.Module):
         }
 
 
+class ImageInput56(torch.nn.Module):
+    def __init__(self, key_size: int, value_size: int, in_channels: int):
+        super().__init__()
+        self.conv = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                in_channels=in_channels,out_channels=32,kernel_size=8,stride=4),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=32,out_channels=64,kernel_size=4,stride=1),
+            torch.nn.LeakyReLU(),
+            torch.nn.Conv2d(
+                in_channels=64,out_channels=64,kernel_size=4,stride=1),
+            torch.nn.Flatten(),
+            torch.nn.LeakyReLU(),
+            torch.nn.Linear(in_features=64*7*7,out_features=512),
+            torch.nn.LeakyReLU(),
+        )
+        self.fc_key = torch.nn.Linear(in_features=512, out_features=key_size)
+        self.fc_value = torch.nn.Linear(in_features=512, out_features=value_size)
+    def forward(self, x: TensorType['batch_size','channels','height','width',float]):
+        x = self.conv(x)
+        return {
+            'key': self.fc_key(x),
+            'value': self.fc_value(x),
+        }
+
+
 class ScalarInput(torch.nn.Module):
     def __init__(self, key_size: int, value_size: int):
         super().__init__()
@@ -646,6 +673,7 @@ class ModularPolicy2(PolicyValueNetworkRecurrent):
                 cls.__name__: cls
                 for cls in [
                     GreyscaleImageInput,
+                    ImageInput56,
                     ScalarInput,
                     DiscreteInput,
                     LinearInput,

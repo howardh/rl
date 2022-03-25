@@ -9,6 +9,7 @@ from gym.wrappers import FrameStack#, AtariPreprocessing
 from gym.spaces import Box
 import cv2
 from permutation import Permutation
+import gym_minigrid.wrappers
 
 import rl.debug_tools.frozenlake
 from rl.utils import get_env_state, set_env_state
@@ -16,6 +17,8 @@ from rl.utils import get_env_state, set_env_state
 def make_env(env_name: str,
         config={},
         atari=False,
+        minigrid=False,
+        minigrid_config={},
         one_hot_obs=False,
         atari_config={},
         frame_stack=4,
@@ -26,6 +29,8 @@ def make_env(env_name: str,
     if atari:
         env = AtariPreprocessing(env, **atari_config)
         env = FrameStack(env, frame_stack)
+    if minigrid:
+        env = MinigridPreprocessing(env, **minigrid_config)
     if one_hot_obs:
         env = rl.debug_tools.frozenlake.OnehotObs(env)
     if episode_stack is not None:
@@ -35,6 +40,7 @@ def make_env(env_name: str,
     if action_shuffle:
         env = ActionShuffle(env)
     return env
+
 
 # See https://github.com/openai/gym/pull/2454
 class AtariPreprocessing(gym.Wrapper):
@@ -197,6 +203,58 @@ class AtariPreprocessing(gym.Wrapper):
         return obs
 
 
+class MinigridPreprocessing(gym.Wrapper):
+    def __init__(
+        self,
+        env,
+        rgb = True,
+        screen_size = None,
+    ):
+        super().__init__(env)
+        assert ( cv2 is not None ), 'opencv-python package not installed!'
+
+        if rgb:
+            self.env = gym_minigrid.wrappers.RGBImgPartialObsWrapper(env)
+            self.observation_space['image'] = Box(
+                    low=0, high=255,
+                    shape=(
+                        self.env.observation_space['image'].shape[2],
+                        self.env.observation_space['image'].shape[0],
+                        self.env.observation_space['image'].shape[1]),
+                    dtype=np.uint8)
+
+        self.screen_size = screen_size
+        self.rgb = rgb
+    
+    def _resize_obs(self, obs):
+        if not self.rgb:
+            return obs
+
+        # Resize
+        if self.screen_size is not None:
+            obs['image'] = cv2.resize( # type: ignore
+                obs['image'],
+                (self.screen_size, self.screen_size),
+                interpolation=cv2.INTER_AREA, # type: ignore
+            )
+
+        # Move channel dimension to start
+        obs['image'] = np.moveaxis(obs['image'], 2, 0)
+
+        return obs
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        obs = self._resize_obs(obs)
+        return obs, reward, done, info
+
+    def reset(self, **kwargs):
+        # NoopReset
+        obs = self.env.reset(**kwargs)
+        obs = self._resize_obs(obs)
+        return obs
+
+
 class EpisodeStack(gym.Wrapper):
     def __init__(self, env, num_episodes : int, dict_obs: bool = False):
         super().__init__(env)
@@ -206,10 +264,14 @@ class EpisodeStack(gym.Wrapper):
         self._done = True
 
         if dict_obs:
+            obs_space = [('obs', self.env.observation_space)]
+            if isinstance(self.env.observation_space, gym.spaces.Dict):
+                obs_space = [(f'obs ({k})',v) for k,v in self.env.observation_space.items()]
             self.observation_space = gym.spaces.Dict([
                 ('reward', gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)),
                 ('done', gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)),
-                ('obs', self.env.observation_space),
+                #('obs', self.env.observation_space),
+                *obs_space,
                 ('action', self.env.action_space),
             ])
 
@@ -223,12 +285,20 @@ class EpisodeStack(gym.Wrapper):
         self._done = done
 
         if self.dict_obs:
-            obs = {
-                'reward': np.array([reward], dtype=np.float32),
-                'done': np.array([done], dtype=np.float32),
-                'obs': obs,
-                'action': action,
-            }
+            if isinstance(self.env.observation_space, gym.spaces.Dict):
+                obs = {
+                    'reward': np.array([reward], dtype=np.float32),
+                    'done': np.array([done], dtype=np.float32),
+                    **{f'obs ({k})': v for k,v in obs.items()},
+                    'action': action,
+                }
+            else:
+                obs = {
+                    'reward': np.array([reward], dtype=np.float32),
+                    'done': np.array([done], dtype=np.float32),
+                    'obs': obs,
+                    'action': action,
+                }
 
         if done:
             if self.episode_count >= self.num_episodes:
@@ -240,13 +310,22 @@ class EpisodeStack(gym.Wrapper):
 
     def reset(self, **kwargs):
         self.episode_count = 0
+        obs = self.env.reset(**kwargs)
         if self.dict_obs:
-            return {
-                'reward': np.array([0], dtype=np.float32),
-                'done': np.array([False], dtype=np.float32),
-                'obs': self.env.reset(**kwargs),
-                'action': self.env.action_space.sample(),
-            }
+            if isinstance(self.env.observation_space, gym.spaces.Dict):
+                return {
+                    'reward': np.array([0], dtype=np.float32),
+                    'done': np.array([False], dtype=np.float32),
+                    **{f'obs ({k})': v for k,v in obs.items()},
+                    'action': self.env.action_space.sample(),
+                }
+            else:
+                return {
+                    'reward': np.array([0], dtype=np.float32),
+                    'done': np.array([False], dtype=np.float32),
+                    'obs': obs,
+                    'action': self.env.action_space.sample(),
+                }
         else:
             return self.env.reset(**kwargs)
 

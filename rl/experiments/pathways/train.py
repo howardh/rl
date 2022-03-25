@@ -27,6 +27,7 @@ class AttnRecAgent(A2CAgentRecurrentVec):
         self._recurrence_type = recurrence_type
         self._num_recurrence_blocks = num_recurrence_blocks
         super().__init__(**kwargs)
+
     def _init_default_net(self, observation_space, action_space, device) -> PolicyValueNetworkRecurrent:
         if isinstance(observation_space, gym.spaces.Box):
             assert observation_space.shape is not None
@@ -45,71 +46,123 @@ class AttnRecAgent(A2CAgentRecurrentVec):
                         num_blocks=self._num_recurrence_blocks,
                 ).to(device)
         if isinstance(observation_space, gym.spaces.Dict):
-            assert len(observation_space['obs'].shape) == 3 # Atari
-            if self._model_type == 'ModularPolicy':
-                return ModularPolicy(
-                        inputs={
-                            'obs': {
-                                'type': 'GreyscaleImageInput',
-                                'config': {
-                                    'in_channels': observation_space['obs'].shape[0]
-                                },
-                            },
-                            'reward': {
-                                'type': 'ScalarInput',
-                            },
-                        },
-                        num_actions=action_space.n,
-                        input_size=512,
-                        key_size=512,
-                        value_size=512,
-                        num_heads=8,
-                        ff_size = 1024,
-                        recurrence_type=self._recurrence_type,
-                        num_blocks=self._num_recurrence_blocks,
-                ).to(device)
-            elif self._model_type == 'ModularPolicy2':
-                return ModularPolicy2(
-                        inputs = {
-                            'obs': {
-                                'type': 'GreyscaleImageInput',
-                                'config': {
-                                    'in_channels': observation_space['obs'].shape[0]
-                                },
-                            },
-                            'reward': {
-                                'type': 'ScalarInput',
-                            },
-                            'action': {
-                                'type': 'DiscreteInput' if isinstance(action_space, gym.spaces.Discrete) else 'LinearInput',
-                                'config': {
-                                    'input_size': action_space.n
-                                },
-                            },
-                        },
-                        outputs = {
-                            'value': {
-                                'type': 'LinearOutput',
-                                'config': {
-                                    'output_size': 1,
-                                }
-                            },
-                            'action': {
-                                'type': 'LinearOutput',
-                                'config': {
-                                    'output_size': action_space.n,
-                                }
-                            },
-                        },
-                        input_size=512,
-                        key_size=512,
-                        value_size=512,
-                        num_heads=8,
-                        ff_size = 1024,
-                        recurrence_type=self._recurrence_type,
-                        num_blocks=self._num_recurrence_blocks,
-                ).to(device)
+            if 'obs' in observation_space.keys() and len(observation_space['obs'].shape) == 3:
+                # Atari
+                return self._init_atari_net(observation_space, action_space, device)
+            elif 'obs (image)' in observation_space.keys():
+                # Minigrid
+                return self._init_minigrid_net(observation_space, action_space, device)
         raise Exception('Unsupported observation space or action space.')
+    def _init_atari_net(self, observation_space, action_space, device):
+        if self._model_type == 'ModularPolicy':
+            return ModularPolicy(
+                    inputs={
+                        'obs': {
+                            'type': 'GreyscaleImageInput',
+                            'config': {
+                                'in_channels': observation_space['obs'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                    },
+                    num_actions=action_space.n,
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size = 1024,
+                    recurrence_type=self._recurrence_type,
+                    num_blocks=self._num_recurrence_blocks,
+            ).to(device)
+        elif self._model_type == 'ModularPolicy2':
+            return ModularPolicy2(
+                    inputs = {
+                        'obs': {
+                            'type': 'GreyscaleImageInput',
+                            'config': {
+                                'in_channels': observation_space['obs'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                        'action': {
+                            'type': 'DiscreteInput' if isinstance(action_space, gym.spaces.Discrete) else 'LinearInput',
+                            'config': {
+                                'input_size': action_space.n
+                            },
+                        },
+                    },
+                    outputs = {
+                        'value': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': 1,
+                            }
+                        },
+                        'action': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': action_space.n,
+                            }
+                        },
+                    },
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size = 1024,
+                    recurrence_type=self._recurrence_type,
+                    num_blocks=self._num_recurrence_blocks,
+            ).to(device)
+        raise NotImplementedError()
+    def _init_minigrid_net(self, observation_space, action_space, device):
+        observation_space = observation_space # Unused variable
+        if self._model_type == 'ModularPolicy2':
+            return ModularPolicy2(
+                    inputs = {
+                        'obs (image)': {
+                            'type': 'ImageInput56',
+                            'config': {
+                                'in_channels': observation_space['obs (image)'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                        'action': {
+                            'type': 'DiscreteInput',
+                            'config': {
+                                'input_size': action_space.n
+                            },
+                        },
+                    },
+                    outputs = {
+                        'value': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': 1,
+                            }
+                        },
+                        'action': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': action_space.n,
+                            }
+                        },
+                    },
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size = 1024,
+                    recurrence_type=self._recurrence_type,
+                    num_blocks=self._num_recurrence_blocks,
+            ).to(device)
+        raise NotImplementedError()
+
     def state_dict_deploy(self):
         return {
                 **super().state_dict_deploy(),
@@ -562,11 +615,53 @@ def get_params():
             'verbose': True,
         })
 
+    def init_minigrid_params():
+        num_envs = 16
+        env_name = 'MiniGrid-Empty-5x5-v0'
+        env_config = {
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'env_name': env_name,
+                'minigrid': True,
+                'minigrid_config': {},
+                'episode_stack': 1,
+                'dict_obs': True,
+                'action_shuffle': False,
+                'config': {}
+            }] * num_envs
+        }
+
+        params.add('exp-minigrid-001', {
+            'agent': {
+                'type': Agent,
+                'parameters': {
+                    'target_update_frequency': 32_000,
+                    'num_train_envs': num_envs,
+                    'num_test_envs': 1,
+                    'obs_scale': {
+                        'obs (image)': 1.0 / 255.0,
+                    },
+                    'max_rollout_length': 16,
+                    'hidden_reset_min_prob': 0,
+                    'hidden_reset_max_prob': 0,
+                    'model_type': 'ModularPolicy2',
+                    'recurrence_type': 'RecurrentAttention9',
+                    'num_recurrence_blocks': 1,
+                },
+            },
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
+        })
+
     init_train_params()
     init_meta_rl_params()
     init_seaquest_params()
     init_breakout_params()
     init_atlantis_params()
+    init_minigrid_params()
     # Breakout, Atlantis, and Skiing are envs with four actions, so they're probably more suitable for the initial action shuffling experiments
     return params
 
