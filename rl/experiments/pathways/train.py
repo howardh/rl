@@ -617,7 +617,8 @@ def get_params():
 
     def init_minigrid_params():
         num_envs = 16
-        env_name = 'MiniGrid-Empty-5x5-v0'
+        #env_name = 'MiniGrid-Empty-5x5-v0'
+        env_name = 'MiniGrid-Empty-16x16-v0'
         env_config = {
             'env_type': 'gym_async',
             'env_configs': [{
@@ -635,7 +636,7 @@ def get_params():
             'agent': {
                 'type': Agent,
                 'parameters': {
-                    'target_update_frequency': 32_000,
+                    'target_update_frequency': 8_000,
                     'num_train_envs': num_envs,
                     'num_test_envs': 1,
                     'obs_scale': {
@@ -656,12 +657,76 @@ def get_params():
             'verbose': True,
         })
 
+        #env_name = 'MiniGrid-Empty-16x16-v0'
+        #env_config_diff = {
+        #    'env_configs': [{
+        #        'env_name': env_name,
+        #    }] * num_envs
+        #}
+        #params.add_change('exp-minigrid-002', {
+        #    'env_test': env_config_diff,
+        #    'env_train': env_config_diff,
+        #})
+
+    def init_minigrid_bandit_params():
+        num_envs = 16
+        env_name = 'MiniGrid-NRoomBanditsSmall-v0'
+        env_config = {
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'env_name': env_name,
+                'minigrid': True,
+                'minigrid_config': {},
+                'episode_stack': 5,
+                'dict_obs': True,
+                'action_shuffle': False,
+                'config': {}
+            }] * num_envs
+        }
+
+        params.add('exp-mgb-001', {
+            'agent': {
+                'type': Agent,
+                'parameters': {
+                    'target_update_frequency': 8_000,
+                    'num_train_envs': num_envs,
+                    'num_test_envs': 1,
+                    'obs_scale': {
+                        'obs (image)': 1.0 / 255.0,
+                    },
+                    'max_rollout_length': 16,
+                    'hidden_reset_min_prob': 0,
+                    'hidden_reset_max_prob': 0,
+                    'model_type': 'ModularPolicy2',
+                    'recurrence_type': 'RecurrentAttention9',
+                    'num_recurrence_blocks': 1,
+                },
+            },
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
+        })
+
+        #env_name = 'MiniGrid-Empty-16x16-v0'
+        #env_config_diff = {
+        #    'env_configs': [{
+        #        'env_name': env_name,
+        #    }] * num_envs
+        #}
+        #params.add_change('exp-minigrid-002', {
+        #    'env_test': env_config_diff,
+        #    'env_train': env_config_diff,
+        #})
+
     init_train_params()
     init_meta_rl_params()
     init_seaquest_params()
     init_breakout_params()
     init_atlantis_params()
     init_minigrid_params()
+    init_minigrid_bandit_params()
     # Breakout, Atlantis, and Skiing are envs with four actions, so they're probably more suitable for the initial action shuffling experiments
     return params
 

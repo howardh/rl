@@ -10,6 +10,8 @@ from gym.spaces import Box
 import cv2
 from permutation import Permutation
 import gym_minigrid.wrappers
+import gym_minigrid.minigrid
+import gym_minigrid.register
 
 import rl.debug_tools.frozenlake
 from rl.utils import get_env_state, set_env_state
@@ -277,6 +279,8 @@ class EpisodeStack(gym.Wrapper):
 
     def step(self, action):
         if self._done:
+            if isinstance(self.env, NRoomBanditsSmall):
+                self.env.shuffle_goals_on_reset = False
             self.episode_count += 1
             self._done = False
             obs, reward, done, info = self.env.reset(), 0, False, {}
@@ -310,6 +314,8 @@ class EpisodeStack(gym.Wrapper):
 
     def reset(self, **kwargs):
         self.episode_count = 0
+        if isinstance(self.env, NRoomBanditsSmall):
+            self.env.shuffle_goals_on_reset = True
         obs = self.env.reset(**kwargs)
         if self.dict_obs:
             if isinstance(self.env.observation_space, gym.spaces.Dict):
@@ -327,7 +333,7 @@ class EpisodeStack(gym.Wrapper):
                     'action': self.env.action_space.sample(),
                 }
         else:
-            return self.env.reset(**kwargs)
+            return obs
 
     def state_dict(self):
         return {
@@ -463,3 +469,55 @@ class ExperimentConfigs(dict):
         self._last_key = key
     def add_change(self, key, config):
         self.add(key, config, inherit=self._last_key)
+
+
+class GoalDeterministic(gym_minigrid.minigrid.Goal):
+    def __init__(self, reward):
+        super().__init__()
+        self.reward = reward
+
+
+class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
+    def __init__(self):
+        self.mission = 'Reach the goal with the highest reward.'
+        self.rewards = [-1,1]
+        self.goals = [
+            GoalDeterministic(reward=r) for r in self.rewards
+        ]
+        self.shuffle_goals_on_reset = True
+
+        super().__init__(width=5, height=5)
+
+    def _shuffle_goals(self):
+        reward_indices = np.random.permutation(len(self.rewards))
+        for g,i in zip(self.goals,reward_indices):
+            g.reward = self.rewards[i]
+
+    def _gen_grid(self, width, height):
+        self.grid = gym_minigrid.minigrid.Grid(width, height)
+
+        self.grid.horz_wall(0, 0)
+        self.grid.horz_wall(0, height - 1)
+        self.grid.vert_wall(0, 0)
+        self.grid.vert_wall(width - 1, 0)
+
+        self.agent_pos = (2, height-2)
+        self.agent_dir = self._rand_int(0, 4)
+
+        if self.shuffle_goals_on_reset:
+            self._shuffle_goals()
+
+        for i,g in enumerate(self.goals):
+            self.put_obj(g, 1+i*2, 1)
+
+    def _reward(self):
+        curr_cell = self.grid.get(*self.agent_pos) # type: ignore (where is self.grid assigned?)
+        if curr_cell != None and hasattr(curr_cell,'reward'):
+            return curr_cell.reward
+        breakpoint()
+        return 0
+
+gym_minigrid.register.register(
+    id='MiniGrid-NRoomBanditsSmall-v0',
+    entry_point=NRoomBanditsSmall
+)
