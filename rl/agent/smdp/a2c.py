@@ -15,6 +15,7 @@ from torch.utils.data.dataloader import default_collate
 
 from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss, advantage_policy_gradient_loss_batch, clipped_advantage_policy_gradient_loss_batch
 from frankenstein.value.monte_carlo import monte_carlo_return_iterative, monte_carlo_return_iterative_batch
+from frankenstein.advantage.gae import generalized_advantage_estimate_batch
 from frankenstein.buffer.history import HistoryBuffer
 from frankenstein.buffer.vec_history import VecHistoryBuffer
 from experiment.logger import Logger, SubLogger
@@ -736,7 +737,7 @@ class A2CAgent(DeployableAgent):
             loss_pi = torch.stack(loss_pi).mean()
             # Train value network
             state_value_estimate = {ek: monte_carlo_return_iterative(
-                        state_values = target_state_values[ek][1:],
+                        next_state_values = target_state_values[ek][1:],
                         rewards = reward_history[ek][1:],
                         terminals = terminal_history[ek][1:],
                         discounts = discount_history[ek][1:],
@@ -938,7 +939,7 @@ class PPOAgent(A2CAgent):
             loss_pi = torch.stack(loss_pi).mean()
             # Train value network
             state_value_estimate = {ek: monte_carlo_return_iterative(
-                        state_values = target_state_values[ek][1:n],
+                        next_state_values = target_state_values[ek][1:n],
                         rewards = reward_history[ek][1:n],
                         terminals = terminal_history[ek][1:n],
                         discounts = discount_history[ek][1:n],
@@ -1188,7 +1189,7 @@ class A2CAgentRecurrent(A2CAgent):
             loss_pi = loss_pi.mean()
             # Train value network
             state_value_estimate = monte_carlo_return_iterative_batch(
-                    state_values = target_state_values[1:,:],
+                    next_state_values = target_state_values[1:,:],
                     rewards = reward_history[1:,:],
                     terminals = terminal_history[1:,:],
                     discounts = discount_history[1:,:],
@@ -1257,6 +1258,7 @@ class A2CAgentVec(DeployableAgent):
             observation_space : gym.spaces.Box,
             discount_factor : float = 0.99,
             learning_rate : float = 1e-4,
+            lr_scheduler : dict = None,
             target_update_frequency : int = 40_000, # Mnih 2016 - section 8
             polyak_rate : float = 1.0,              # Mnih 2016 - section 8
             max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
@@ -1266,6 +1268,8 @@ class A2CAgentVec(DeployableAgent):
             reward_scale : float = 1,
             vf_loss_coeff : float = 1.,
             entropy_loss_coeff : float = 0.01,
+            max_grad_norm : float = None,
+            gae_lambda : float = 0.95,
             device : torch.device = torch.device('cpu'),
             optimizer : str = 'rmsprop', # adam or rmsprop
             net : PolicyValueNetwork = None,
@@ -1282,6 +1286,8 @@ class A2CAgentVec(DeployableAgent):
         self.reward_scale = reward_scale
         self.vf_loss_coeff = vf_loss_coeff
         self.entropy_loss_coeff = entropy_loss_coeff
+        self.max_grad_norm = max_grad_norm
+        self.gae_lambda = gae_lambda
         self.device = device
         self.num_training_envs = num_train_envs
 
@@ -1317,6 +1323,7 @@ class A2CAgentVec(DeployableAgent):
             self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=learning_rate)
         else:
             raise Exception(f'Unsupported optimizer: "{optimizer}". Use "adam" or "rmsprop".')
+        self.scheduler = self._init_lr_scheduler(self.optimizer, config=lr_scheduler)
 
         # Logging
         if logger is None:
@@ -1342,6 +1349,18 @@ class A2CAgentVec(DeployableAgent):
                         action_space.n
                 ).to(device)
         raise Exception('Unsupported observation space or action space.')
+    def _init_lr_scheduler(self, optimizer, config):
+        if config is None:
+            return None
+        valid_schedulers = {
+                cls.__name__: cls
+                for cls in [
+                    torch.optim.lr_scheduler.LinearLR
+                ]
+        }
+        if config['type'] not in valid_schedulers:
+            raise Exception(f'Invalid lr_scheduler type: "{config["type"]}". Valid types are: {list(valid_schedulers.keys())}.')
+        return valid_schedulers[config['type']](optimizer, **config['parameters'])
 
     def observe(self, obs, reward=None, terminal=None, testing=False, time=1, discount=None):
         if discount is None:
@@ -1433,13 +1452,22 @@ class A2CAgentVec(DeployableAgent):
             )
             loss_pi = loss_pi.mean()
             # Train value network
-            state_value_estimate = monte_carlo_return_iterative_batch(
-                    state_values = target_state_values[1:,:].detach(),
+            #state_value_estimate = monte_carlo_return_iterative_batch(
+            #        next_state_values = target_state_values[1:,:].detach(),
+            #        rewards = reward[1:,:],
+            #        terminals = terminal[1:,:],
+            #        discounts = discount[1:,:],
+            #)
+            #loss_v = (state_values[:-1,:]-state_value_estimate)**2
+            advantage = generalized_advantage_estimate_batch(
+                    state_values = state_values[:-1,:],
+                    next_state_values = target_state_values[1:,:].detach(),
                     rewards = reward[1:,:],
                     terminals = terminal[1:,:],
-                    discounts = discount[1:,:],
+                    discount = discount[0],
+                    gae_lambda = self.gae_lambda,
             )
-            loss_v = (state_values[:-1,:]-state_value_estimate)**2
+            loss_v = advantage ** 2
             loss_v = loss_v.mean()
             # Entropy
             loss_entropy = -entropy.mean()
@@ -1447,7 +1475,12 @@ class A2CAgentVec(DeployableAgent):
             loss = loss_pi+self.vf_loss_coeff*loss_v+self.entropy_loss_coeff*loss_entropy
             self.optimizer.zero_grad()
             loss.backward()
+            if self.max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(
+                        self.net.parameters(), self.max_grad_norm)
             self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
             # Clear data
             self.train_history_buffer.clear()
             # Log
@@ -1522,6 +1555,7 @@ class PPOAgentVec(A2CAgentVec):
             observation_space : gym.spaces.Box,
             discount_factor : float = 0.99,
             learning_rate : float = 1e-4,
+            lr_scheduler : dict = None,
             target_update_frequency : int = 40_000, # Mnih 2016 - section 8
             polyak_rate : float = 1.0,              # Mnih 2016 - section 8
             max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
@@ -1531,6 +1565,8 @@ class PPOAgentVec(A2CAgentVec):
             reward_scale : float = 1,
             vf_loss_coeff : float = 1.,
             entropy_loss_coeff : float = 0.01,
+            max_grad_norm : float = None,
+            gae_lambda : float = 0.95,
             device : torch.device = torch.device('cpu'),
             optimizer : str = 'rmsprop', # adam or rmsprop
             net : PolicyValueNetwork = None,
@@ -1544,6 +1580,7 @@ class PPOAgentVec(A2CAgentVec):
                 observation_space = observation_space,
                 discount_factor = discount_factor,
                 learning_rate = learning_rate,
+                lr_scheduler = lr_scheduler,
                 target_update_frequency = target_update_frequency,
                 polyak_rate = polyak_rate,
                 max_rollout_length = max_rollout_length,
@@ -1553,6 +1590,8 @@ class PPOAgentVec(A2CAgentVec):
                 reward_scale = reward_scale,
                 vf_loss_coeff = vf_loss_coeff,
                 entropy_loss_coeff = entropy_loss_coeff,
+                max_grad_norm = max_grad_norm,
+                gae_lambda = gae_lambda,
                 device = device,
                 optimizer = optimizer,
                 net = net,
@@ -1616,13 +1655,22 @@ class PPOAgentVec(A2CAgentVec):
                 loss_pi = loss_pi[minibatch_indices[0],minibatch_indices[1]]
             loss_pi = loss_pi.mean()
             # Train value network
-            state_value_estimate = monte_carlo_return_iterative_batch(
-                    state_values = target_state_values[1:,:].detach(),
+            #state_value_estimate = monte_carlo_return_iterative_batch(
+            #        state_values = target_state_values[1:,:].detach(),
+            #        rewards = reward[1:,:],
+            #        terminals = terminal[1:,:],
+            #        discounts = discount[1:,:],
+            #)
+            #loss_v = (state_values[:-1,:]-state_value_estimate)**2
+            advantage = generalized_advantage_estimate_batch(
+                    state_values = state_values[:-1,:],
+                    next_state_values = target_state_values[1:,:].detach(),
                     rewards = reward[1:,:],
                     terminals = terminal[1:,:],
-                    discounts = discount[1:,:],
+                    discount = discount[0],
+                    gae_lambda = self.gae_lambda,
             )
-            loss_v = (state_values[:-1,:]-state_value_estimate)**2
+            loss_v = advantage ** 2
             if minibatch_indices is not None:
                 loss_v = loss_v[minibatch_indices[0],minibatch_indices[1]]
             loss_v = loss_v.mean()
@@ -1636,6 +1684,9 @@ class PPOAgentVec(A2CAgentVec):
             loss = loss_pi+self.vf_loss_coeff*loss_v+self.entropy_loss_coeff*loss_entropy
             self.optimizer.zero_grad()
             loss.backward(retain_graph=True)
+            if self.max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(
+                        self.net.parameters(), self.max_grad_norm)
             self.optimizer.step()
 
             # Log
@@ -1647,6 +1698,9 @@ class PPOAgentVec(A2CAgentVec):
                     train_state_value=state_values.mean().item(),
                     train_state_value_target_net=target_state_values.mean().item(),
             )
+        # Update learning rate
+        if self.scheduler is not None:
+            self.scheduler.step()
         # Clear data
         self.train_history_buffer.clear()
         # Keep track of number of training steps so we know when to update the target network
@@ -1925,7 +1979,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             loss_pi = loss_pi.mean()
             # Train value network
             state_value_estimate = monte_carlo_return_iterative_batch(
-                    state_values = target_state_values[1:,:].detach(),
+                    next_state_values = target_state_values[1:,:].detach(),
                     rewards = reward[1:,:],
                     terminals = terminal[1:,:],
                     discounts = discount[1:,:],
@@ -2118,8 +2172,9 @@ if __name__ == "__main__":
     def run_atari_ppo_vec():
         from rl.agent.smdp.a2c import PPOAgentVec
 
-        num_envs = 16
-        env_name = 'Pong-v5'
+        num_envs = 8
+        #env_name = 'Pong-v5'
+        env_name = 'Breakout-v5'
         env_config = {
             'env_type': 'envpool',
             'env_configs': {
@@ -2133,6 +2188,7 @@ if __name__ == "__main__":
             }
         }
 
+        # See CleanRL parameters: https://wandb.ai/cleanrl/cleanrl.benchmark/runs/thq5rgnz/overview
         exp_runner = make_experiment_runner(
                 TrainExperimentVec,
                 config={
@@ -2141,7 +2197,19 @@ if __name__ == "__main__":
                         'parameters': {
                             'num_train_envs': num_envs,
                             'num_test_envs': num_envs,
-                            'num_minibatches': 5,
+                            'learning_rate': 2.5e-4,
+                            'lr_scheduler': {
+                                'type': 'LinearLR',
+                                'parameters': {
+                                    'start_factor': 1.0,
+                                    'end_factor': 1e-3, # CleanRL scales down to 1/num_steps
+                                    'total_iters': 10_000_000,
+                                }
+                            },
+                            'vf_loss_coeff': 0.5,
+                            'max_rollout_length': 128, # Off by one. Close enough.
+                            'num_minibatches': 4,
+                            'minibatch_size': 256,
                         },
                     },
                     'env_test': env_config,
@@ -2153,7 +2221,7 @@ if __name__ == "__main__":
                 #trial_id='checkpointtest',
                 #checkpoint_frequency=250_000,
                 checkpoint_frequency=None,
-                max_iterations=50_000_000,
+                max_iterations=10_000_000,
                 verbose=True,
         )
         exp_runner.exp.logger.init_wandb({

@@ -699,7 +699,7 @@ def get_params():
                     'hidden_reset_max_prob': 0,
                     'model_type': 'ModularPolicy2',
                     'recurrence_type': 'RecurrentAttention9',
-                    'num_recurrence_blocks': 1,
+                    'num_recurrence_blocks': 3,
                 },
             },
             'env_test': env_config,
