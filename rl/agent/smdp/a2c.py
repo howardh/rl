@@ -13,7 +13,7 @@ import gym.spaces
 from torchtyping import TensorType
 from torch.utils.data.dataloader import default_collate
 
-from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss, advantage_policy_gradient_loss_batch, clipped_advantage_policy_gradient_loss_batch
+from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss, advantage_policy_gradient_loss_batch, clipped_advantage_policy_gradient_loss_batch2#, clipped_advantage_policy_gradient_loss_batch
 from frankenstein.value.monte_carlo import monte_carlo_return_iterative, monte_carlo_return_iterative_batch
 from frankenstein.advantage.gae import generalized_advantage_estimate_batch
 from frankenstein.buffer.history import HistoryBuffer
@@ -22,6 +22,11 @@ from experiment.logger import Logger, SubLogger
 from rl.utils import default_state_dict, default_load_state_dict
 from rl.agent.agent import DeployableAgent
 from rl.experiments.training._utils import zip2
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
 
 class PolicyValueNetworkOutput(TypedDict, total=False):
     """ Discrete action space """
@@ -102,6 +107,38 @@ class PolicyValueNetworkCNN(PolicyValueNetwork):
         )
         self.v = torch.nn.Linear(in_features=512,out_features=1)
         self.pi = torch.nn.Linear(in_features=512,out_features=num_actions)
+    def forward(self, x) -> PolicyValueNetworkOutput:
+        x = self.conv(x)
+        x = x.view(-1,64*7*7)
+        x = self.fc(x)
+        v = self.v(x)
+        pi = self.pi(x)
+        return {
+                'value': v,
+                'action': pi, # Unnormalized action probabilities
+        }
+class PolicyValueNetworkCNN2(PolicyValueNetwork):
+    """ Same architecture as PolicyValueNetwork, but with different weight initializations and ReLU instead of leaky ReLU. """
+    def __init__(self, num_actions):
+        super().__init__()
+        self.num_actions = num_actions
+        self.conv = torch.nn.Sequential(
+            layer_init(torch.nn.Conv2d(
+                in_channels=4,out_channels=32,kernel_size=8,stride=4)),
+            torch.nn.ReLU(),
+            layer_init(torch.nn.Conv2d(
+                in_channels=32,out_channels=64,kernel_size=4,stride=2)),
+            torch.nn.ReLU(),
+            layer_init(torch.nn.Conv2d(
+                in_channels=64,out_channels=64,kernel_size=3,stride=1)),
+            torch.nn.ReLU(),
+        )
+        self.fc = torch.nn.Sequential(
+            layer_init(torch.nn.Linear(in_features=64*7*7,out_features=512)),
+            torch.nn.ReLU(),
+        )
+        self.v = layer_init(torch.nn.Linear(in_features=512,out_features=1),std=1)
+        self.pi = layer_init(torch.nn.Linear(in_features=512,out_features=num_actions),std=0.01)
     def forward(self, x) -> PolicyValueNetworkOutput:
         x = self.conv(x)
         x = x.view(-1,64*7*7)
@@ -508,9 +545,133 @@ def compute_normal_entropy(mean,std):
 #    entropy = 0.5*np.log(2*np.pi)+0.5+torch.log(std)
 #    return entropy
 
+def compute_ppo_losses(
+        observation_space, action_space,
+        history, model, discount, gae_lambda, norm_adv,
+        clip_vf_loss,
+        entropy_loss_coeff, vf_loss_coeff,
+        target_kl,
+        minibatch_size, num_minibatches):
+    #from pprint import pprint
+    #pprint({k:v for k,v in locals().items() if k!='observation_space'})
+    #breakpoint()
+    obs = history.obs
+    action = history.action
+    reward = history.reward
+    terminal = history.terminal
+
+    n = len(history.obs_history)
+    num_training_envs = len(history.obs_history[0])
+
+    with torch.no_grad():
+        net_output = default_collate([model(o) for o in obs])
+        state_values_old = net_output['value'].squeeze(2)
+        action_dist = torch.distributions.Categorical(logits=net_output['action'][:n-1])
+        log_action_probs_old = action_dist.log_prob(action)
+
+        # Advantage
+        advantages = generalized_advantage_estimate_batch(
+                state_values = state_values_old[:n-1,:],
+                next_state_values = state_values_old[1:,:],
+                rewards = reward[1:,:],
+                terminals = terminal[1:,:],
+                discount = discount,
+                gae_lambda = gae_lambda,
+        )
+        returns = advantages + state_values_old[:n-1,:]
+
+    # Flatten everything
+    flat_obs = obs[:n-1].reshape(-1,*observation_space.shape)
+    flat_action = action[:n-1].reshape(-1, *action_space.shape)
+    flat_returns = returns[:n-1].reshape(-1)
+    flat_advantages = advantages[:n-1].reshape(-1)
+    flat_log_action_probs_old = log_action_probs_old[:n-1].reshape(-1)
+    flat_state_values_old = state_values_old[:n-1].reshape(-1)
+
+    minibatches = enum_minibatches(
+            batch_size=(n-1) * num_training_envs,
+            minibatch_size=minibatch_size,
+            num_minibatches=num_minibatches,
+            replace=False)
+
+    for _,mb_inds in enumerate(minibatches):
+        mb_obs = flat_obs[mb_inds]
+        mb_action = flat_action[mb_inds]
+        mb_returns = flat_returns[mb_inds]
+        mb_advantages = flat_advantages[mb_inds]
+        mb_log_action_probs_old = flat_log_action_probs_old[mb_inds]
+        mb_state_values_old = flat_state_values_old[mb_inds]
+
+        net_output = model(mb_obs)
+        assert 'value' in net_output
+        assert 'action' in net_output
+        mb_state_values = net_output['value'].squeeze()
+        action_dist = torch.distributions.Categorical(logits=net_output['action'])
+        mb_log_action_probs = action_dist.log_prob(mb_action)
+        mb_entropy = action_dist.entropy()
+
+        with torch.no_grad():
+            logratio = mb_log_action_probs - mb_log_action_probs_old
+            ratio = logratio.exp()
+            approx_kl = ((ratio - 1) - logratio).mean()
+
+        if norm_adv:
+            mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+
+        # Policy loss
+        pg_loss = clipped_advantage_policy_gradient_loss_batch2(
+                log_action_probs = mb_log_action_probs,
+                old_log_action_probs = mb_log_action_probs_old,
+                advantages = mb_advantages,
+                epsilon=0.1
+        ).mean()
+
+        # Value loss
+        if clip_vf_loss is not None:
+            v_loss_unclipped = (mb_state_values - mb_returns) ** 2
+            v_clipped = mb_state_values_old + torch.clamp(
+                mb_state_values - mb_state_values_old,
+                -clip_vf_loss,
+                clip_vf_loss,
+            )
+            v_loss_clipped = (v_clipped - mb_returns) ** 2
+            v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+            v_loss = 0.5 * v_loss_max.mean()
+        else:
+            v_loss = 0.5 * ((mb_state_values - mb_returns) ** 2).mean()
+
+        entropy_loss = mb_entropy.mean()
+        loss = pg_loss - entropy_loss_coeff * entropy_loss + v_loss * vf_loss_coeff
+
+        yield {
+                'loss': loss,
+                'loss_pi': pg_loss,
+                'loss_vf': v_loss,
+                'loss_entropy': -entropy_loss,
+                'approx_kl': approx_kl,
+        }
+
+        if target_kl is not None:
+            if approx_kl > target_kl:
+                break
+
 def sample_minibatch(shape, minibatch_size):
     indices = np.random.choice(np.prod(shape), minibatch_size, replace=False)
     return torch.tensor(np.unravel_index(indices, shape))
+def enum_minibatches(batch_size, minibatch_size, num_minibatches, replace=False):
+    indices = np.arange(batch_size)
+    if replace:
+        for _ in range(0,batch_size,minibatch_size):
+            np.random.shuffle(indices)
+            yield indices[:minibatch_size]
+    else:
+        indices = np.arange(batch_size)
+        n = batch_size//minibatch_size
+        for i in range(num_minibatches):
+            j = i % n
+            if j == 0:
+                np.random.shuffle(indices)
+            yield indices[j*minibatch_size:(j+1)*minibatch_size]
 
 def zip_dict(*dcts):
     if not dcts:
@@ -1302,7 +1463,7 @@ class A2CAgentVec(DeployableAgent):
         # State (training)
         self.train_history_buffer = VecHistoryBuffer(
                 num_envs=num_train_envs,
-                max_len=max_rollout_length,
+                max_len=max_rollout_length+1,
                 device=device)
         self.test_history_buffer = VecHistoryBuffer(
                 num_envs=num_test_envs,
@@ -1318,7 +1479,7 @@ class A2CAgentVec(DeployableAgent):
             self.net.to(device)
         self.target_net = copy.deepcopy(self.net)
         if optimizer == 'adam':
-            self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
+            self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate, eps=1e-5)
         elif optimizer == 'rmsprop':
             self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=learning_rate)
         else:
@@ -1345,7 +1506,8 @@ class A2CAgentVec(DeployableAgent):
                         shared_std=False
                 ).to(device)
             if len(observation_space.shape) == 3: # Atari
-                return PolicyValueNetworkCNN(
+                #return PolicyValueNetworkCNN(
+                return PolicyValueNetworkCNN2(
                         action_space.n
                 ).to(device)
         raise Exception('Unsupported observation space or action space.')
@@ -1376,31 +1538,31 @@ class A2CAgentVec(DeployableAgent):
 
         history.append_obs(obs, reward, terminal, misc=[{'discount': discount**time}]*len(obs))
 
-        # Choose next action
-        net_output = self.net(
-                torch.tensor(obs,device=self.device).float()*self.obs_scale
-        )
-        if isinstance(self.action_space, gym.spaces.Discrete):
-            assert 'action' in net_output
-            action_probs_unnormalized = net_output['action']
-            action_probs = action_probs_unnormalized.softmax(1).squeeze()
-            assert (torch.abs(action_probs.sum(1)-1) < 1e-6).all()
-            action_dist = torch.distributions.Categorical(action_probs)
-            action = action_dist.sample().cpu().numpy()
-        elif isinstance(self.action_space, gym.spaces.Box):
-            assert 'action_mean' in net_output
-            assert 'action_std' in net_output
-            action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
-            action = action_dist.sample().cpu().numpy()
-        else:
-            raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
-        self.logger.log(train_entropy=action_dist.entropy().mean().item())
+        ## Choose next action
+        #net_output = self.net(
+        #        torch.tensor(obs,device=self.device).float()*self.obs_scale
+        #)
+        #if isinstance(self.action_space, gym.spaces.Discrete):
+        #    assert 'action' in net_output
+        #    action_probs_unnormalized = net_output['action']
+        #    action_probs = action_probs_unnormalized.softmax(1).squeeze()
+        #    assert (torch.abs(action_probs.sum(1)-1) < 1e-6).all()
+        #    action_dist = torch.distributions.Categorical(action_probs)
+        #    action = action_dist.sample().cpu().numpy()
+        #elif isinstance(self.action_space, gym.spaces.Box):
+        #    assert 'action_mean' in net_output
+        #    assert 'action_std' in net_output
+        #    action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
+        #    action = action_dist.sample().cpu().numpy()
+        #else:
+        #    raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
+        #self.logger.log(train_entropy=action_dist.entropy().mean().item())
 
-        assert 'value' in net_output
-        state_value = net_output['value']
-        self.state_values_current.append(state_value.mean().item())
+        #assert 'value' in net_output
+        #state_value = net_output['value']
+        #self.state_values_current.append(state_value.mean().item())
 
-        history.append_action(action)
+        #history.append_action(action)
 
         # Save training data and train
         if not testing:
@@ -1408,7 +1570,7 @@ class A2CAgentVec(DeployableAgent):
             if not isinstance(self.logger, SubLogger):
                 self.logger.log(step=self._steps)
 
-            self.logger.append(debug_state_value=state_value.mean().item())
+            #self.logger.append(debug_state_value=state_value.mean().item())
 
             self._train()
             self._update_target()
@@ -1507,14 +1669,45 @@ class A2CAgentVec(DeployableAgent):
         else:
             history = self.train_history_buffer
 
-        action = history.action_history[-1]
+        #action = history.action_history[-1]
+        with torch.no_grad():
+            obs = history.obs_history[-1]
+            net_output = self.net(
+                    torch.tensor(obs,device=self.device).float()*self.obs_scale
+            )
+            if isinstance(self.action_space, gym.spaces.Discrete):
+                assert 'action' in net_output
+                action_probs_unnormalized = net_output['action']
+                action_probs = action_probs_unnormalized.softmax(1).squeeze()
+                assert (torch.abs(action_probs.sum(1)-1) < 1e-6).all()
+                action_dist = torch.distributions.Categorical(action_probs)
+                action = action_dist.sample().cpu().numpy()
+            elif isinstance(self.action_space, gym.spaces.Box):
+                assert 'action_mean' in net_output
+                assert 'action_std' in net_output
+                action_dist = torch.distributions.Normal(net_output['action_mean'],net_output['action_std'])
+                action = action_dist.sample().cpu().numpy()
+            else:
+                raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
+            self.logger.log(train_entropy=action_dist.entropy().mean().item())
 
-        if isinstance(self.action_space, gym.spaces.Discrete):
-            return action
-        elif isinstance(self.action_space, gym.spaces.Box):
-            raise NotImplementedError()
-        else:
-            raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
+        assert 'value' in net_output
+        state_value = net_output['value']
+        self.state_values_current.append(state_value.mean().item())
+
+        history.append_action(action)
+
+        if not testing:
+            self.logger.append(debug_state_value=state_value.mean().item())
+
+        return action
+
+        #if isinstance(self.action_space, gym.spaces.Discrete):
+        #    return action
+        #elif isinstance(self.action_space, gym.spaces.Box):
+        #    raise NotImplementedError()
+        #else:
+        #    raise NotImplementedError('Unsupported action space of type %s' % type(self.action_space))
 
     def state_dict(self):
         return default_state_dict(self, [
@@ -1598,14 +1791,23 @@ class PPOAgentVec(A2CAgentVec):
                 logger = logger,
         )
         self.num_minibatches = num_minibatches
-        self.minibatch_size = minibatch_size
+        if minibatch_size is None:
+            self.minibatch_size = num_train_envs*max_rollout_length
+        else:
+            self.minibatch_size = minibatch_size
+        self.clip_vf_loss = 0.1
+        self.norm_adv = True
+        self.target_kl = None
     def _train(self):
+        #self._train_cleanrl()
+        self._train_3()
+    def _train_mine(self):
         history = self.train_history_buffer
         t_max = self.max_rollout_length
 
         # Check if we've accumulated enough data
         n = len(history.obs_history)
-        if n < t_max:
+        if n <= t_max:
             return
 
         obs = history.obs.float()*self.obs_scale
@@ -1616,74 +1818,161 @@ class PPOAgentVec(A2CAgentVec):
         assert isinstance(misc, dict)
         assert 'discount' in misc
         discount = misc['discount']
-        target_net_output = default_collate([self.target_net(o) for o in obs])
-        log_action_probs_old = None
 
-        for _ in range(self.num_minibatches):
-            # Sample minibatch
-            if self.minibatch_size is not None:
-                minibatch_indices = sample_minibatch([n-1,self.num_training_envs], self.minibatch_size)
-            else:
-                minibatch_indices = None
-
-            # Re-evaluate values that depend on `self.net`
-            net_output = default_collate([self.net(o) for o in obs])
-            state_values = net_output['value'].squeeze(2)
+        with torch.no_grad():
+            target_net_output = default_collate([self.target_net(o) for o in obs])
             target_state_values = target_net_output['value'].squeeze(2)
-            if isinstance(self.action_space,gym.spaces.Discrete):
-                log_action_probs = net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
-                entropy = -(net_output['action'].log_softmax(2)*net_output['action'].softmax(2)).sum(2)[:n-1,:] # Remove the last step to match up with minibatch indices.
-            else:
-                raise NotImplementedError()
 
-            if log_action_probs_old is None:
-                log_action_probs_old = log_action_probs.clone().detach()
+            log_action_probs_old = target_net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
+            state_values_old = target_net_output['value'].squeeze(2)
 
-            # Train policy
-            loss_pi = clipped_advantage_policy_gradient_loss_batch(
-                    log_action_probs = log_action_probs[:n-1,:],
-                    old_log_action_probs = log_action_probs_old[:n-1,:],
-                    state_values = state_values[:n-1,:].detach(),
+            # Advantage
+            advantages = generalized_advantage_estimate_batch(
+                    state_values = target_state_values[:n-1,:],
                     next_state_values = target_state_values[1:,:],
-                    rewards = reward[1:,:],
-                    terminals = terminal[1:,:],
-                    prev_terminals = terminal[:n-1,:],
-                    discounts = discount[1:,:],
-                    epsilon=0.1
-            )
-            if minibatch_indices is not None:
-                loss_pi = loss_pi[minibatch_indices[0],minibatch_indices[1]]
-            loss_pi = loss_pi.mean()
-            # Train value network
-            #state_value_estimate = monte_carlo_return_iterative_batch(
-            #        state_values = target_state_values[1:,:].detach(),
-            #        rewards = reward[1:,:],
-            #        terminals = terminal[1:,:],
-            #        discounts = discount[1:,:],
-            #)
-            #loss_v = (state_values[:-1,:]-state_value_estimate)**2
-            advantage = generalized_advantage_estimate_batch(
-                    state_values = state_values[:-1,:],
-                    next_state_values = target_state_values[1:,:].detach(),
                     rewards = reward[1:,:],
                     terminals = terminal[1:,:],
                     discount = discount[0],
                     gae_lambda = self.gae_lambda,
             )
-            loss_v = advantage ** 2
-            if minibatch_indices is not None:
-                loss_v = loss_v[minibatch_indices[0],minibatch_indices[1]]
-            loss_v = loss_v.mean()
+            returns = advantages + target_state_values[:n-1,:]
+
+        #for _ in range(self.num_minibatches):
+        #    # Sample minibatch
+        #    if self.minibatch_size is not None:
+        #        minibatch_indices = sample_minibatch([n-1,self.num_training_envs], self.minibatch_size)
+        #    else:
+        #        minibatch_indices = None
+
+        # Flatten everything
+        flat_obs = obs[:n-1].reshape(-1,*self.observation_space.shape)
+        flat_action = action[:n-1].reshape(-1, *self.action_space.shape)
+        flat_returns = returns[:n-1].reshape(-1)
+        flat_advantages = advantages[:n-1].reshape(-1)
+        flat_log_action_probs_old = log_action_probs_old[:n-1].reshape(-1)
+        flat_state_values_old = state_values_old[:n-1].reshape(-1)
+
+        minibatches = enum_minibatches(
+                batch_size=(n-1) * self.num_training_envs,
+                minibatch_size=self.minibatch_size,
+                num_minibatches=self.num_minibatches,
+                replace=False)
+
+        for mbi,minibatch_indices in enumerate(minibatches):
+            minibatch_obs = flat_obs[minibatch_indices]
+            minibatch_action = flat_action[minibatch_indices]
+            minibatch_returns = flat_returns[minibatch_indices]
+            minibatch_advantages = flat_advantages[minibatch_indices]
+            minibatch_log_action_probs_old = flat_log_action_probs_old[minibatch_indices]
+            minibatch_state_values_old = flat_state_values_old[minibatch_indices]
+
+            # Normalize
+            if self.norm_adv:
+                adv_mean = minibatch_advantages.mean()
+                adv_std = minibatch_advantages.std() + 1e-8
+                minibatch_advantages = (minibatch_advantages - adv_mean) / adv_std
+
+            # Re-evaluate values that depend on `self.net`
+            net_output = self.net(minibatch_obs)
+            assert 'value' in net_output
+            assert 'action' in net_output
+            minibatch_state_values = net_output['value'].squeeze()
+            if isinstance(self.action_space,gym.spaces.Discrete):
+                #log_action_probs = net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
+                #entropy = -(net_output['action'].log_softmax(2)*net_output['action'].softmax(2)).sum(2)[:n-1,:] # Remove the last step to match up with minibatch indices.
+                minibatch_log_action_probs = net_output['action'].log_softmax(1).gather(1,minibatch_action.unsqueeze(1)).squeeze(1)
+                minibatch_entropy = -(net_output['action'].log_softmax(1)*net_output['action'].softmax(1)).sum(1)
+            else:
+                raise NotImplementedError()
+
+            #if log_action_probs_old is None:
+            #    log_action_probs_old = log_action_probs.clone().detach()
+            #if state_values_old is None:
+            #    state_values_old = state_values.clone().detach()
+
+            # KL
+            with torch.no_grad():
+                logratio = minibatch_log_action_probs - minibatch_log_action_probs_old
+                ratio = torch.exp(logratio)
+                approx_kl = ((ratio - 1) - logratio).mean()
+            # Train policy
+            loss_pi = clipped_advantage_policy_gradient_loss_batch2(
+                    log_action_probs = minibatch_log_action_probs,
+                    old_log_action_probs = minibatch_log_action_probs_old,
+                    advantages = minibatch_advantages,
+                    epsilon=0.1
+            )
+            #loss_pi = clipped_advantage_policy_gradient_loss_batch2(
+            #        log_action_probs = log_action_probs[:n-1,:],
+            #        old_log_action_probs = log_action_probs_old[:n-1,:],
+            #        advantages = (advantages[:n-1,:] - adv_mean)/adv_std,
+            #        epsilon=0.1
+            #)
+            #loss_pi = clipped_advantage_policy_gradient_loss_batch(
+            #        log_action_probs = log_action_probs[:n-1,:],
+            #        old_log_action_probs = log_action_probs_old[:n-1,:],
+            #        state_values = state_values[:n-1,:].detach(),
+            #        next_state_values = target_state_values[1:,:],
+            #        rewards = reward[1:,:],
+            #        terminals = terminal[1:,:],
+            #        prev_terminals = terminal[:n-1,:],
+            #        discounts = discount[1:,:],
+            #        epsilon=0.1
+            #)
+            #if minibatch_indices is not None:
+            #    loss_pi = loss_pi[minibatch_indices[0],minibatch_indices[1]]
+            loss_pi = loss_pi.mean(0)
+            # Train value network
+            loss_v_unclipped = (minibatch_state_values - minibatch_returns) ** 2
+            if self.clip_vf_loss is not None:
+                v_clipped = minibatch_state_values_old + torch.clamp(
+                        minibatch_state_values - minibatch_state_values_old,
+                        -self.clip_vf_loss,
+                        self.clip_vf_loss)
+                loss_v_clipped = (v_clipped - minibatch_returns) ** 2
+                loss_v_max = torch.max(loss_v_unclipped, loss_v_clipped)
+                loss_v = loss_v_max
+            else:
+                loss_v = loss_v_unclipped
+            loss_v = 0.5 * loss_v.mean(0)
+            if mbi == 0:
+                self.logger.log(**{
+                    f'debug_mb_sv_{mbi}': minibatch_state_values.mean().item(),
+                    f'debug_mb_sv_old_{mbi}': minibatch_state_values_old.mean().item(),
+                    f'debug_return_{mbi}': minibatch_returns.mean().item(),
+                })
+            #loss_v_unclipped = (state_values[:n-1,:] - returns) ** 2
+            #if self.clip_vf_loss is not None:
+            #    v_clipped = state_values_old + torch.clamp(
+            #            state_values-state_values_old,
+            #            -self.clip_vf_loss,
+            #            self.clip_vf_loss)
+            #    loss_v_clipped = (v_clipped[:n-1,:] - returns) ** 2
+            #    loss_v_max = torch.max(loss_v_unclipped, loss_v_clipped)
+            #    loss_v = loss_v_max
+            #else:
+            #    loss_v = loss_v_unclipped
+            #if minibatch_indices is not None:
+            #    loss_v = loss_v[minibatch_indices[0],minibatch_indices[1]]
+            #loss_v = 0.5 * loss_v.mean()
             # Entropy
-            loss_entropy = -entropy
-            if minibatch_indices is not None:
-                loss_entropy = loss_entropy[minibatch_indices[0],minibatch_indices[1]]
-            loss_entropy = loss_entropy.mean()
+            loss_entropy = -minibatch_entropy
+            #if minibatch_indices is not None:
+            #    loss_entropy = loss_entropy[minibatch_indices[0],minibatch_indices[1]]
+            loss_entropy = loss_entropy.mean(0)
 
             # Take a gradient step
+            #print('-'*20)
+            #print('sv estimate:\t', state_values[:n-1,:].mean().item())
+            #print('returns:\t', returns.mean().item())
+            #print('TD diff:\t', (state_values[:n-1,:] - returns).mean().item())
+            #print('Val loss:\t',loss_v.item())
+            #print('PG loss:\t',loss_pi.item())
+            #print('-'*20)
+            #breakpoint()
             loss = loss_pi+self.vf_loss_coeff*loss_v+self.entropy_loss_coeff*loss_entropy
             self.optimizer.zero_grad()
-            loss.backward(retain_graph=True)
+            loss.backward()
             if self.max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(
                         self.net.parameters(), self.max_grad_norm)
@@ -1695,9 +1984,16 @@ class PPOAgentVec(A2CAgentVec):
                     loss_v=loss_v.item(),
                     loss_entropy=loss_entropy.item(),
                     loss_total=loss.item(),
-                    train_state_value=state_values.mean().item(),
-                    train_state_value_target_net=target_state_values.mean().item(),
+                    approx_kl=approx_kl.item(),
+                    train_state_value=minibatch_state_values.mean().item(),
+                    #train_state_value_target_net=target_state_values.mean().item(),
             )
+
+            # KL bounds
+            if self.target_kl is not None:
+                if approx_kl > self.target_kl:
+                    break
+
         # Update learning rate
         if self.scheduler is not None:
             self.scheduler.step()
@@ -1705,6 +2001,339 @@ class PPOAgentVec(A2CAgentVec):
         self.train_history_buffer.clear()
         # Keep track of number of training steps so we know when to update the target network
         self._training_steps += 1
+        # Log
+        self.logger.log(
+                last_loss_pi=loss_pi.item(), # type: ignore
+                last_loss_v=loss_v.item(), # type: ignore
+                last_loss_entropy=loss_entropy.item(), # type: ignore
+                last_loss_total=loss.item(), # type: ignore
+                last_approx_kl=approx_kl.item(), # type: ignore
+        )
+    def _train_cleanrl(self):
+        history = self.train_history_buffer
+        t_max = self.max_rollout_length
+
+        # Check if we've accumulated enough data
+        n = len(history.obs_history)
+        if n <= t_max:
+            return
+
+        obs = history.obs.float()*self.obs_scale
+        action = history.action
+        reward = history.reward
+        terminal = history.terminal
+        misc = history.misc
+        assert isinstance(misc, dict)
+        assert 'discount' in misc
+        discount = misc['discount']
+
+        with torch.no_grad():
+            #target_net_output = default_collate([self.target_net(o) for o in obs])
+            target_net_output = default_collate([self.net(o) for o in obs])
+            target_state_values = target_net_output['value'].squeeze(2)
+
+            #log_action_probs_old = target_net_output['action'].log_softmax(2).gather(2,action.unsqueeze(2)).squeeze(2)
+            state_values_old = target_net_output['value'].squeeze(2)
+            action_dist = torch.distributions.Categorical(logits=target_net_output['action'])
+            #breakpoint()
+            log_action_probs_old = action_dist.log_prob(action)
+
+            # Advantage
+            #advantages = generalized_advantage_estimate_batch(
+            #        state_values = target_state_values[:n-1,:],
+            #        next_state_values = target_state_values[1:,:],
+            #        rewards = reward[1:,:],
+            #        terminals = terminal[1:,:],
+            #        discount = discount[0],
+            #        gae_lambda = self.gae_lambda,
+            #)
+            advantages = torch.zeros_like(reward[:n-1,:]).to(self.device)
+            lastgaelam = 0
+            for t in reversed(range(n-1)):
+                if t == n - 2:
+                    nextnonterminal = 1.0 - terminal[-1].float()
+                    nextvalues = target_state_values[-1]
+                else:
+                    nextnonterminal = 1.0 - terminal[t + 1].float()
+                    nextvalues = target_state_values[t + 1]
+                delta = reward[t+1] + discount[0,0].item() * nextvalues * nextnonterminal - target_state_values[t]
+                advantages[t] = lastgaelam = delta + discount[0,0].item() * self.gae_lambda * nextnonterminal * lastgaelam
+            returns = advantages + target_state_values[:n-1,:]
+
+        #for _ in range(self.num_minibatches):
+        #    # Sample minibatch
+        #    if self.minibatch_size is not None:
+        #        minibatch_indices = sample_minibatch([n-1,self.num_training_envs], self.minibatch_size)
+        #    else:
+        #        minibatch_indices = None
+
+        # Flatten everything
+        flat_obs = obs[:n-1].reshape(-1,*self.observation_space.shape)
+        flat_action = action[:n-1].reshape(-1, *self.action_space.shape)
+        flat_returns = returns[:n-1].reshape(-1)
+        flat_advantages = advantages[:n-1].reshape(-1)
+        flat_log_action_probs_old = log_action_probs_old[:n-1].reshape(-1)
+        flat_state_values_old = state_values_old[:n-1].reshape(-1)
+
+        minibatches = enum_minibatches(
+                batch_size=(n-1) * self.num_training_envs,
+                minibatch_size=self.minibatch_size,
+                num_minibatches=self.num_minibatches,
+                replace=False)
+
+        for _,mb_inds in enumerate(minibatches):
+            mb_obs = flat_obs[mb_inds]
+            mb_action = flat_action[mb_inds]
+            mb_returns = flat_returns[mb_inds]
+            mb_advantages = flat_advantages[mb_inds]
+            mb_log_action_probs_old = flat_log_action_probs_old[mb_inds]
+            mb_state_values_old = flat_state_values_old[mb_inds]
+
+            net_output = self.net(mb_obs)
+            assert 'value' in net_output
+            assert 'action' in net_output
+            mb_state_values = net_output['value'].squeeze()
+            mb_log_action_probs = net_output['action'].log_softmax(1).gather(1,mb_action.unsqueeze(1)).squeeze(1)
+            #mb_entropy = -(net_output['action'].log_softmax(1)*net_output['action'].softmax(1)).sum(1)
+            action_dist = torch.distributions.Categorical(logits=net_output['action'])
+            #breakpoint()
+            mb_log_action_probs = action_dist.log_prob(mb_action)
+            mb_entropy = action_dist.entropy()
+
+            logratio = mb_log_action_probs - mb_log_action_probs_old
+            ratio = logratio.exp()
+
+            with torch.no_grad():
+                # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                #old_approx_kl = (-logratio).mean()
+                approx_kl = ((ratio - 1) - logratio).mean()
+                #clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+
+            if self.norm_adv:
+                mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+
+            # Policy loss
+            pg_loss1 = -mb_advantages * ratio
+            pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - 0.1, 1 + 0.1)
+            pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+            # Value loss
+            if self.clip_vf_loss is not None:
+                v_loss_unclipped = (mb_state_values - mb_returns) ** 2
+                v_clipped = mb_state_values_old + torch.clamp(
+                    mb_state_values - mb_state_values_old,
+                    -self.clip_vf_loss,
+                    self.clip_vf_loss,
+                )
+                v_loss_clipped = (v_clipped - mb_returns) ** 2
+                v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                v_loss = 0.5 * v_loss_max.mean()
+            else:
+                v_loss = 0.5 * ((mb_state_values - mb_returns) ** 2).mean()
+
+            entropy_loss = mb_entropy.mean()
+            loss = pg_loss - self.entropy_loss_coeff * entropy_loss + v_loss * self.vf_loss_coeff
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            if self.max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
+            self.optimizer.step()
+
+            if self.target_kl is not None:
+                if approx_kl > self.target_kl:
+                    break
+
+
+        # Update learning rate
+        if self.scheduler is not None:
+            self.scheduler.step()
+        # Clear data
+        self.train_history_buffer.clear()
+        # Keep track of number of training steps so we know when to update the target network
+        self._training_steps += 1
+        # Log
+        self.logger.log(
+                last_loss_pi=pg_loss.item(), # type: ignore
+                last_loss_v=v_loss.item(), # type: ignore
+                last_loss_entropy=-entropy_loss.item(), # type: ignore
+                last_loss_total=loss.item(), # type: ignore
+                last_approx_kl=approx_kl.item(), # type: ignore
+        )
+    def _train_2(self):
+        history = self.train_history_buffer
+        t_max = self.max_rollout_length
+
+        # Check if we've accumulated enough data
+        n = len(history.obs_history)
+        if n <= t_max:
+            return
+
+        obs = history.obs.float()*self.obs_scale
+        action = history.action
+        reward = history.reward
+        terminal = history.terminal
+        misc = history.misc
+        assert isinstance(misc, dict)
+        assert 'discount' in misc
+        discount = misc['discount']
+        #breakpoint()
+
+        with torch.no_grad():
+            target_net_output = default_collate([self.net(o) for o in obs])
+            target_state_values = target_net_output['value'].squeeze(2)
+            state_values_old = target_net_output['value'].squeeze(2)
+            action_dist = torch.distributions.Categorical(logits=target_net_output['action'][:n-1])
+            #breakpoint()
+            log_action_probs_old = action_dist.log_prob(action)
+
+            # Advantage
+            advantages = generalized_advantage_estimate_batch(
+                    state_values = target_state_values[:n-1,:],
+                    next_state_values = target_state_values[1:,:],
+                    rewards = reward[1:,:],
+                    terminals = terminal[1:,:],
+                    discount = discount[0],
+                    gae_lambda = self.gae_lambda,
+            )
+            returns = advantages + target_state_values[:n-1,:]
+
+        # Flatten everything
+        flat_obs = obs[:n-1].reshape(-1,*self.observation_space.shape)
+        flat_action = action[:n-1].reshape(-1, *self.action_space.shape)
+        flat_returns = returns[:n-1].reshape(-1)
+        flat_advantages = advantages[:n-1].reshape(-1)
+        flat_log_action_probs_old = log_action_probs_old[:n-1].reshape(-1)
+        flat_state_values_old = state_values_old[:n-1].reshape(-1)
+
+        minibatches = enum_minibatches(
+                batch_size=(n-1) * self.num_training_envs,
+                minibatch_size=self.minibatch_size,
+                num_minibatches=self.num_minibatches,
+                replace=False)
+
+        for _,mb_inds in enumerate(minibatches):
+            mb_obs = flat_obs[mb_inds]
+            mb_action = flat_action[mb_inds]
+            mb_returns = flat_returns[mb_inds]
+            mb_advantages = flat_advantages[mb_inds]
+            mb_log_action_probs_old = flat_log_action_probs_old[mb_inds]
+            mb_state_values_old = flat_state_values_old[mb_inds]
+
+            net_output = self.net(mb_obs)
+            assert 'value' in net_output
+            assert 'action' in net_output
+            mb_state_values = net_output['value'].squeeze()
+            action_dist = torch.distributions.Categorical(logits=net_output['action'])
+            mb_log_action_probs = action_dist.log_prob(mb_action)
+            mb_entropy = action_dist.entropy()
+
+            with torch.no_grad():
+                logratio = mb_log_action_probs - mb_log_action_probs_old
+                ratio = logratio.exp()
+                approx_kl = ((ratio - 1) - logratio).mean()
+
+            if self.norm_adv:
+                mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+
+            # Policy loss
+            pg_loss = clipped_advantage_policy_gradient_loss_batch2(
+                    log_action_probs = mb_log_action_probs,
+                    old_log_action_probs = mb_log_action_probs_old,
+                    advantages = mb_advantages,
+                    epsilon=0.1
+            ).mean()
+
+            # Value loss
+            if self.clip_vf_loss is not None:
+                v_loss_unclipped = (mb_state_values - mb_returns) ** 2
+                v_clipped = mb_state_values_old + torch.clamp(
+                    mb_state_values - mb_state_values_old,
+                    -self.clip_vf_loss,
+                    self.clip_vf_loss,
+                )
+                v_loss_clipped = (v_clipped - mb_returns) ** 2
+                v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                v_loss = 0.5 * v_loss_max.mean()
+            else:
+                v_loss = 0.5 * ((mb_state_values - mb_returns) ** 2).mean()
+
+            entropy_loss = mb_entropy.mean()
+            loss = pg_loss - self.entropy_loss_coeff * entropy_loss + v_loss * self.vf_loss_coeff
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            if self.max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
+            self.optimizer.step()
+
+            if self.target_kl is not None:
+                if approx_kl > self.target_kl:
+                    break
+
+        # Clear data
+        self.train_history_buffer.clear()
+        # Keep track of number of training steps so we know when to update the target network
+        self._training_steps += 1
+        # Log
+        self.logger.log(
+                last_loss_pi=pg_loss.item(), # type: ignore
+                last_loss_v=v_loss.item(), # type: ignore
+                last_loss_entropy=-entropy_loss.item(), # type: ignore
+                last_loss_total=loss.item(), # type: ignore
+                last_approx_kl=approx_kl.item(), # type: ignore
+                learning_rate=self.scheduler.get_lr()[0], # type: ignore
+        )
+        # Update learning rate
+        if self.scheduler is not None:
+            self.scheduler.step()
+    def _train_3(self):
+        history = self.train_history_buffer
+        t_max = self.max_rollout_length
+
+        # Check if we've accumulated enough data
+        n = len(history.obs_history)
+        if n <= t_max:
+            return
+
+        losses = compute_ppo_losses(
+                observation_space=self.observation_space,
+                action_space=self.action_space,
+                history=history,
+                model=lambda x: self.net(x.float()*self.obs_scale),
+                discount=history.misc_history[-1][0]['discount'],
+                gae_lambda=self.gae_lambda,
+                norm_adv=self.norm_adv,
+                clip_vf_loss=self.clip_vf_loss,
+                entropy_loss_coeff=self.entropy_loss_coeff,
+                vf_loss_coeff=self.vf_loss_coeff,
+                target_kl=self.target_kl,
+                minibatch_size=self.minibatch_size,
+                num_minibatches=self.num_minibatches,
+        )
+        for x in losses:
+            self.optimizer.zero_grad()
+            x['loss'].backward()
+            if self.max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
+            self.optimizer.step()
+
+        # Clear data
+        self.train_history_buffer.clear()
+        # Keep track of number of training steps so we know when to update the target network
+        self._training_steps += 1
+        # Log
+        self.logger.log(
+                last_loss_pi=x['loss_pi'].item(), # type: ignore
+                last_loss_v=x['loss_vf'].item(), # type: ignore
+                last_loss_entropy=x['loss_entropy'].item(), # type: ignore
+                last_loss_total=x['loss'].item(), # type: ignore
+                #last_approx_kl=approx_kl.item(), # type: ignore
+                learning_rate=self.scheduler.get_lr()[0], # type: ignore
+        )
+        # Update learning rate
+        if self.scheduler is not None:
+            self.scheduler.step()
 
 
 class A2CAgentRecurrentVec(A2CAgentVec):
@@ -2033,6 +2662,51 @@ class A2CAgentRecurrentVec(A2CAgentVec):
         super().load_state_dict(state)
 
 
+class RecordEpisodeStatistics(gym.Wrapper):
+    def __init__(self, env):
+        super(RecordEpisodeStatistics, self).__init__(env)
+        self.num_envs = getattr(env, "num_envs", 1)
+        self.episode_returns = None
+        self.episode_lengths = None
+        # get if the env has lives
+        self.has_lives = False
+        env.reset()
+        info = env.step(np.zeros(self.num_envs, dtype=int))[-1]
+        if info["lives"].sum() > 0:
+            self.has_lives = True
+            print("env has lives")
+
+    def reset(self, **kwargs):
+        observations = super(RecordEpisodeStatistics, self).reset(**kwargs)
+        self.episode_returns = np.zeros(self.num_envs, dtype=np.float32)
+        self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
+        self.lives = np.zeros(self.num_envs, dtype=np.int32)
+        self.returned_episode_returns = np.zeros(self.num_envs, dtype=np.float32)
+        self.returned_episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
+        return observations
+
+    def step(self, action):
+        observations, rewards, dones, infos = super(RecordEpisodeStatistics, self).step(action)
+        self.episode_returns += infos["reward"]
+        self.episode_lengths += 1
+        self.returned_episode_returns[:] = self.episode_returns
+        self.returned_episode_lengths[:] = self.episode_lengths
+        all_lives_exhausted = infos["lives"] == 0
+        if self.has_lives:
+            self.episode_returns *= 1 - all_lives_exhausted
+            self.episode_lengths *= 1 - all_lives_exhausted
+        else:
+            self.episode_returns *= 1 - dones
+            self.episode_lengths *= 1 - dones
+        infos["r"] = self.returned_episode_returns
+        infos["l"] = self.returned_episode_lengths
+        return (
+            observations,
+            rewards,
+            dones,
+            infos,
+        )
+
 if __name__ == "__main__":
     import torch.cuda
     import numpy as np
@@ -2183,7 +2857,9 @@ if __name__ == "__main__":
                 'atari_config': {
                     'num_envs': num_envs,
                     'stack_num': 4,
-                    'repeat_action_probability': 0.25,
+                    #'repeat_action_probability': 0.25,
+                    'episodic_life': True,
+                    'reward_clip': True,
                 }
             }
         }
@@ -2197,19 +2873,23 @@ if __name__ == "__main__":
                         'parameters': {
                             'num_train_envs': num_envs,
                             'num_test_envs': num_envs,
+                            'target_update_frequency': num_envs,
+                            'optimizer': 'adam',
                             'learning_rate': 2.5e-4,
                             'lr_scheduler': {
                                 'type': 'LinearLR',
                                 'parameters': {
                                     'start_factor': 1.0,
-                                    'end_factor': 1e-3, # CleanRL scales down to 1/num_steps
-                                    'total_iters': 10_000_000,
+                                    'end_factor': 1e-7, # CleanRL scales down to 1/num_steps
+                                    'total_iters': 10_000_000/num_envs/128,
                                 }
                             },
                             'vf_loss_coeff': 0.5,
                             'max_rollout_length': 128, # Off by one. Close enough.
-                            'num_minibatches': 4,
+                            'num_minibatches': 4*(128*num_envs//256),
                             'minibatch_size': 256,
+                            'max_grad_norm': 0.5,
+                            'gae_lambda': 0.95,
                         },
                     },
                     'env_test': env_config,
@@ -2221,9 +2901,12 @@ if __name__ == "__main__":
                 #trial_id='checkpointtest',
                 #checkpoint_frequency=250_000,
                 checkpoint_frequency=None,
-                max_iterations=10_000_000,
+                max_iterations=10_000_000//num_envs,
+                #max_iterations=20_000//num_envs,
                 verbose=True,
         )
+        exp_runner.exp.env_train.num_envs = num_envs
+        exp_runner.exp.env_train = RecordEpisodeStatistics(exp_runner.exp.env_train)
         exp_runner.exp.logger.init_wandb({
             'project': 'PPOAgentVec-%s' % env_name.replace('/','_')
         })

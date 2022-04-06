@@ -119,18 +119,31 @@ class TrainExperiment(Experiment):
             self._first_step = False
         else:
             action = agent.act(testing=False)
-            obs, reward, done, _ = env.step(action)
+            obs, reward, done, info = env.step(action)
             agent.observe(obs, reward, done, testing=False)
             # Logging
             self.logger.log(train_reward=reward)
             self._ep_len += 1
-            self._ep_rewards += reward
+            if 'reward' in info:
+                self._ep_rewards += info['reward']
+            else:
+                self._ep_rewards += reward
             if done.any():
-                mean_reward = self._ep_rewards[done].mean().item()
-                self.logger.log(reward=mean_reward)
-                self._ep_rewards = self._ep_rewards*(1-done)
-                self._ep_len = self._ep_len*(1-done)
-                tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}')
+                if 'lives' in info:
+                    real_done = np.logical_and(done, info['lives'] == 0)
+                    if real_done.any():
+                        mean_reward = self._ep_rewards[real_done].mean().item()
+                        mean_length = self._ep_len[real_done].mean().item()
+                        self.logger.log(reward=mean_reward, episode_length=mean_length)
+                        self._ep_rewards = self._ep_rewards*(1-real_done)
+                        self._ep_len = self._ep_len*(1-real_done)
+                        tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}')
+                else:
+                    mean_reward = self._ep_rewards[done].mean().item()
+                    self.logger.log(reward=mean_reward)
+                    self._ep_rewards = self._ep_rewards*(1-done)
+                    self._ep_len = self._ep_len*(1-done)
+                    tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}')
 
     def _save_model(self,i):
         """ Save the model parameters """
