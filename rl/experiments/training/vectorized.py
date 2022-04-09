@@ -124,10 +124,8 @@ class TrainExperiment(Experiment):
             # Logging
             self.logger.log(train_reward=reward)
             self._ep_len += 1
-            if 'reward' in info:
-                self._ep_rewards += info['reward']
-            else:
-                self._ep_rewards += reward
+            self._ep_rewards += reward
+
             if done.any():
                 if 'lives' in info:
                     real_done = np.logical_and(done, info['lives'] == 0)

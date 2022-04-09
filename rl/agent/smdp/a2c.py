@@ -15,7 +15,7 @@ from torch.utils.data.dataloader import default_collate
 
 from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss, advantage_policy_gradient_loss, clipped_advantage_policy_gradient_loss
 from frankenstein.value.monte_carlo import monte_carlo_return_iterative, monte_carlo_return_iterative_batch
-from frankenstein.advantage.gae import generalized_advantage_estimate, generalized_advantage_estimate_batch
+from frankenstein.advantage.gae import generalized_advantage_estimate 
 from frankenstein.buffer.history import HistoryBuffer
 from frankenstein.buffer.vec_history import VecHistoryBuffer
 from experiment.logger import Logger, SubLogger
@@ -577,7 +577,7 @@ def compute_ppo_losses(
         log_action_probs_old = action_dist.log_prob(action)
 
         # Advantage
-        advantages = generalized_advantage_estimate_batch(
+        advantages = generalized_advantage_estimate(
                 state_values = state_values_old[:n-1,:],
                 next_state_values = state_values_old[1:,:],
                 rewards = reward[1:,:],
@@ -708,7 +708,7 @@ def compute_ppo_losses_recurrent(
         log_action_probs_old = action_dist.log_prob(action)
 
         # Advantage
-        advantages = generalized_advantage_estimate_batch(
+        advantages = generalized_advantage_estimate(
                 state_values = state_values_old[:n-1,:],
                 next_state_values = state_values_old[1:,:],
                 rewards = reward[1:,:],
@@ -1722,7 +1722,7 @@ class A2CAgentVec(DeployableAgent):
             except:
                 raise
             # Advantage
-            advantages = generalized_advantage_estimate_batch(
+            advantages = generalized_advantage_estimate(
                     state_values = state_values[:-1,:],
                     next_state_values = target_state_values[1:,:].detach(),
                     rewards = reward[1:,:],
@@ -2196,7 +2196,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
                     next_state_values = target_state_values[1:,:],
                     rewards = reward[1:,:],
                     terminals = terminal[1:,:],
-                    discount = discount.item(0),
+                    discount = discount.flatten()[0].item(),
                     gae_lambda = self.gae_lambda,
             )
             # Train policy
@@ -2322,8 +2322,6 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
             discount_factor : float = 0.99,
             learning_rate : float = 1e-4,
             lr_scheduler : dict = None,
-            target_update_frequency : int = 40_000, # Mnih 2016 - section 8
-            polyak_rate : float = 1.0,              # Mnih 2016 - section 8
             max_rollout_length : int = 5,           # Mnih 2016 - section 8 (t_max)
             num_train_envs : int = 16,
             num_test_envs : int = 4,
@@ -2350,8 +2348,8 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
                 discount_factor = discount_factor,
                 learning_rate = learning_rate,
                 lr_scheduler = lr_scheduler,
-                target_update_frequency = target_update_frequency,
-                polyak_rate = polyak_rate,
+                target_update_frequency = num_train_envs, # TODO: Get rid of this
+                polyak_rate = 1, # TODO: Get rid of this
                 max_rollout_length = max_rollout_length,
                 num_train_envs = num_train_envs,
                 num_test_envs = num_test_envs,
@@ -2380,9 +2378,19 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
         if n <= t_max:
             return
 
+        if isinstance(self.observation_space,gym.spaces.Dict):
+            assert isinstance(self.obs_scale,Mapping)
+            obs_scale = copy.deepcopy(self.obs_scale) # Make sure changes to obs_scale don't affect the output of the lambda below
+            model = lambda x,h: self.net({
+                k: v.float() * obs_scale.get(k,1)
+                for k,v in x.items()
+            },h)
+        else:
+            model = lambda x,h: self.net(x.float()*self.obs_scale,h)
+
         losses = compute_ppo_losses_recurrent(
                 history=history,
-                model=lambda x,h: self.net(x.float()*self.obs_scale,h),
+                model=model,
                 discount=history.misc_history[-1]['discount'].flatten()[0],
                 gae_lambda=self.gae_lambda,
                 norm_adv=self.norm_adv,
@@ -2408,7 +2416,7 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
                 last_loss_entropy=x['loss_entropy'].item(), # type: ignore
                 last_loss_total=x['loss'].item(), # type: ignore
                 #last_approx_kl=approx_kl.item(), # type: ignore
-                learning_rate=self.scheduler.get_lr()[0], # type: ignore
+                #learning_rate=self.scheduler.get_lr()[0], # type: ignore
         )
         # Update learning rate
         if self.scheduler is not None:
@@ -2631,10 +2639,10 @@ if __name__ == "__main__":
                 'atari': True,
                 'atari_config': {
                     'num_envs': num_envs,
-                    'stack_num': 4,
+                    'stack_num': 1,
                     #'repeat_action_probability': 0.25,
                     'episodic_life': True,
-                    'reward_clip': True,
+                    #'reward_clip': True,
                 }
             }
         }
@@ -2656,7 +2664,7 @@ if __name__ == "__main__":
                                 'parameters': {
                                     'start_factor': 1.0,
                                     'end_factor': 1e-7,
-                                    'total_iters': 10_000_000/num_envs/128,
+                                    'total_iters': 50_000_000/num_envs/128,
                                 }
                             },
                             'vf_loss_coeff': 0.5,
@@ -2675,7 +2683,7 @@ if __name__ == "__main__":
                 #trial_id='checkpointtest',
                 #checkpoint_frequency=250_000,
                 checkpoint_frequency=None,
-                max_iterations=10_000_000//num_envs,
+                max_iterations=50_000_000//num_envs,
                 #max_iterations=20_000//num_envs,
                 verbose=True,
         )
