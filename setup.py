@@ -5,7 +5,7 @@ setup(name='rl',
       install_requires=[
           'gym',
           'gym[atari,accept-rom-license]',
-          'torch',
+          'torch>=1.11.0',
           'torchtyping',
           'matplotlib',
           'opencv-python',

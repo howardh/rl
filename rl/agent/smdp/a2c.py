@@ -2640,7 +2640,7 @@ if __name__ == "__main__":
                 'atari_config': {
                     'num_envs': num_envs,
                     'stack_num': 1,
-                    #'repeat_action_probability': 0.25,
+                    'repeat_action_probability': 0.25,
                     'episodic_life': True,
                     #'reward_clip': True,
                 }
@@ -2656,7 +2656,6 @@ if __name__ == "__main__":
                         'parameters': {
                             'num_train_envs': num_envs,
                             'num_test_envs': num_envs,
-                            'target_update_frequency': num_envs,
                             'optimizer': 'adam',
                             'learning_rate': 2.5e-4,
                             'lr_scheduler': {

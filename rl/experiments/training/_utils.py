@@ -26,7 +26,7 @@ def make_env(env_name: str,
         frame_stack=4,
         episode_stack=None,
         dict_obs=False,
-        action_shuffle=False):
+        action_shuffle=False) -> gym.Env:
     env = gym.make(env_name, **config)
     if atari:
         env = AtariPreprocessing(env, **atari_config)
@@ -478,13 +478,14 @@ class GoalDeterministic(gym_minigrid.minigrid.Goal):
 
 
 class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
-    def __init__(self):
+    def __init__(self, rewards=[-1,1], shuffle_goals_on_reset=True, include_reward_permutation=False):
         self.mission = 'Reach the goal with the highest reward.'
-        self.rewards = [-1,1]
+        self.rewards = rewards
         self.goals = [
             GoalDeterministic(reward=r) for r in self.rewards
         ]
-        self.shuffle_goals_on_reset = True
+        self.shuffle_goals_on_reset = shuffle_goals_on_reset
+        self.include_reward_permutation = include_reward_permutation
 
         super().__init__(width=5, height=5)
 
@@ -517,7 +518,23 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
         breakpoint()
         return 0
 
+    def reset(self):
+        obs = super().reset()
+        if self.include_reward_permutation:
+            obs['reward_permutation'] = self.rewards
+        return obs
+
+    def step(self, action):
+        obs, reward, done, info = super().step(action)
+        if self.include_reward_permutation:
+            info['reward_permutation'] = [g.reward for g in self.goals]
+        return obs, reward, done, info
+
 gym_minigrid.register.register(
     id='MiniGrid-NRoomBanditsSmall-v0',
     entry_point=NRoomBanditsSmall
 )
+
+if __name__ == '__main__':
+    env = gym.make('MiniGrid-NRoomBanditsSmall-v0')
+    env.render()

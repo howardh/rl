@@ -13,11 +13,11 @@ import experiment.logger
 from experiment import load_checkpoint, make_experiment_runner
 from experiment.logger import Logger
 
-from rl.agent.smdp.a2c import A2CAgentRecurrentVec, PolicyValueNetworkRecurrent
+from rl.agent.smdp.a2c import A2CAgentRecurrentVec, PPOAgentRecurrentVec, PolicyValueNetworkRecurrent
 from rl.experiments.training.vectorized import TrainExperiment, make_vec_env
 from rl.experiments.training._utils import ExperimentConfigs
 from rl.experiments.pathways.models import ConvPolicy
-from rl.experiments.pathways.models import ModularPolicy, ModularPolicy2
+from rl.experiments.pathways.models import ModularPolicy, ModularPolicy2, ModularPolicy4
 #from rl.experiments.training._utils import make_env
 
 
@@ -190,8 +190,221 @@ class AttnRecAgent(A2CAgentRecurrentVec):
             return agent
 
 
+class AttnRecAgentPPO(PPOAgentRecurrentVec):
+    def __init__(self, recurrence_type='RecurrentAttention', model_type='ModularPolicy', num_recurrence_blocks=1, architecture=None, **kwargs):
+        self._model_type = model_type
+        self._recurrence_type = recurrence_type
+        self._num_recurrence_blocks = num_recurrence_blocks
+        self._architecture = architecture
+        super().__init__(**kwargs)
+
+    def _init_default_net(self, observation_space, action_space, device) -> PolicyValueNetworkRecurrent:
+        if isinstance(observation_space, gym.spaces.Box):
+            assert observation_space.shape is not None
+            if len(observation_space.shape) == 1: # Mujoco
+                raise Exception('Unsupported observation space or action space.')
+            if len(observation_space.shape) == 3: # Atari
+                return ConvPolicy(
+                        num_actions=action_space.n,
+                        input_size=512,
+                        key_size=512,
+                        value_size=512,
+                        num_heads=8,
+                        ff_size = 1024,
+                        in_channels=observation_space.shape[0],
+                        recurrence_type=self._recurrence_type,
+                        num_blocks=self._num_recurrence_blocks,
+                ).to(device)
+        if isinstance(observation_space, gym.spaces.Dict):
+            if 'obs' in observation_space.keys() and len(observation_space['obs'].shape) == 3:
+                # Atari
+                return self._init_atari_net(observation_space, action_space, device)
+            elif 'obs (image)' in observation_space.keys():
+                # Minigrid
+                return self._init_minigrid_net(observation_space, action_space, device)
+        raise Exception('Unsupported observation space or action space.')
+    def _init_atari_net(self, observation_space, action_space, device):
+        if self._model_type == 'ModularPolicy':
+            return ModularPolicy(
+                    inputs={
+                        'obs': {
+                            'type': 'GreyscaleImageInput',
+                            'config': {
+                                'in_channels': observation_space['obs'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                    },
+                    num_actions=action_space.n,
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size = 1024,
+                    recurrence_type=self._recurrence_type,
+                    num_blocks=self._num_recurrence_blocks,
+            ).to(device)
+        elif self._model_type == 'ModularPolicy2':
+            return ModularPolicy2(
+                    inputs = {
+                        'obs': {
+                            'type': 'GreyscaleImageInput',
+                            'config': {
+                                'in_channels': observation_space['obs'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                        'action': {
+                            'type': 'DiscreteInput' if isinstance(action_space, gym.spaces.Discrete) else 'LinearInput',
+                            'config': {
+                                'input_size': action_space.n
+                            },
+                        },
+                    },
+                    outputs = {
+                        'value': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': 1,
+                            }
+                        },
+                        'action': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': action_space.n,
+                            }
+                        },
+                    },
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size = 1024,
+                    recurrence_type=self._recurrence_type,
+                    num_blocks=self._num_recurrence_blocks,
+            ).to(device)
+        raise NotImplementedError()
+    def _init_minigrid_net(self, observation_space, action_space, device):
+        observation_space = observation_space # Unused variable
+        if self._model_type == 'ModularPolicy2':
+            return ModularPolicy2(
+                    inputs = {
+                        'obs (image)': {
+                            'type': 'ImageInput56',
+                            'config': {
+                                'in_channels': observation_space['obs (image)'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                        'action': {
+                            'type': 'DiscreteInput',
+                            'config': {
+                                'input_size': action_space.n
+                            },
+                        },
+                    },
+                    outputs = {
+                        'value': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': 1,
+                            }
+                        },
+                        'action': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': action_space.n,
+                            }
+                        },
+                    },
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size = 1024,
+                    recurrence_type=self._recurrence_type,
+                    num_blocks=self._num_recurrence_blocks,
+            ).to(device)
+        elif self._model_type == 'ModularPolicy4':
+            assert self._architecture is not None
+            return ModularPolicy4(
+                    inputs = {
+                        'obs (image)': {
+                            'type': 'ImageInput56',
+                            'config': {
+                                'in_channels': observation_space['obs (image)'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                        'action': {
+                            'type': 'DiscreteInput',
+                            'config': {
+                                'input_size': action_space.n
+                            },
+                        },
+                    },
+                    outputs = {
+                        'value': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': 1,
+                            }
+                        },
+                        'action': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': action_space.n,
+                            }
+                        },
+                    },
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size=1024,
+                    recurrence_type=self._recurrence_type,
+                    architecture=self._architecture,
+            ).to(device)
+        raise NotImplementedError()
+
+    def state_dict_deploy(self):
+        return {
+                **super().state_dict_deploy(),
+                '_model_type': self._model_type,
+                'recurrence_type': self._recurrence_type,
+                'num_recurrence_blocks': self._num_recurrence_blocks,
+        }
+    @staticmethod
+    def from_deploy_state(state):
+        if isinstance(state, str):
+            with open(state, 'rb') as f:
+                state = dill.load(f)
+            return AttnRecAgent.from_deploy_state(state)
+        elif isinstance(state, dict):
+            agent = AttnRecAgent(
+                    action_space = state['action_space'],
+                    observation_space = state['observation_space'],
+                    model_type=state['_model_type'],
+                    recurrence_type=state.pop('recurrence_type'),
+                    num_recurrence_blocks=state.pop('num_recurrence_blocks'),
+                    obs_scale=state.pop('obs_scale'),
+                    num_test_envs=16, # TODO
+            )
+            agent.load_state_dict_deploy(state)
+            return agent
+
+
 def get_params():
     from rl.experiments.pathways.train import AttnRecAgent as Agent # Need to import for pickling purposes
+    from rl.experiments.pathways.train import AttnRecAgentPPO as AgentPPO
 
     params = ExperimentConfigs()
 
@@ -577,6 +790,71 @@ def get_params():
             },
         })
 
+        # Using the PPO+LSTM hyperparameters
+        env_config = {
+            'env_type': 'envpool',
+            'env_configs': {
+                'env_name': env_name,
+                'atari': True,
+                'atari_config': {
+                    'num_envs': num_envs,
+                    'stack_num': 1,
+                    #'repeat_action_probability': 0.25,
+                    'episodic_life': True,
+                    #'reward_clip': True,
+                }
+            }
+        }
+        env_name = 'ALE/Breakout-v5'
+        env_config = {
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'env_name': env_name,
+                'atari': True,
+                'episode_stack': 1,
+                'dict_obs': True,
+                'config': {},
+                'atari_config': {
+                    'num_envs': num_envs,
+                    'stack_num': 1,
+                    #'repeat_action_probability': 0.25,
+                    'terminal_on_life_loss': True,
+                }
+            }] * num_envs
+        }
+        params.add('exp-breakout-004', {
+            'agent': {
+                'type': AgentPPO,
+                'parameters': {
+                    'num_train_envs': num_envs,
+                    'num_test_envs': num_envs,
+                    'optimizer': 'adam',
+                    'learning_rate': 2.5e-4,
+                    'lr_scheduler': {
+                        'type': 'LinearLR',
+                        'parameters': {
+                            'start_factor': 1.0,
+                            'end_factor': 1e-7,
+                            'total_iters': 50_000_000/num_envs/128,
+                        }
+                    },
+                    'vf_loss_coeff': 0.5,
+                    'max_rollout_length': 128,
+                    'num_epochs': 4,
+                    'max_grad_norm': 0.5,
+                    'gae_lambda': 0.95,
+                    'model_type': 'ModularPolicy2',
+                    'recurrence_type': 'RecurrentAttention9',
+                    'num_recurrence_blocks': 1,
+                },
+            },
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
+        })
+
     def init_atlantis_params():
         # Look for a set of parameters that work well for seaquest.
         num_envs = 16
@@ -677,7 +955,7 @@ def get_params():
                 'env_name': env_name,
                 'minigrid': True,
                 'minigrid_config': {},
-                'episode_stack': 5,
+                'episode_stack': 100,
                 'dict_obs': True,
                 'action_shuffle': False,
                 'config': {}
@@ -686,20 +964,22 @@ def get_params():
 
         params.add('exp-mgb-001', {
             'agent': {
-                'type': Agent,
+                'type': AgentPPO,
                 'parameters': {
-                    'target_update_frequency': 8_000,
+                    #'target_update_frequency': 8_000,
                     'num_train_envs': num_envs,
                     'num_test_envs': 1,
                     'obs_scale': {
                         'obs (image)': 1.0 / 255.0,
                     },
-                    'max_rollout_length': 16,
-                    'hidden_reset_min_prob': 0,
-                    'hidden_reset_max_prob': 0,
-                    'model_type': 'ModularPolicy2',
+                    'max_rollout_length': 128,
+                    #'hidden_reset_min_prob': 0,
+                    #'hidden_reset_max_prob': 0,
+                    #'model_type': 'ModularPolicy2',
+                    'model_type': 'ModularPolicy4',
                     'recurrence_type': 'RecurrentAttention9',
-                    'num_recurrence_blocks': 3,
+                    #'num_recurrence_blocks': 3,
+                    'architecture': [3, 3]
                 },
             },
             'env_test': env_config,
