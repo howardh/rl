@@ -276,6 +276,31 @@ class RecurrentAttention9(RecurrentAttention3):
         }
 
 
+class RecurrentAttention10(RecurrentAttention3):
+    # Same as RecurrentAttention9, but the feed-forward output is held close to the initial input.
+    # Note: this is incompatible with the other RecurrentAttension models, since the `forward` method takes an additional argument
+    def forward(self,
+            x: TensorType['num_blocks', 'batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float],
+            initial_x: TensorType['batch_size','value_size',float],
+        ):
+        query = self.fc_query(x) # (num_blocks, batch_size, key_size)
+        attn_output, attn_output_weights = self.attention(query, input_keys, input_values) # (num_blocks, batch_size, value_size)
+        output_keys = self.fc_key(attn_output) # (num_blocks, batch_size, key_size)
+        output_values = self.fc_value(attn_output) # (num_blocks, batch_size, value_size)
+        output_x = self.fc_output(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size, value_size)
+        output_gate = self.fc_gate(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size)
+        return {
+            'attn_output': attn_output.squeeze(0), # (num_blocks, batch_size, value_size)
+            'attn_output_weights': attn_output_weights, # (num_blocks, batch_size, seq_len)
+            'output_gate': output_gate.squeeze(2), # (num_blocks, batch_size)
+            'key': output_keys, # (num_blocks, batch_size, key_size)
+            'value': output_values.tanh(), # (num_blocks, batch_size, value_size)
+            'x': output_gate*output_x + (1-output_gate)*initial_x # (num_blocks, batch_size, value_size)
+        }
+
+
 class ConvPolicy(PolicyValueNetworkRecurrent):
     def __init__(self, num_actions, in_channels, input_size, key_size, value_size, num_heads, ff_size, num_blocks=1,
             recurrence_type='RecurrentAttention'):
@@ -1237,6 +1262,180 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
         )
 
 
+class ModularPolicy5(PolicyValueNetworkRecurrent):
+    """
+    Transformer architecture in the style of a fully connected feedforward network, but all blocks in a layer share weights.
+    """
+    def __init__(self, inputs, outputs, input_size, key_size, value_size, num_heads, ff_size, architecture, recurrence_type='RecurrentAttention'):
+        super().__init__()
+        self._key_size = key_size
+        self._input_size = input_size
+        self._value_size = value_size
+
+        self._architecture = architecture
+
+        self.input_modules = self._init_input_modules(inputs,
+                key_size=key_size, value_size=value_size)
+        self.output_modules = self._init_output_modules(outputs,
+                key_size=key_size, num_heads=num_heads)
+
+        self.attention = self._init_core_modules(
+                recurrence_type = recurrence_type,
+                input_size = input_size,
+                key_size = key_size,
+                value_size = value_size,
+                num_heads = num_heads,
+                ff_size = ff_size,
+                architecture = architecture,
+        )
+        self.initial_hidden_state = torch.nn.ParameterList([
+            torch.nn.Parameter(torch.rand([size, input_size]))
+            for size in architecture
+        ])
+
+        # Store the attention for analysis purposes
+        self.last_attention = None
+        self.last_ff_gating = None
+        self.last_output_attention = None
+
+    def _init_input_modules(self, input_configs: Dict[str,Dict], key_size, value_size):
+        valid_modules = {
+                cls.__name__: cls
+                for cls in [
+                    GreyscaleImageInput,
+                    ImageInput56,
+                    ScalarInput,
+                    DiscreteInput,
+                    LinearInput,
+                ]
+        }
+        input_modules: Dict[str,torch.nn.Module] = {}
+        for k,v in input_configs.items():
+            if v['type'] not in valid_modules:
+                raise NotImplementedError(f'Unknown output module type: {v["type"]}')
+            input_modules[k] = valid_modules[v['type']](
+                    **v.get('config', {}),
+                    key_size = key_size,
+                    value_size = value_size)
+        return torch.nn.ModuleDict(input_modules)
+
+    def _init_output_modules(self, output_configs: Dict[str,Dict], key_size, num_heads):
+        valid_modules = {
+                cls.__name__: cls
+                for cls in [
+                    LinearOutput,
+                ]
+        }
+        output_modules: Dict[str,torch.nn.Module] = {}
+        for k,v in output_configs.items():
+            if v['type'] not in valid_modules:
+                raise NotImplementedError(f'Unknown output module type: {v["type"]}')
+            if k == 'hidden':
+                raise Exception('Cannot use "hidden" as an output module name')
+            output_modules[k] = valid_modules[v['type']](
+                    **v.get('config', {}),
+                    key_size = key_size,
+                    num_heads = num_heads)
+        return torch.nn.ModuleDict(output_modules)
+
+    def _init_core_modules(self, recurrence_type, input_size, key_size, value_size, num_heads, ff_size, architecture):
+        recurrence_classes = {
+                cls.__name__: cls
+                for cls in [
+                    RecurrentAttention10,
+                ]
+        }
+
+        cls = None
+        if recurrence_type in recurrence_classes:
+            cls = recurrence_classes[recurrence_type]
+        else:
+            raise ValueError('Unknown recurrence type: {}'.format(recurrence_type))
+
+        output = torch.nn.ModuleList([
+            cls(input_size, key_size, value_size, num_heads, ff_size)
+            for _ in architecture
+        ])
+        return output
+
+    def forward(self,
+            inputs: Dict[str,TensorType['batch_size','observation_shape']],
+            hidden: List[TensorType['num_blocks','batch_size','hidden_size']]):
+        assert len(hidden) == 2+len(self.attention)
+
+        self.last_attention = []
+        self.last_ff_gating = []
+        self.last_output_attention = []
+
+        # Compute input to core module
+        input_keys = []
+        input_vals = []
+        for k,x in inputs.items():
+            if k not in self.input_modules:
+                continue
+            y = self.input_modules[k](x)
+            input_keys.append(y['key'].unsqueeze(0))
+            input_vals.append(y['value'].unsqueeze(0))
+
+        keys = torch.cat([
+            *input_keys,
+            hidden[0]
+        ], dim=0)
+        values = torch.cat([
+            *input_vals,
+            hidden[1]
+        ], dim=0)
+
+        # Core module computation
+        new_keys = hidden[0]
+        new_values = hidden[1]
+        internal_state : List[TensorType] = hidden[2:]
+        new_internal_state = []
+        layer_output = None
+        for attn_layer, in_state, init_state in zip(self.attention, internal_state, self.initial_hidden_state):
+            layer_output = attn_layer(
+                    input_keys = keys,
+                    input_values = values,
+                    x = in_state,
+                    initial_x = init_state.view(-1, 1, self._input_size),
+            )
+            new_internal_state.append(layer_output['x'])
+        if layer_output is not None: # Save output from last layer
+            new_keys = layer_output['key']
+            new_values = layer_output['value']
+            self.last_attention.append([h.cpu().detach() for h in layer_output['attn_output_weights']])
+            self.last_ff_gating.append(layer_output['output_gate'].cpu().detach())
+
+        # Compute output
+        output = {}
+
+        keys = torch.cat([
+            *input_keys,
+            new_keys
+        ], dim=0)
+        values = torch.cat([
+            *input_vals,
+            new_values
+        ], dim=0)
+
+        for k,v in self.output_modules.items():
+            y = v(keys, values)
+            output[k] = y['output']
+            self.last_output_attention.append([h.cpu().detach() for h in y['attn_output_weights']])
+
+        return {
+            **output,
+            'hidden': (new_keys, new_values, *new_internal_state)
+        }
+
+    def init_hidden(self, batch_size: int = 1):
+        device = next(self.parameters()).device
+        return (
+                torch.zeros([self._architecture[-1], batch_size, self._key_size], device=device), # Key
+                torch.zeros([self._architecture[-1], batch_size, self._key_size], device=device), # Query
+                *[x.view(-1, 1, self._input_size).expand(-1, batch_size, self._input_size) for x in self.initial_hidden_state], # Internal State
+        )
+
 if __name__ == '__main__':
     def test_mp4():
         if torch.cuda.is_available():
@@ -1378,4 +1577,87 @@ if __name__ == '__main__':
         print(f'{num_iterations / total_time} iterations per second')
         print(f'{total_time / num_iterations} seconds per iteration')
 
-    benchmark_mp4()
+    def benchmark_mp5():
+        import timeit
+
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
+
+        model = ModularPolicy5(
+                inputs = {
+                    'obs (image)': {
+                        'type': 'ImageInput56',
+                        'config': {
+                            'in_channels': 3,
+                        },
+                    },
+                    'reward': {
+                        'type': 'ScalarInput',
+                    },
+                    'action': {
+                        'type': 'DiscreteInput',
+                        'config': {
+                            'input_size': 5,
+                        },
+                    },
+                },
+                outputs = {
+                    'value': {
+                        'type': 'LinearOutput',
+                        'config': {
+                            'output_size': 1,
+                        }
+                    },
+                    'action': {
+                        'type': 'LinearOutput',
+                        'config': {
+                            'output_size': 5
+                        }
+                    },
+                },
+                input_size=512,
+                key_size=512,
+                value_size=512,
+                num_heads=8,
+                ff_size=1024,
+                recurrence_type='RecurrentAttention10',
+                architecture=[24,24]
+        ).to(device)
+
+        batch_size = 1024
+        rand_input = {
+                'obs (image)': torch.randn(batch_size,3,56,56, device=device),
+                'reward': torch.randn(batch_size, device=device),
+                'action': torch.randint(0, 5, (batch_size,), device=device),
+        }
+
+        hidden = model.init_hidden(batch_size=batch_size)
+
+        def foo():
+            model(rand_input, hidden)
+
+        def foo2():
+            output = model(rand_input, hidden)
+            loss = output['value'].mean() + output['action'].mean() # type: ignore
+            loss.backward()
+
+        num_iterations = 1_000
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of forward only')
+        total_time = timeit.Timer(foo).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of forward and backward')
+        total_time = timeit.Timer(foo2).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+    #benchmark_mp4()
+    benchmark_mp5()

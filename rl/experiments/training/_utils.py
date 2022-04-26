@@ -521,19 +521,22 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
     def reset(self):
         obs = super().reset()
         if self.include_reward_permutation:
-            obs['reward_permutation'] = self.rewards
+            assert isinstance(obs, dict)
+            obs['reward_permutation'] = [g.reward for g in self.goals]
         return obs
 
     def step(self, action):
         obs, reward, done, info = super().step(action)
         if self.include_reward_permutation:
-            info['reward_permutation'] = [g.reward for g in self.goals]
+            obs['reward_permutation'] = [g.reward for g in self.goals]
         return obs, reward, done, info
+
 
 gym_minigrid.register.register(
     id='MiniGrid-NRoomBanditsSmall-v0',
     entry_point=NRoomBanditsSmall
 )
+
 
 if __name__ == '__main__':
     env = gym.make('MiniGrid-NRoomBanditsSmall-v0')

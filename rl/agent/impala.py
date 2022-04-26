@@ -1,7 +1,11 @@
 from abc import abstractmethod
+import cProfile
 import copy
 from typing import List, Mapping, Tuple, Iterable
 import threading
+import pprint
+import time
+import timeit
 
 import gym
 import gym.spaces
@@ -15,6 +19,76 @@ from frankenstein.value.v_trace import v_trace_return
 from frankenstein.loss.policy_gradient import advantage_policy_gradient_loss
 
 from rl.experiments.training._utils import make_env
+
+
+class RecurrentModel(torch.nn.Module):
+    @abstractmethod
+    def init_hidden(self, batch_size): ...
+
+
+class Resnet(torch.nn.Module):
+    """
+    See figure 3 in https://arxiv.org/pdf/1802.01561.pdf
+    and table 7 in https://arxiv.org/pdf/1809.04474.pdf
+    """
+    def __init__(self, num_actions) -> None:
+        super().__init__()
+        self.seqs = torch.nn.ModuleList()
+        num_channels = [4, 16,32, 32]
+        for in_channels, out_channels in zip(num_channels, num_channels[1:]):
+            conv = torch.nn.Sequential(
+                    torch.nn.Conv2d(
+                        in_channels = in_channels,
+                        out_channels = out_channels,
+                        kernel_size = 3,
+                        stride = 1,
+                        padding = 1),
+                    torch.nn.MaxPool2d(kernel_size = 3, stride = 2),
+            )
+            res = [torch.nn.Sequential(
+                    torch.nn.ReLU(),
+                    torch.nn.Conv2d(
+                        in_channels = out_channels,
+                        out_channels = out_channels,
+                        kernel_size = 3,
+                        stride = 1,
+                        padding = 1),
+                    torch.nn.ReLU(),
+                    torch.nn.Conv2d(
+                        in_channels = out_channels,
+                        out_channels = out_channels,
+                        kernel_size = 3,
+                        stride = 1,
+                        padding = 1),
+            ) for _ in range(2)]
+            self.seqs.append(torch.nn.ModuleList([conv, *res]))
+
+        self.fc = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Flatten(),
+                torch.nn.Linear(32 * 9 * 9, 256),
+                torch.nn.ReLU(),
+        )
+        self.action = torch.nn.Linear(256, num_actions)
+        self.value = torch.nn.Linear(256, 1)
+    
+    def forward(self, x, hidden):
+        hidden = hidden # Unused
+        x = x.float() / 255.0
+        for conv, res0, res1 in self.seqs: # type: ignore
+            x = conv(x)
+            x = res0(x) + x
+            x = res1(x) + x
+        x = self.fc(x)
+        return {
+            'action': self.action(x),
+            'state_value': self.value(x),
+            'hidden': (),
+        }
+
+    def init_hidden(self, batch_size=1):
+        batch_size = batch_size
+        return ()
 
 
 def bin_envs(environments):
@@ -49,11 +123,6 @@ def copy_tensor(src, dest, dest_indices=...):
             copy_tensor(s, d)
     else:
         raise NotImplementedError(f"Unknown data type: {type(src)}")
-
-
-class RecurrentModel(torch.nn.Module):
-    @abstractmethod
-    def init_hidden(self, batch_size): ...
 
 
 def to_tensor(x, device):
@@ -94,12 +163,26 @@ def transpose(x, dim0, dim1):
         raise NotImplementedError(f"Unknown data type: {type(x)}")
 
 
+def get_slice(x, indices):
+    if isinstance(x, torch.Tensor):
+        return x.__getitem__(indices)
+    elif isinstance(x, Mapping):
+        return {k: get_slice(v, indices) for k,v in x.items()}
+    elif isinstance(x, Tuple):
+        return tuple(get_slice(v, indices) for v in x)
+    else:
+        raise NotImplementedError(f"Unknown data type: {type(x)}")
+
+
 class ImpalaTrainer:
     """
     Implementation of Impala. See https://arxiv.org/abs/1802.01561.
     """
     def __init__(self,
             env_configs : List[Mapping],
+            buffer_obs_space: Mapping,
+            buffer_act_space: Mapping,
+            total_steps : int,
             net : RecurrentModel,
             discount_factor : float = 0.99,
             learning_rate : float = 1e-4,
@@ -111,6 +194,10 @@ class ImpalaTrainer:
             logger : Logger = None,
         ):
         self._env_configs = env_configs
+        self._buffer_obs_space = buffer_obs_space
+        self._buffer_act_space = buffer_act_space
+
+        self.total_steps = total_steps
 
         self.discount_factor = discount_factor
         self.max_rollout_length = max_rollout_length
@@ -190,10 +277,10 @@ class ImpalaTrainer:
                 if not done:
                     buffer.append_action(action)
 
-    def _train_loop(self, shared_net, net, buffer, optimizer, batch_size, action_space, lock=threading.Lock()):
-        while True:
+    def _train_loop(self, shared_net, net, buffer, optimizer, batch_size, action_space, profiler, lock=threading.Lock(), lock2=threading.Lock()):
+        while self._steps < self.total_steps:
+            profiler.enable()
             batch = buffer.get_batch(batch_size, device=self.device)
-            assert isinstance(batch.obs, Mapping)
 
             with lock:
                 # batch.misc['hidden'] has shape
@@ -204,7 +291,7 @@ class ImpalaTrainer:
                 for t in range(self.max_rollout_length+1):
                     # Get the next output
                     o = net(
-                            {k:v[t,...] for k,v in batch.obs.items()},
+                            get_slice(batch.obs, [t,...]),
                             hidden
                     )
                     output.append(o)
@@ -253,13 +340,16 @@ class ImpalaTrainer:
 
                 shared_net.load_state_dict(net.state_dict())
 
+                profiler.disable()
+
+            with lock2:
                 # Logging
                 returns = batch.misc['episode_return'][batch.terminal]
                 task_ids = batch.misc['task'][batch.terminal]
                 labels = [self._env_configs[i].get('label', self._env_configs[i]['env_name']) for i in task_ids]
                 returns_by_label = {l:[] for l in labels}
                 for l,r in zip(labels, returns):
-                    returns_by_label[l].append(r)
+                    returns_by_label[l].append(r.item())
                 self.logger.log(
                     step = self._steps,
                     returns = {
@@ -267,6 +357,8 @@ class ImpalaTrainer:
                         for label, returns in returns_by_label.items()
                     },
                 )
+                if len(returns_by_label) > 0:
+                    pprint.pprint(returns_by_label)
 
                 self._steps += self.max_rollout_length * batch_size
 
@@ -291,34 +383,8 @@ class ImpalaTrainer:
                 num_buffers = num_buffers,
                 rollout_length = self.max_rollout_length,
                 mp_context = ctx,
-                observation_space = {
-                    'type': 'dict',
-                    'data': {
-                        'obs': {
-                            'type': 'box',
-                            'shape': envs[0].observation_space['obs'].shape,
-                            'dtype': torch.uint8,
-                        },
-                        'reward': {
-                            'type': 'box',
-                            'shape': (1,),
-                            'dtype': torch.uint8,
-                        },
-                        'done': {
-                            'type': 'box',
-                            'shape': (1,),
-                            'dtype': torch.bool,
-                        },
-                        'action': {
-                            'type': 'box',
-                            'shape': (1,),
-                            'dtype': torch.uint8,
-                        },
-                    }
-                },
-                action_space = {
-                    'type': 'discrete'
-                },
+                observation_space = self._buffer_obs_space,
+                action_space = self._buffer_act_space,
                 misc_space = {
                     'type': 'dict',
                     'data': {
@@ -360,6 +426,7 @@ class ImpalaTrainer:
         )
 
         #self._actor_loop(envs[0], 0, self.net, buffer)
+        actor_processes = []
         for i in range(len(self._env_configs)-1):
             process = ctx.Process(
                 target=self._actor_loop,
@@ -371,6 +438,7 @@ class ImpalaTrainer:
                 )
             )
             process.start()
+            actor_processes.append(process)
 
         # Start training processes/threads
         #self._train_loop(
@@ -381,8 +449,13 @@ class ImpalaTrainer:
         #        batch_size = 2,
         #        action_space = envs[0].action_space,
         #)
-        threads = []
-        for _ in range(self.num_train_loop_workers):
+
+        timer = timeit.default_timer
+        start_time = timer()
+
+        profilers = [cProfile.Profile() for _ in range(self.num_train_loop_workers)]
+        train_threads = []
+        for i in range(self.num_train_loop_workers):
             thread = threading.Thread(
                 target=self._train_loop,
                 args=(
@@ -392,10 +465,24 @@ class ImpalaTrainer:
                     self.optimizer,
                     self.batch_size,
                     envs[0].action_space,
+                    profilers[i],
                 )
             )
             thread.start()
-            threads.append(thread)
+            train_threads.append(thread)
+
+        try:
+            while self._steps < self.total_steps:
+                time.sleep(5)
+                sps = self._steps / (timer() - start_time)
+                print(f'{self._steps:,} steps -- {sps:.2f} steps/sec')
+        except KeyboardInterrupt:
+            pass
+
+        for thread in train_threads:
+            thread.join()
+        for process in actor_processes:
+            process.join(timeout=1)
 
         breakpoint()
 
@@ -412,7 +499,7 @@ class ImpalaTrainer:
         self._steps = state_dict['_steps']
 
 
-def main():
+def train_mp2():
     from rl.experiments.pathways.models import ModularPolicy2
     from rl.experiments.training._utils import make_env
 
@@ -490,8 +577,38 @@ def main():
             num_heads = 4,
             recurrence_type='RecurrentAttention9',
     )
+    buffer_obs_space = {
+        'type': 'dict',
+        'data': {
+            'obs': {
+                'type': 'box',
+                'shape': observation_space['obs'].shape,
+                'dtype': torch.uint8,
+            },
+            'reward': {
+                'type': 'box',
+                'shape': (1,),
+                'dtype': torch.uint8,
+            },
+            'done': {
+                'type': 'box',
+                'shape': (1,),
+                'dtype': torch.bool,
+            },
+            'action': {
+                'type': 'box',
+                'shape': (1,),
+                'dtype': torch.uint8,
+            },
+        }
+    }
+    buffer_act_space = {
+        'type': 'discrete'
+    }
     trainer = ImpalaTrainer(
             env_configs = [env_config]*8,
+            buffer_obs_space = buffer_obs_space,
+            buffer_act_space = buffer_act_space,
             net = net, # type: ignore
             num_train_loop_workers = 2,
             num_buffers_per_env = 2,
@@ -504,7 +621,71 @@ def main():
     trainer.train()
 
 
+def train_resnet():
+    from rl.experiments.training._utils import make_env
+
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
+
+    env_name = 'ALE/Pong-v5'
+    env_config = {
+        'env_name': env_name,
+        'atari': True,
+        #'episode_stack': 1,
+        #'dict_obs': False,
+        'config': {
+            'frameskip': 1,
+            #'mode': 0,
+            #'difficulty': 0,
+            #'repeat_action_probability': 0.25,
+            #'full_action_space': False,
+        },
+        'atari_config': {
+            #'repeat_action_probability': 0.25,
+            #'terminal_on_life_loss': False,
+        }
+    }
+
+    envs = [make_env(**env_config) for _ in range(2)]
+
+    observation_space = envs[0].observation_space
+    assert observation_space is not None
+    action_space = envs[0].action_space
+    assert action_space is not None
+
+    net = Resnet(
+            num_actions = action_space.n,
+    )
+    buffer_obs_space = {
+        'type': 'box',
+        'shape': observation_space.shape,
+        'dtype': torch.uint8,
+    }
+    buffer_act_space = {
+        'type': 'discrete'
+    }
+    trainer = ImpalaTrainer(
+            env_configs = [env_config]*24,
+            buffer_obs_space = buffer_obs_space,
+            buffer_act_space = buffer_act_space,
+            total_steps = 300_000_000,
+            net = net, # type: ignore
+            num_train_loop_workers = 2,
+            num_buffers_per_env = 4,
+            batch_size = 8,
+            learning_rate = 4.8e-4,
+            device = device,
+    )
+    trainer.logger.init_wandb(wandb_params={
+        'project': 'impala-test'
+    })
+    trainer.train()
+
+
 if __name__=='__main__':
     torch.set_num_threads(1) # It hangs on certain operations if I don't have this. See https://github.com/pytorch/pytorch/issues/58962
 
-    main()
+    #train_mp2()
+    train_resnet()

@@ -75,6 +75,10 @@ class TrainExperiment(Experiment):
         self._ep_len = np.array([0] * self._num_train_envs)
         self._ep_rewards = np.array([0.] * self._num_train_envs)
         self._first_step = True
+
+        self.callbacks = {
+            'on_episode_end': [],
+        }
     def _init_device(self):
         if torch.cuda.is_available():
             print('GPU found')
@@ -142,6 +146,8 @@ class TrainExperiment(Experiment):
                     self._ep_rewards = self._ep_rewards*(1-done)
                     self._ep_len = self._ep_len*(1-done)
                     tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}')
+                for callback in self.callbacks['on_episode_end']:
+                    callback(self, (obs, reward, done, info))
 
     def _save_model(self,i):
         """ Save the model parameters """

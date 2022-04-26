@@ -2269,7 +2269,7 @@ class A2CAgentRecurrentVec(A2CAgentVec):
         if isinstance(self.action_space, gym.spaces.Discrete):
             assert 'action' in net_output
             action_probs_unnormalized = net_output['action']
-            action_probs = action_probs_unnormalized.softmax(1).squeeze()
+            action_probs = action_probs_unnormalized.softmax(1)#.squeeze()
             assert (torch.abs(action_probs.sum(1)-1) < 1e-6).all()
             action_dist = torch.distributions.Categorical(action_probs)
             action = action_dist.sample().cpu().numpy()
@@ -2300,6 +2300,15 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             return min_eps
         #return (1-eps)*max(1-self._steps/max_steps,0)+eps # Linear
         return (max_eps-min_eps)*np.exp(-self._steps/max_steps)+min_eps # Exponential
+
+    def reset(self):
+        """ Reset the agent. """
+        self.state_values_current = []
+        self.state_values_target = []
+        self.train_history_buffer.clear(fullclear=True)
+        self.test_history_buffer.clear(fullclear=True)
+        self._prev_hidden = None
+        self._training_steps = 0
 
     def state_dict(self):
         return {
