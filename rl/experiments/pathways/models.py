@@ -1361,7 +1361,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
     def forward(self,
             inputs: Dict[str,TensorType['batch_size','observation_shape']],
             hidden: List[TensorType['num_blocks','batch_size','hidden_size']]):
-        assert len(hidden) == 2+len(self.attention)
+        assert len(hidden) == 2+len(self.initial_hidden_state)
 
         self.last_attention = []
         self.last_ff_gating = []

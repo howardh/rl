@@ -17,7 +17,7 @@ from rl.agent.smdp.a2c import A2CAgentRecurrentVec, PPOAgentRecurrentVec, Policy
 from rl.experiments.training.vectorized import TrainExperiment, make_vec_env
 from rl.experiments.training._utils import ExperimentConfigs
 from rl.experiments.pathways.models import ConvPolicy
-from rl.experiments.pathways.models import ModularPolicy, ModularPolicy2, ModularPolicy4
+from rl.experiments.pathways.models import ModularPolicy, ModularPolicy2, ModularPolicy4, ModularPolicy5
 #from rl.experiments.training._utils import make_env
 
 
@@ -334,6 +334,48 @@ class AttnRecAgentPPO(PPOAgentRecurrentVec):
         elif self._model_type == 'ModularPolicy4':
             assert self._architecture is not None
             return ModularPolicy4(
+                    inputs = {
+                        'obs (image)': {
+                            'type': 'ImageInput56',
+                            'config': {
+                                'in_channels': observation_space['obs (image)'].shape[0]
+                            },
+                        },
+                        'reward': {
+                            'type': 'ScalarInput',
+                        },
+                        'action': {
+                            'type': 'DiscreteInput',
+                            'config': {
+                                'input_size': action_space.n
+                            },
+                        },
+                    },
+                    outputs = {
+                        'value': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': 1,
+                            }
+                        },
+                        'action': {
+                            'type': 'LinearOutput',
+                            'config': {
+                                'output_size': action_space.n,
+                            }
+                        },
+                    },
+                    input_size=512,
+                    key_size=512,
+                    value_size=512,
+                    num_heads=8,
+                    ff_size=1024,
+                    recurrence_type=self._recurrence_type,
+                    architecture=self._architecture,
+            ).to(device)
+        elif self._model_type == 'ModularPolicy5':
+            assert self._architecture is not None
+            return ModularPolicy5(
                     inputs = {
                         'obs (image)': {
                             'type': 'ImageInput56',

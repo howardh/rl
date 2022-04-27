@@ -2069,10 +2069,10 @@ class A2CAgentRecurrentVec(A2CAgentVec):
             self._prev_hidden = self.net.init_hidden(batch_size=batch_size)
         else:
             initial_hidden = self.net.init_hidden(batch_size=batch_size)
-            self._prev_hidden = ( # FIXME: Hard-coded hidden state format
-                hidden_reset.logical_not() * self._prev_hidden[0] + hidden_reset * initial_hidden[0],
-                hidden_reset.logical_not() * self._prev_hidden[1] + hidden_reset * initial_hidden[1],
-            )
+            self._prev_hidden = tuple([
+                torch.where(hidden_reset, init_h, prev_h)
+                for prev_h, init_h in zip(self._prev_hidden, initial_hidden)
+            ])
 
         history.append_obs(obs, reward, terminal,
                 misc={
