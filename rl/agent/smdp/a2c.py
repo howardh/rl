@@ -1,6 +1,6 @@
 import copy
 from collections import defaultdict
-from typing import Callable, Dict, Generator, Optional, Tuple, List, Union, Mapping
+from typing import Callable, Dict, Generator, Optional, Tuple, List, Union, Mapping, Sequence
 from typing_extensions import TypedDict
 
 import numpy as np
@@ -668,6 +668,7 @@ def compute_ppo_losses(
 def compute_ppo_losses_recurrent(
         history : VecHistoryBuffer,
         model : Callable,
+        initial_hidden : Sequence[TensorType],
         discount : float,
         gae_lambda : float,
         norm_adv : bool,
@@ -692,15 +693,14 @@ def compute_ppo_losses_recurrent(
 
     with torch.no_grad():
         net_output = []
-        h = (hidden[0][0],hidden[1][0])
+        curr_hidden = tuple([h[0].detach() for h in hidden])
         for o,hr in zip2(obs,hidden_reset):
-            # FIXME: This assumes that the initial hidden state is 0.
-            h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
-                    h[0]*hr.logical_not(),
-                    h[1]*hr.logical_not(),
-            )
-            no = model(o,h)
-            h = no['hidden']
+            curr_hidden = tuple([
+                torch.where(hr, init_h, h)
+                for init_h,h in zip(initial_hidden,curr_hidden)
+            ])
+            no = model(o,curr_hidden)
+            curr_hidden = no['hidden']
             net_output.append(no)
         net_output = default_collate(net_output)
         state_values_old = net_output['value'].squeeze(2)
@@ -723,15 +723,14 @@ def compute_ppo_losses_recurrent(
 
     for _ in range(num_epochs):
         net_output = []
-        h = (hidden[0][0],hidden[1][0])
+        curr_hidden = tuple([h[0].detach() for h in hidden])
         for o,hr in zip2(obs,hidden_reset):
-            # FIXME: This assumes that the initial hidden state is 0.
-            h = ( # FIXME: Should not be hard-coded. We don't know what the hidden state format is.
-                    h[0]*hr.logical_not(),
-                    h[1]*hr.logical_not(),
-            )
-            no = model(o,h)
-            h = no['hidden']
+            curr_hidden = tuple([
+                torch.where(hr, init_h, h)
+                for init_h,h in zip(initial_hidden,curr_hidden)
+            ])
+            no = model(o,curr_hidden)
+            curr_hidden = no['hidden']
             net_output.append(no)
         net_output = default_collate(net_output)
 
@@ -2400,6 +2399,7 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
         losses = compute_ppo_losses_recurrent(
                 history=history,
                 model=model,
+                initial_hidden=self.net.init_hidden(self.num_training_envs),
                 discount=history.misc_history[-1]['discount'].flatten()[0],
                 gae_lambda=self.gae_lambda,
                 norm_adv=self.norm_adv,

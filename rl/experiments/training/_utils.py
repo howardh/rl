@@ -16,13 +16,15 @@ import gym_minigrid.register
 import rl.debug_tools.frozenlake
 from rl.utils import get_env_state, set_env_state
 
+
 def make_env(env_name: str,
         config={},
         atari=False,
+        atari_config={},
         minigrid=False,
         minigrid_config={},
+        meta_config=None,
         one_hot_obs=False,
-        atari_config={},
         frame_stack=4,
         episode_stack=None,
         dict_obs=False,
@@ -39,6 +41,8 @@ def make_env(env_name: str,
         env = EpisodeStack(env, episode_stack, dict_obs=dict_obs)
     elif dict_obs:
         raise Exception('dict_obs requires episode_stack')
+    if meta_config is not None:
+        env = MetaWrapper(env, **meta_config)
     if action_shuffle:
         env = ActionShuffle(env)
     return env
@@ -279,8 +283,8 @@ class EpisodeStack(gym.Wrapper):
 
     def step(self, action):
         if self._done:
-            if isinstance(self.env, NRoomBanditsSmall):
-                self.env.shuffle_goals_on_reset = False
+            if isinstance(self.env.unwrapped, NRoomBanditsSmall):
+                self.env.unwrapped.shuffle_goals_on_reset = False
             self.episode_count += 1
             self._done = False
             obs, reward, done, info = self.env.reset(), 0, False, {}
@@ -314,8 +318,118 @@ class EpisodeStack(gym.Wrapper):
 
     def reset(self, **kwargs):
         self.episode_count = 0
-        if isinstance(self.env, NRoomBanditsSmall):
-            self.env.shuffle_goals_on_reset = True
+        if isinstance(self.env.unwrapped, NRoomBanditsSmall):
+            self.env.unwrapped.shuffle_goals_on_reset = True
+        obs = self.env.reset(**kwargs)
+        if self.dict_obs:
+            if isinstance(self.env.observation_space, gym.spaces.Dict):
+                return {
+                    'reward': np.array([0], dtype=np.float32),
+                    'done': np.array([False], dtype=np.float32),
+                    **{f'obs ({k})': v for k,v in obs.items()},
+                    'action': self.env.action_space.sample(),
+                }
+            else:
+                return {
+                    'reward': np.array([0], dtype=np.float32),
+                    'done': np.array([False], dtype=np.float32),
+                    'obs': obs,
+                    'action': self.env.action_space.sample(),
+                }
+        else:
+            return obs
+
+    def state_dict(self):
+        return {
+            'episode_count': self.episode_count,
+            'env': get_env_state(self.env),
+            'dict_obs': self.dict_obs,
+            '_done': self._done,
+        }
+
+    def load_state_dict(self, state_dict):
+        self.episode_count = state_dict['episode_count']
+        set_env_state(self.env, state_dict['env'])
+        self.dict_obs = state_dict['dict_obs']
+        self._done = state_dict['_done']
+
+
+class MetaWrapper(gym.Wrapper):
+    """
+    Wrapper for meta-RL.
+
+    Features:
+    - Converting observations to dict
+    - Adding reward, termination signal, and previous action to observations
+    - Stacking episodes
+    - Randomizing the environment between trials (requires the environment to have a `randomize()` method)
+    """
+    def __init__(self,
+            env,
+            episode_stack: int,
+            dict_obs: bool = False,
+            randomize: bool = True,
+            action_shuffle: bool = False):
+        super().__init__(env)
+        self.episode_stack = episode_stack
+        self.randomize = randomize
+        self.dict_obs = dict_obs
+        self.action_shuffle = action_shuffle
+
+        self.episode_count = 0
+        self._done = True
+
+        if action_shuffle:
+            raise NotImplementedError('Action shuffle not implemented')
+
+        if dict_obs:
+            obs_space = [('obs', self.env.observation_space)]
+            if isinstance(self.env.observation_space, gym.spaces.Dict):
+                obs_space = [(f'obs ({k})',v) for k,v in self.env.observation_space.items()]
+            self.observation_space = gym.spaces.Dict([
+                ('reward', gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)),
+                ('done', gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)),
+                *obs_space,
+                ('action', self.env.action_space),
+            ])
+
+    def step(self, action):
+        if self._done:
+            self.episode_count += 1
+            self._done = False
+            obs, reward, done, info = self.env.reset(), 0, False, {}
+        else:
+            obs, reward, done, info = self.env.step(action)
+        self._done = done
+
+        if self.dict_obs:
+            if isinstance(self.env.observation_space, gym.spaces.Dict):
+                obs = {
+                    'reward': np.array([reward], dtype=np.float32),
+                    'done': np.array([done], dtype=np.float32),
+                    **{f'obs ({k})': v for k,v in obs.items()},
+                    'action': action,
+                }
+            else:
+                obs = {
+                    'reward': np.array([reward], dtype=np.float32),
+                    'done': np.array([done], dtype=np.float32),
+                    'obs': obs,
+                    'action': action,
+                }
+
+        if done:
+            if self.episode_count > self.episode_stack: # Episode count starts at 1
+                self.episode_count = 0
+                return obs, reward, done, info
+            else:
+                return obs, reward, False, info
+        return obs, reward, done, info
+
+    def reset(self, **kwargs):
+        self.episode_count = 0
+        if self.randomize:
+            self.env.randomize()
         obs = self.env.reset(**kwargs)
         if self.dict_obs:
             if isinstance(self.env.observation_space, gym.spaces.Dict):
@@ -489,6 +603,9 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
 
         super().__init__(width=5, height=5)
 
+    def randomize(self):
+        self._shuffle_goals()
+
     def _shuffle_goals(self):
         reward_indices = np.random.permutation(len(self.rewards))
         for g,i in zip(self.goals,reward_indices):
@@ -523,6 +640,8 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
         if self.include_reward_permutation:
             assert isinstance(obs, dict)
             obs['reward_permutation'] = [g.reward for g in self.goals]
+        if self.shuffle_goals_on_reset:
+            self._shuffle_goals()
         return obs
 
     def step(self, action):

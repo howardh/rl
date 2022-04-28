@@ -308,6 +308,12 @@ class AttnRecAgentPPO(PPOAgentRecurrentVec):
                                 'input_size': action_space.n
                             },
                         },
+                        'reward_permutation': {
+                            'type': 'LinearInput',
+                            'config': {
+                                'input_size': action_space.n,
+                            }
+                        },
                     },
                     outputs = {
                         'value': {
