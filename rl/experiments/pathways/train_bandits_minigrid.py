@@ -288,7 +288,7 @@ def make_app():
         breakpoint()
 
     @app.command()
-    def video(checkpoint_filename : Path):
+    def video(checkpoint_filename : Path, reward_config: Tuple[float,float] = (1, -1)):
         import cv2
         import PIL.Image, PIL.ImageDraw, PIL.ImageFont
         from fonts.ttf import Roboto # type: ignore
@@ -301,10 +301,15 @@ def make_app():
                 'env_name': 'MiniGrid-NRoomBanditsSmall-v0',
                 'minigrid': True,
                 'minigrid_config': {},
-                'episode_stack': 100,
-                'dict_obs': True,
-                'action_shuffle': False,
-                'config': {}
+                'meta_config': {
+                    'episode_stack': 100,
+                    'dict_obs': True,
+                    'randomize': False,
+                },
+                'config': {
+                    'rewards': reward_config,
+                    'shuffle_goals_on_reset': False,
+                }
             }]
         )
 

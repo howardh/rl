@@ -395,6 +395,8 @@ class MetaWrapper(gym.Wrapper):
 
     def step(self, action):
         if self._done:
+            if self.episode_count == 0 and self.randomize:
+                self.env.randomize()
             self.episode_count += 1
             self._done = False
             obs, reward, done, info = self.env.reset(), 0, False, {}
