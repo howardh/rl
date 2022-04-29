@@ -6,6 +6,7 @@ from torch.utils.data.dataloader import default_collate
 
 from rl.agent.smdp.a2c import PolicyValueNetworkRecurrent
 
+# Recurrences
 
 class RecurrentAttention(torch.nn.Module):
     def __init__(self, input_size, key_size, value_size, num_heads, ff_size):
@@ -291,15 +292,16 @@ class RecurrentAttention10(RecurrentAttention3):
         output_values = self.fc_value(attn_output) # (num_blocks, batch_size, value_size)
         output_x = self.fc_output(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size, value_size)
         output_gate = self.fc_gate(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size)
-        return {
-            'attn_output': attn_output.squeeze(0), # (num_blocks, batch_size, value_size)
-            'attn_output_weights': attn_output_weights, # (num_blocks, batch_size, seq_len)
+        return { # seq_len = number of inputs receives
+            'attn_output': attn_output, # (num_blocks, batch_size, value_size)
+            'attn_output_weights': attn_output_weights.permute(1,0,2), # (num_blocks, batch_size, seq_len)
             'output_gate': output_gate.squeeze(2), # (num_blocks, batch_size)
             'key': output_keys, # (num_blocks, batch_size, key_size)
             'value': output_values.tanh(), # (num_blocks, batch_size, value_size)
             'x': output_gate*output_x + (1-output_gate)*initial_x # (num_blocks, batch_size, value_size)
         }
 
+# Everything else
 
 class ConvPolicy(PolicyValueNetworkRecurrent):
     def __init__(self, num_actions, in_channels, input_size, key_size, value_size, num_heads, ff_size, num_blocks=1,
@@ -1294,7 +1296,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
         ])
 
         # Store the attention for analysis purposes
-        self.last_attention = None
+        self.last_attention = None # [num_layers, batch_size, num_heads, seq_len]
         self.last_ff_gating = None
         self.last_output_attention = None
 
@@ -1365,7 +1367,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
 
         self.last_attention = []
         self.last_ff_gating = []
-        self.last_output_attention = []
+        self.last_output_attention = {}
 
         # Compute input to core module
         input_keys = []
@@ -1400,11 +1402,13 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                     initial_x = init_state.view(-1, 1, self._input_size),
             )
             new_internal_state.append(layer_output['x'])
-        if layer_output is not None: # Save output from last layer
+            #if layer_output is not None: # Save output from last layer
             new_keys = layer_output['key']
             new_values = layer_output['value']
-            self.last_attention.append([h.cpu().detach() for h in layer_output['attn_output_weights']])
-            self.last_ff_gating.append(layer_output['output_gate'].cpu().detach())
+            self.last_attention.append(
+                    layer_output['attn_output_weights'].cpu().detach())
+            self.last_ff_gating.append(
+                    layer_output['output_gate'].cpu().detach())
 
         # Compute output
         output = {}
@@ -1421,7 +1425,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
         for k,v in self.output_modules.items():
             y = v(keys, values)
             output[k] = y['output']
-            self.last_output_attention.append([h.cpu().detach() for h in y['attn_output_weights']])
+            self.last_output_attention[k] = y['attn_output_weights'].cpu().detach().squeeze(1) # (batch_size, seq_len)
 
         return {
             **output,
@@ -1435,6 +1439,8 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                 torch.zeros([self._architecture[-1], batch_size, self._key_size], device=device), # Query
                 *[x.view(-1, 1, self._input_size).expand(-1, batch_size, self._input_size) for x in self.initial_hidden_state], # Internal State
         )
+
+
 
 if __name__ == '__main__':
     def test_mp4():

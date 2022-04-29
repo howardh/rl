@@ -66,6 +66,45 @@ def get_params():
         'verbose': True,
     })
 
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 100,
+                'dict_obs': True,
+                'randomize': True,
+            },
+            'config': {
+                'rewards': [1, -1],
+                'shuffle_goals_on_reset': False,
+            }
+        }] * num_envs
+    }
+    params.add('exp-002', {
+        'agent': {
+            'type': AgentPPO,
+            'parameters': {
+                'num_train_envs': num_envs,
+                'num_test_envs': 1,
+                'obs_scale': {
+                    'obs (image)': 1.0 / 255.0,
+                },
+                'max_rollout_length': 128,
+                'model_type': 'ModularPolicy5',
+                'recurrence_type': 'RecurrentAttention10',
+                'architecture': [3, 3]
+            },
+        },
+        'env_test': env_config,
+        'env_train': env_config,
+        'test_frequency': None,
+        'save_model_frequency': None,
+        'verbose': True,
+    })
+
     return params
 
 
@@ -251,6 +290,8 @@ def make_app():
     @app.command()
     def video(checkpoint_filename : Path):
         import cv2
+        import PIL.Image, PIL.ImageDraw, PIL.ImageFont
+        from fonts.ttf import Roboto
 
         num_trials = 1
         exp = load_checkpoint(TrainExperiment, checkpoint_filename)
@@ -266,6 +307,131 @@ def make_app():
                 'config': {}
             }]
         )
+
+        def concat_images(images, padding=0, direction='h', align=0):
+            if direction == 'h':
+                width = sum([i.size[0] for i in images]) + padding * (len(images) + 1)
+                height = max([i.size[1] for i in images]) + padding*2
+                new_image = PIL.Image.new('RGB', (width, height), color=(255,255,255))
+                x = 0
+                for i in images:
+                    new_image.paste(i, (x+padding, (height - 2*padding - i.size[1]) // 2 * (align + 1) + padding))
+                    x += i.size[0] + padding
+                return new_image
+            elif direction == 'v':
+                width = max([i.size[0] for i in images]) + padding*2
+                height = sum([i.size[1] for i in images]) + padding * (len(images) + 1)
+                new_image = PIL.Image.new('RGB', (width, height), color=(255,255,255))
+                y = 0
+                for i in images:
+                    new_image.paste(i, ((width - 2*padding - i.size[0]) // 2 * (align + 1) + padding, y + padding))
+                    y += i.size[1] + padding
+                return new_image
+            else:
+                raise ValueError('direction must be "h" or "v"')
+
+        def draw_attention(core_attention, query_gating, output_attention):
+            block_size = 24
+            padding = 2
+
+            core_images = []
+            for layer in core_attention:
+                num_blocks, _, num_inputs = layer.shape
+                width = num_inputs*block_size + (num_inputs+1)*padding
+                height = num_blocks*block_size + (num_blocks+1)*padding
+                img = PIL.Image.new('RGB', (width, height), color=(255,255,255))
+                for i in range(num_blocks):
+                    for j in range(num_inputs):
+                        weight = layer[i,0,j].item()
+                        c = int(255*(1-weight))
+                        x = j*(block_size+padding) + padding
+                        y = i*(block_size+padding) + padding
+                        PIL.ImageDraw.Draw(img).rectangle(
+                                (x,y,x+block_size,y+block_size),
+                                fill=(c,c,c),
+                        )
+                core_images.append(img)
+            core_imags_concat = concat_images(core_images, padding=padding, direction='v')
+
+            num_layers = len(query_gating)
+            max_layer_size = max(layer.shape[0] for layer in query_gating)
+            width = num_layers*block_size + (num_layers+1)*padding
+            height = max_layer_size*block_size + (max_layer_size+1)*padding
+            query_image = PIL.Image.new('RGB', (width, height), color=(255,255,255))
+            for i, layer in enumerate(query_gating):
+                num_blocks = layer.shape[0]
+                for j in range(num_blocks):
+                    weight = layer[j,0].item()
+                    c = int(255*(1-weight))
+                    x = i*(block_size+padding) + padding
+                    y = j*(block_size+padding) + padding
+                    PIL.ImageDraw.Draw(query_image).rectangle(
+                            (x,y,x+block_size,y+block_size),
+                            fill=(c,c,c)
+                    )
+
+            output_images = {}
+            for k, layer in output_attention.items():
+                layer = layer.squeeze()
+                num_inputs = len(layer)
+                width = num_inputs*block_size + (num_inputs+1)*padding
+                height = block_size + 2*padding
+                img = PIL.Image.new('RGB', (width, height), color=(255,255,255))
+                for i in range(num_inputs):
+                    weight = layer[i].item()
+                    c = int(255*(1-weight))
+                    x = i*(block_size+padding) + padding
+                    y = padding
+                    PIL.ImageDraw.Draw(img).rectangle(
+                            (x,y,x+block_size,y+block_size),
+                            fill=(c,c,c)
+                    )
+                output_images[k] = img
+
+            font_family = Roboto
+            font_size = 18
+            font = PIL.ImageFont.truetype(font_family, font_size)
+            text_images = {}
+            for k in output_attention.keys():
+                text_width, text_height = font.getsize(k)
+                img = PIL.Image.new('RGB',
+                        (text_width+2*padding, text_height+2*padding),
+                        color=(255,255,255))
+                draw = PIL.ImageDraw.Draw(img)
+                draw.fontmode = 'L' # type: ignore
+                draw.text(
+                        (padding, padding),
+                        k,
+                        font=font,
+                        fill=(0,0,0)
+                )
+                text_images[k] = img
+
+            output_images_concat = concat_images(
+                    [
+                        concat_images(
+                            [
+                                text_images[k],
+                                output_images[k],
+                            ],
+                            padding = padding,
+                            direction='v',
+                            align=-1,
+                        )
+                        for k in output_images.keys()],
+                    padding=padding, direction='v'
+            )
+
+            all_images_concat = concat_images(
+                    [
+                        core_imags_concat,
+                        query_image,
+                        output_images_concat,
+                    ],
+                    padding=padding, direction='h'
+            )
+
+            return all_images_concat
 
         agent = exp.exp.agent
         results = {}
@@ -286,6 +452,7 @@ def make_app():
                     fps,
                     env.envs[0].observation_space['obs (image)'].shape[1:], # type: ignore
             )
+            video_writer3 = None
             num_frames = 0
 
             results['agent'].append([])
@@ -306,10 +473,24 @@ def make_app():
                 frame = env.envs[0].render(mode=None) # type: ignore
                 video_writer.write(frame[:,:,::-1])
                 video_writer2.write(np.moveaxis(obs['obs (image)'].squeeze(), 0, 2)[:,:,::-1])
+                attn_img = draw_attention(
+                        core_attention = agent.net.last_attention,
+                        query_gating = agent.net.last_ff_gating,
+                        output_attention = agent.net.last_output_attention)
+                if video_writer3 is None:
+                    video_writer3 = cv2.VideoWriter( # type: ignore
+                            f'video3-{i}.webm',
+                            cv2.VideoWriter_fourcc(*'VP80'), # type: ignore
+                            fps,
+                            attn_img.size,
+                    )
+                video_writer3.write(np.array(attn_img)[:,:,::-1])
                 #if num_frames > 100:
                 #    break
             video_writer.release()
             video_writer2.release()
+            if video_writer3 is not None:
+                video_writer3.release()
 
     commands = {
             'run': run,
