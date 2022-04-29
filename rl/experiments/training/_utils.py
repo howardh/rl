@@ -1,5 +1,8 @@
+import os
 import copy
 from typing import Sequence, Iterable, Tuple, Mapping, Union
+import threading
+import time
 
 import torch
 import numpy as np
@@ -594,7 +597,7 @@ class GoalDeterministic(gym_minigrid.minigrid.Goal):
 
 
 class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
-    def __init__(self, rewards=[-1,1], shuffle_goals_on_reset=True, include_reward_permutation=False):
+    def __init__(self, rewards=[-1,1], shuffle_goals_on_reset=True, include_reward_permutation=False, seed=None):
         self.mission = 'Reach the goal with the highest reward.'
         self.rewards = rewards
         self.goals = [
@@ -605,11 +608,19 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
 
         super().__init__(width=5, height=5)
 
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+        self.np_random.seed(seed)
+
     def randomize(self):
         self._shuffle_goals()
 
     def _shuffle_goals(self):
-        reward_indices = np.random.permutation(len(self.rewards))
+        reward_indices = self.np_random.permutation(len(self.rewards))
         for g,i in zip(self.goals,reward_indices):
             g.reward = self.rewards[i]
 
