@@ -94,7 +94,7 @@ def get_params():
                 },
                 'max_rollout_length': 128,
                 'model_type': 'ModularPolicy5',
-                'recurrence_type': 'RecurrentAttention10',
+                'recurrence_type': 'RecurrentAttention11',
                 'architecture': [3, 3]
             },
         },
@@ -291,7 +291,7 @@ def make_app():
     def video(checkpoint_filename : Path):
         import cv2
         import PIL.Image, PIL.ImageDraw, PIL.ImageFont
-        from fonts.ttf import Roboto
+        from fonts.ttf import Roboto # type: ignore
 
         num_trials = 1
         exp = load_checkpoint(TrainExperiment, checkpoint_filename)
@@ -351,7 +351,7 @@ def make_app():
                                 fill=(c,c,c),
                         )
                 core_images.append(img)
-            core_imags_concat = concat_images(core_images, padding=padding, direction='v')
+            core_imags_concat = concat_images(core_images, padding=padding, direction='v', align=1)
 
             num_layers = len(query_gating)
             max_layer_size = max(layer.shape[0] for layer in query_gating)

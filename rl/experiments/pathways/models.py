@@ -301,6 +301,59 @@ class RecurrentAttention10(RecurrentAttention3):
             'x': output_gate*output_x + (1-output_gate)*initial_x # (num_blocks, batch_size, value_size)
         }
 
+
+class RecurrentAttention11(torch.nn.Module):
+    # Same as RecurrentAttention10, but removed the linear layers between the input and the query. The input is used as the query as is.
+    def __init__(self, input_size, key_size, value_size, num_heads, ff_size):
+        super(RecurrentAttention11, self).__init__()
+        self.fc_key = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, key_size)
+        )
+        self.fc_value = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, value_size)
+        )
+        self.fc_output = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size*2, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, input_size)
+        )
+        self.fc_gate = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size*2, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, 1),
+                torch.nn.Sigmoid()
+        )
+        self.attention = torch.nn.MultiheadAttention(key_size, num_heads=num_heads, batch_first=False)
+    def forward(self,
+            x: TensorType['num_blocks', 'batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float],
+            initial_x: TensorType['batch_size','value_size',float],
+        ):
+        query = x # (num_blocks, batch_size, key_size)
+        attn_output, attn_output_weights = self.attention(query, input_keys, input_values) # (num_blocks, batch_size, value_size)
+        output_keys = self.fc_key(attn_output) # (num_blocks, batch_size, key_size)
+        output_values = self.fc_value(attn_output) # (num_blocks, batch_size, value_size)
+        output_x = self.fc_output(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size, value_size)
+        output_gate = self.fc_gate(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size)
+        return { # seq_len = number of inputs receives
+            'attn_output': attn_output, # (num_blocks, batch_size, value_size)
+            'attn_output_weights': attn_output_weights.permute(1,0,2), # (num_blocks, batch_size, seq_len)
+            'output_gate': output_gate.squeeze(2), # (num_blocks, batch_size)
+            'key': output_keys, # (num_blocks, batch_size, key_size)
+            'value': output_values.tanh(), # (num_blocks, batch_size, value_size)
+            'x': output_gate*output_x + (1-output_gate)*initial_x # (num_blocks, batch_size, value_size)
+        }
+
+
 # Everything else
 
 class ConvPolicy(PolicyValueNetworkRecurrent):
@@ -1345,6 +1398,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                 cls.__name__: cls
                 for cls in [
                     RecurrentAttention10,
+                    RecurrentAttention11,
                 ]
         }
 
@@ -1405,6 +1459,8 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
             #if layer_output is not None: # Save output from last layer
             new_keys = layer_output['key']
             new_values = layer_output['value']
+            keys = new_keys
+            values = new_values
             self.last_attention.append(
                     layer_output['attn_output_weights'].cpu().detach())
             self.last_ff_gating.append(
