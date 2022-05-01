@@ -1,3 +1,4 @@
+from typing import Mapping
 import os
 import gym
 import torch
@@ -54,10 +55,16 @@ class TrainExperiment(Experiment):
         self.test_frequency = config.get('test_frequency', None)
         self._num_train_envs = config['agent']['parameters'].get('num_train_envs', 8)
         self._num_test_envs = config['agent']['parameters'].get('num_test_envs', 8)
-        #self.env_test = make_vec_env(**config['env_test'])
-        #self.env_train = make_vec_env(**config['env_train'])
-        self.env_test = make_vec_env(**config['env_test'])
-        self.env_train = make_vec_env(**config['env_train'])
+
+        if isinstance(config['env_test'], Mapping):
+            self.env_test = make_vec_env(**config['env_test'])
+        else:
+            self.env_test = config['env_test']
+
+        if isinstance(config['env_train'], Mapping):
+            self.env_train = make_vec_env(**config['env_train'])
+        else:
+            self.env_train = config['env_train']
 
         self.agent = config.get('agent')
         self.agent = self._init_agent(

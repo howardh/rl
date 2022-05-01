@@ -1348,6 +1348,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
         self._key_size = key_size
         self._input_size = input_size
         self._value_size = value_size
+        self._input_modules_config = inputs
 
         self._architecture = architecture
 
@@ -1388,12 +1389,15 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
         }
         input_modules: Dict[str,torch.nn.Module] = {}
         for k,v in input_configs.items():
-            if v['type'] not in valid_modules:
-                raise NotImplementedError(f'Unknown output module type: {v["type"]}')
-            input_modules[k] = valid_modules[v['type']](
-                    **v.get('config', {}),
-                    key_size = key_size,
-                    value_size = value_size)
+            if v['type'] is None:
+                input_modules[k] = v['module']
+            else:
+                if v['type'] not in valid_modules:
+                    raise NotImplementedError(f'Unknown output module type: {v["type"]}')
+                input_modules[k] = valid_modules[v['type']](
+                        **v.get('config', {}),
+                        key_size = key_size,
+                        value_size = value_size)
         return torch.nn.ModuleDict(input_modules)
 
     def _init_output_modules(self, output_configs: Dict[str,Dict], key_size, num_heads):
@@ -1448,12 +1452,25 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
         # Compute input to core module
         input_keys = []
         input_vals = []
-        for k,x in inputs.items():
-            if k not in self.input_modules:
-                continue
-            y = self.input_modules[k](x)
-            input_keys.append(y['key'].unsqueeze(0))
-            input_vals.append(y['value'].unsqueeze(0))
+        for k,module in self.input_modules.items():
+            module_config = self._input_modules_config[k]
+            if 'inputs' in module_config:
+                input_mapping = module_config['inputs']
+                module_inputs = {}
+                for dest_key, src_key in input_mapping.items():
+                    if src_key not in inputs:
+                        module_inputs = None
+                        break
+                    module_inputs[dest_key] = inputs[src_key]
+                if module_inputs is not None:
+                    y = module(**module_inputs)
+                    input_keys.append(y['key'].unsqueeze(0))
+                    input_vals.append(y['value'].unsqueeze(0))
+            else:
+                module_inputs = inputs[k]
+                y = module(module_inputs)
+                input_keys.append(y['key'].unsqueeze(0))
+                input_vals.append(y['value'].unsqueeze(0))
 
         keys = torch.cat([
             *input_keys,
@@ -1520,6 +1537,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
 
 
 class ModularPolicy6(ModularPolicy5):
+    # Added a tanh to the core module hidden states
     def init_hidden(self, batch_size: int = 1):
         device = next(self.parameters()).device
         return (

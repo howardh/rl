@@ -1,9 +1,12 @@
 import os
 import itertools
 from pathlib import Path
+from rl.experiments.pathways.models import LinearInput
 from typing import Optional, Tuple
 from pprint import pprint
 
+import torch
+import gym
 from tqdm import tqdm
 import numpy as np
 import dill
@@ -173,6 +176,161 @@ def make_app():
         if wandb:
             exp_runner.exp.logger.init_wandb({
                 'project': f'PPO-minigrid-bandits-{exp_name}'
+            })
+        exp_runner.run()
+        exp_runner.exp.logger.finish_wandb()
+
+    @app.command()
+    def run2(trial_id : Optional[str] = None,
+            results_directory : Optional[str] = None,
+            max_iterations : int = 5_000_000,
+            slurm : bool = typer.Option(False, '--slurm'),
+            wandb : bool = typer.Option(False, '--wandb'),
+            debug : bool = typer.Option(False, '--debug')):
+        from rl.experiments.pathways.train import AttnRecAgentPPO as AgentPPO
+        from rl.experiments.pathways.models import ModularPolicy5
+
+        # Environment
+        num_envs = 16
+        env_name = 'MiniGrid-NRoomBanditsSmall-v0'
+        env_config = {
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'env_name': env_name,
+                'minigrid': True,
+                'minigrid_config': {},
+                'meta_config': {
+                    'episode_stack': 100,
+                    'dict_obs': True,
+                    'randomize': True,
+                },
+                'config': {
+                    'rewards': [1, -1],
+                    'shuffle_goals_on_reset': False,
+                    'include_reward_permutation': True,
+                }
+            }] * num_envs
+        }
+        env = make_vec_env(**env_config)
+        if isinstance(env, gym.vector.VectorEnv):
+            observation_space = env.single_observation_space
+            action_space = env.single_action_space
+        else:
+            observation_space = env.observation_space
+            action_space = env.action_space
+
+        # Pretrained module
+        reward_permutation_module = LinearInput(
+            key_size=512,
+            value_size=512,
+            input_size = observation_space['obs (reward_permutation)'].shape[0]
+        )
+        reward_permutation_module.load_state_dict(torch.load('reward_perm.pt'))
+        for param in reward_permutation_module.parameters():
+            param.requires_grad = False
+
+        # Agent
+        inputs = {
+            'obs (image)': {
+                'type': 'ImageInput56',
+                'config': {
+                    'in_channels': observation_space['obs (image)'].shape[0]
+                },
+            },
+            'reward': {
+                'type': 'ScalarInput',
+            },
+            'action': {
+                'type': 'DiscreteInput',
+                'config': {
+                    'input_size': action_space.n
+                },
+            },
+            'obs (reward_permutation)': {
+                'type': None,
+                'module': reward_permutation_module,
+            },
+        }
+        outputs = {
+            'value': {
+                'type': 'LinearOutput',
+                'config': {
+                    'output_size': 1,
+                }
+            },
+            'action': {
+                'type': 'LinearOutput',
+                'config': {
+                    'output_size': action_space.n,
+                }
+            },
+        }
+        model_params = {
+            'inputs': inputs,
+            'outputs': outputs,
+            'input_size': 512,
+            'key_size': 512,
+            'value_size': 512,
+            'num_heads': 8,
+            'ff_size': 1024,
+            'recurrence_type': 'RecurrentAttention11',
+            'architecture': [3, 3],
+        }
+        config = {
+            'agent': {
+                'type': AgentPPO,
+                'parameters': {
+                    'num_train_envs': num_envs,
+                    'num_test_envs': 1,
+                    'obs_scale': {
+                        'obs (image)': 1.0 / 255.0,
+                    },
+                    'max_rollout_length': 128,
+                    'net': ModularPolicy5(**model_params),
+                },
+            },
+            'env_test': env_config,
+            'env_train': env_config,
+            'test_frequency': None,
+            'save_model_frequency': None,
+            'verbose': True,
+        }
+        pprint(config)
+        if debug:
+            exp_runner = make_experiment_runner(
+                    TrainExperiment,
+                    config={
+                        **config,
+                        #'save_model_frequency': 100_000, # This is number of iterations, not the number of transitions experienced
+                    },
+                    results_directory=results_directory,
+                    trial_id=trial_id,
+                    #checkpoint_frequency=250_000,
+                    checkpoint_frequency=None,
+                    max_iterations=max_iterations,
+                    slurm_split=slurm,
+                    verbose=True,
+                    modifiable=True,
+            )
+        else:
+            exp_runner = make_experiment_runner(
+                    TrainExperiment,
+                    config={
+                        **config,
+                        #'save_model_frequency': 100_000, # This is number of iterations, not the number of transitions experienced
+                    },
+                    results_directory=results_directory,
+                    trial_id=trial_id,
+                    checkpoint_frequency=25_000,
+                    #checkpoint_frequency=None,
+                    max_iterations=max_iterations,
+                    slurm_split=slurm,
+                    verbose=True,
+                    modifiable=True,
+            )
+        if wandb:
+            exp_runner.exp.logger.init_wandb({
+                'project': f'PPO-minigrid-bandits'
             })
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
@@ -516,6 +674,7 @@ def make_app():
 
     commands = {
             'run': run,
+            'run2': run2,
             'checkpoint': checkpoint,
             'plot': plot,
             'test': test,

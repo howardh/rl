@@ -255,18 +255,18 @@ class MinigridPreprocessing(gym.Wrapper):
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         obs = self._resize_obs(obs)
-        # XXX: Check for reward permutation (until bug is mixed in minigrid)
-        if self.env.unwrapped.include_reward_permutation:
-            obs['reward_permutation'] = self.env.unwrapped.reward_permutation
+        ## XXX: Check for reward permutation (until bug is mixed in minigrid)
+        #if self.env.unwrapped.include_reward_permutation:
+        #    obs['reward_permutation'] = self.env.unwrapped.reward_permutation
         return obs, reward, done, info
 
     def reset(self, **kwargs):
         # NoopReset
         obs = self.env.reset(**kwargs)
         obs = self._resize_obs(obs)
-        # XXX: Check for reward permutation (until bug is mixed in minigrid)
-        if self.env.unwrapped.include_reward_permutation:
-            obs['reward_permutation'] = self.env.unwrapped.reward_permutation
+        ## XXX: Check for reward permutation (until bug is mixed in minigrid)
+        #if self.env.unwrapped.include_reward_permutation:
+        #    obs['reward_permutation'] = self.env.unwrapped.reward_permutation
         return obs
 
 
