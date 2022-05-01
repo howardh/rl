@@ -66,6 +66,7 @@ def get_params():
         'verbose': True,
     })
 
+    # Use a different wrapper for all the meta-learning stuff. Previous version was bugged.
     env_config = {
         'env_type': 'gym_async',
         'env_configs': [{
@@ -103,6 +104,21 @@ def get_params():
         'test_frequency': None,
         'save_model_frequency': None,
         'verbose': True,
+    }) 
+
+    # Add the reward permutation as part of the observation
+    env_config = {
+        #'env_type': 'gym_sync',
+        'env_configs': [{
+            'config': {
+                'include_reward_permutation': True,
+            }
+        }] * num_envs
+    }
+    params.add_change('exp-003', {
+        'env_test': env_config,
+        'env_train': env_config,
+        #'save_model_frequency': 1_000_000,
     })
 
     return params
@@ -147,7 +163,7 @@ def make_app():
                     },
                     results_directory=results_directory,
                     trial_id=trial_id,
-                    checkpoint_frequency=250_000,
+                    checkpoint_frequency=25_000,
                     #checkpoint_frequency=None,
                     max_iterations=max_iterations,
                     slurm_split=slurm,
@@ -309,6 +325,7 @@ def make_app():
                 'config': {
                     'rewards': reward_config,
                     'shuffle_goals_on_reset': False,
+                    'include_reward_permutation': False,
                 }
             }]
         )

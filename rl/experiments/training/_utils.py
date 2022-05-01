@@ -255,12 +255,18 @@ class MinigridPreprocessing(gym.Wrapper):
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         obs = self._resize_obs(obs)
+        # XXX: Check for reward permutation (until bug is mixed in minigrid)
+        if self.env.unwrapped.include_reward_permutation:
+            obs['reward_permutation'] = self.env.unwrapped.reward_permutation
         return obs, reward, done, info
 
     def reset(self, **kwargs):
         # NoopReset
         obs = self.env.reset(**kwargs)
         obs = self._resize_obs(obs)
+        # XXX: Check for reward permutation (until bug is mixed in minigrid)
+        if self.env.unwrapped.include_reward_permutation:
+            obs['reward_permutation'] = self.env.unwrapped.reward_permutation
         return obs
 
 
@@ -608,6 +614,12 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
 
         super().__init__(width=5, height=5)
 
+        if include_reward_permutation:
+            self.observation_space = gym.spaces.Dict({
+                **self.observation_space.spaces,
+                'reward_permutation': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.rewards),), dtype=np.float32),
+            })
+
         if seed is None:
             seed = os.getpid() + int(time.time())
             thread_id = threading.current_thread().ident
@@ -615,6 +627,10 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
                 seed += thread_id
             seed = seed % (2**32 - 1)
         self.np_random.seed(seed)
+
+    @property
+    def reward_permutation(self):
+        return [g.reward for g in self.goals]
 
     def randomize(self):
         self._shuffle_goals()

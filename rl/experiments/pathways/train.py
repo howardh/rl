@@ -290,135 +290,69 @@ class AttnRecAgentPPO(PPOAgentRecurrentVec):
         raise NotImplementedError()
     def _init_minigrid_net(self, observation_space, action_space, device):
         observation_space = observation_space # Unused variable
+        inputs = {
+            'obs (image)': {
+                'type': 'ImageInput56',
+                'config': {
+                    'in_channels': observation_space['obs (image)'].shape[0]
+                },
+            },
+            'reward': {
+                'type': 'ScalarInput',
+            },
+            'action': {
+                'type': 'DiscreteInput',
+                'config': {
+                    'input_size': action_space.n
+                },
+            },
+        }
+        if 'obs (reward_permutation)' in observation_space.keys():
+            inputs['obs (reward_permutation)'] = {
+                'type': 'LinearInput',
+                'config': {
+                    'input_size': observation_space['obs (reward_permutation)'].shape[0]
+                }
+            }
+        outputs = {
+            'value': {
+                'type': 'LinearOutput',
+                'config': {
+                    'output_size': 1,
+                }
+            },
+            'action': {
+                'type': 'LinearOutput',
+                'config': {
+                    'output_size': action_space.n,
+                }
+            },
+        }
+        common_model_params = {
+            'inputs': inputs,
+            'outputs': outputs,
+            'input_size': 512,
+            'key_size': 512,
+            'value_size': 512,
+            'num_heads': 8,
+            'ff_size': 1024,
+            'recurrence_type': self._recurrence_type,
+        }
         if self._model_type == 'ModularPolicy2':
             return ModularPolicy2(
-                    inputs = {
-                        'obs (image)': {
-                            'type': 'ImageInput56',
-                            'config': {
-                                'in_channels': observation_space['obs (image)'].shape[0]
-                            },
-                        },
-                        'reward': {
-                            'type': 'ScalarInput',
-                        },
-                        'action': {
-                            'type': 'DiscreteInput',
-                            'config': {
-                                'input_size': action_space.n
-                            },
-                        },
-                        'reward_permutation': {
-                            'type': 'LinearInput',
-                            'config': {
-                                'input_size': action_space.n,
-                            }
-                        },
-                    },
-                    outputs = {
-                        'value': {
-                            'type': 'LinearOutput',
-                            'config': {
-                                'output_size': 1,
-                            }
-                        },
-                        'action': {
-                            'type': 'LinearOutput',
-                            'config': {
-                                'output_size': action_space.n,
-                            }
-                        },
-                    },
-                    input_size=512,
-                    key_size=512,
-                    value_size=512,
-                    num_heads=8,
-                    ff_size = 1024,
-                    recurrence_type=self._recurrence_type,
+                    **common_model_params,
                     num_blocks=self._num_recurrence_blocks,
             ).to(device)
         elif self._model_type == 'ModularPolicy4':
             assert self._architecture is not None
             return ModularPolicy4(
-                    inputs = {
-                        'obs (image)': {
-                            'type': 'ImageInput56',
-                            'config': {
-                                'in_channels': observation_space['obs (image)'].shape[0]
-                            },
-                        },
-                        'reward': {
-                            'type': 'ScalarInput',
-                        },
-                        'action': {
-                            'type': 'DiscreteInput',
-                            'config': {
-                                'input_size': action_space.n
-                            },
-                        },
-                    },
-                    outputs = {
-                        'value': {
-                            'type': 'LinearOutput',
-                            'config': {
-                                'output_size': 1,
-                            }
-                        },
-                        'action': {
-                            'type': 'LinearOutput',
-                            'config': {
-                                'output_size': action_space.n,
-                            }
-                        },
-                    },
-                    input_size=512,
-                    key_size=512,
-                    value_size=512,
-                    num_heads=8,
-                    ff_size=1024,
-                    recurrence_type=self._recurrence_type,
+                    **common_model_params,
                     architecture=self._architecture,
             ).to(device)
         elif self._model_type == 'ModularPolicy5':
             assert self._architecture is not None
             return ModularPolicy5(
-                    inputs = {
-                        'obs (image)': {
-                            'type': 'ImageInput56',
-                            'config': {
-                                'in_channels': observation_space['obs (image)'].shape[0]
-                            },
-                        },
-                        'reward': {
-                            'type': 'ScalarInput',
-                        },
-                        'action': {
-                            'type': 'DiscreteInput',
-                            'config': {
-                                'input_size': action_space.n
-                            },
-                        },
-                    },
-                    outputs = {
-                        'value': {
-                            'type': 'LinearOutput',
-                            'config': {
-                                'output_size': 1,
-                            }
-                        },
-                        'action': {
-                            'type': 'LinearOutput',
-                            'config': {
-                                'output_size': action_space.n,
-                            }
-                        },
-                    },
-                    input_size=512,
-                    key_size=512,
-                    value_size=512,
-                    num_heads=8,
-                    ff_size=1024,
-                    recurrence_type=self._recurrence_type,
+                    **common_model_params,
                     architecture=self._architecture,
             ).to(device)
         raise NotImplementedError()

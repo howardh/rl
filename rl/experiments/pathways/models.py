@@ -354,6 +354,28 @@ class RecurrentAttention11(torch.nn.Module):
         }
 
 
+class RecurrentAttention12(RecurrentAttention11):
+    def forward(self,
+            x: TensorType['num_blocks', 'batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float],
+            initial_x: TensorType['batch_size','value_size',float],
+        ):
+        query = x # (num_blocks, batch_size, key_size)
+        attn_output, attn_output_weights = self.attention(query, input_keys, input_values) # (num_blocks, batch_size, value_size)
+        output_keys = self.fc_key(attn_output) # (num_blocks, batch_size, key_size)
+        output_values = self.fc_value(attn_output) # (num_blocks, batch_size, value_size)
+        output_x = self.fc_output(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size, value_size)
+        output_gate = self.fc_gate(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size)
+        return { # seq_len = number of inputs receives
+            'attn_output': attn_output, # (num_blocks, batch_size, value_size)
+            'attn_output_weights': attn_output_weights.permute(1,0,2), # (num_blocks, batch_size, seq_len)
+            'output_gate': output_gate.squeeze(2), # (num_blocks, batch_size)
+            'key': output_keys.tanh(), # (num_blocks, batch_size, key_size)
+            'value': output_values.tanh(), # (num_blocks, batch_size, value_size)
+            'x': output_gate*output_x.tanh() + (1-output_gate)*initial_x.tanh() # (num_blocks, batch_size, value_size)
+        }
+
 # Everything else
 
 class ConvPolicy(PolicyValueNetworkRecurrent):
@@ -1496,6 +1518,15 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                 *[x.view(-1, 1, self._input_size).expand(-1, batch_size, self._input_size) for x in self.initial_hidden_state], # Internal State
         )
 
+
+class ModularPolicy6(ModularPolicy5):
+    def init_hidden(self, batch_size: int = 1):
+        device = next(self.parameters()).device
+        return (
+                torch.zeros([self._architecture[-1], batch_size, self._key_size], device=device), # Key
+                torch.zeros([self._architecture[-1], batch_size, self._key_size], device=device), # Query
+                *[x.view(-1, 1, self._input_size).tanh().expand(-1, batch_size, self._input_size) for x in self.initial_hidden_state], # Internal State
+        )
 
 
 if __name__ == '__main__':

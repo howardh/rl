@@ -249,6 +249,8 @@ def get_env_state(env):
         return None # TODO: How do I save an envpool state? I can't pickle the entire environment.
     if type(env).__name__ == 'AsyncVectorEnv':
         return None # Data is stored in a separate process, so I don't think we can access it.
+    if type(env).__name__ == 'SyncVectorEnv':
+        return None
     try:
         # This needs to be in a try block because mujoco might not be installed on the machine.
         # There's no reason to require mujoco to be installed if it's not being used, so we just ignore this.
@@ -292,6 +294,8 @@ def set_env_state(env, state):
     if type(env).__name__ == 'AtariGymEnvPool':
         return # TODO: How do I save an envpool state? I can't pickle the entire environment.
     if type(env).__name__ == 'AsyncVectorEnv':
+        return
+    if type(env).__name__ == 'SyncVectorEnv':
         return
     try:
         # This needs to be in a try block because mujoco might not be installed on the machine.
