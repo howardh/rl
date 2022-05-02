@@ -1,4 +1,4 @@
-from typing import Generator, Optional, Dict
+from typing import Generator, Optional, Dict, Tuple
 
 from tqdm import tqdm
 from torchtyping import TensorType
@@ -14,7 +14,7 @@ from frankenstein.loss.policy_gradient import clipped_advantage_policy_gradient_
 from experiment.logger import Logger
 
 from rl.experiments.training.vectorized import make_vec_env
-from rl.agent.smdp.a2c import compute_ppo_losses_recurrent
+from rl.agent.smdp.a2c import compute_ppo_losses_recurrent, compute_ppo_losses
 from rl.agent.impala import to_tensor
 from rl.experiments.training._utils import zip2
 
@@ -33,6 +33,19 @@ def compute_ppo_losses_recurrent(
         num_epochs : int) -> Generator[Dict[str,TensorType],None,None]:
     """
     Compute the losses for PPO.
+
+    Args:
+        history (VecHistoryBuffer): The history buffer.
+        model: The model. The `forward` method must take two inputs (obs, hidden) and return a dictionary with keys (value, action, hidden).
+        initial_hidden: The hidden state at the first step of the sequence stored in `history`.
+        discount (float): The discount factor.
+        gae_lambda (float): The lambda for generalized advantage estimation.
+        norm_adv (bool): Whether to normalize the advantages.
+        clip_vf_loss (float): The value function loss clipping threshold.
+        entropy_loss_coeff (float): The coefficient for the entropy loss.
+        vf_loss_coeff (float): The coefficient for the value function loss.
+        target_kl (float): The target KL divergence.
+        num_epochs (int): The number of epochs to run.
     """
     obs = history.obs
     action = history.action
@@ -152,17 +165,20 @@ class PPOTrainer():
             lr_scheduler = None,
             discount: float = 0.99,
             reward_scale: float = 1,
-            reward_clip: float = None,
+            reward_clip: Tuple[float,float] = None,
             rollout_length: int = 32,
-            num_steps: int = 1_000,
+            num_steps: int = 1_000_000,
             vf_loss_coeff : float = 0.5,
             entropy_loss_coeff : float = 0.01,
             max_grad_norm : float = 0.5,
             gae_lambda: float = 0.95,
-            num_epochs : int = 5,
-            clip_vf_loss : float = 0.1,
-            norm_adv : bool = True,
-            target_kl : float = None,
+            use_recurrence: bool = False,
+            num_epochs: int = None, # With recurrence only
+            num_minibatches: int = None, # No recurrence only
+            minibatch_size: int = None, # No recurrence only
+            clip_vf_loss: float = 0.1,
+            norm_adv: bool = True,
+            target_kl: float = None,
             device: torch.device = torch.device('cpu'),
             wandb: dict = None,
             ) -> None:
@@ -192,10 +208,51 @@ class PPOTrainer():
         self.target_kl = target_kl
         self.device = device
 
+        self.use_recurrence = use_recurrence
+        if use_recurrence:
+            self.num_epochs = num_epochs or 1
+            assert num_minibatches is None, "Cannot use minibatches with recurrence"
+            assert minibatch_size is None, "Cannot use minibatches with recurrence"
+        else:
+            self.num_minibatches = num_minibatches
+            self.minibatch_size = minibatch_size
+
         self.logger = Logger(key_name='step', allow_implicit_key=True)
         self.logger.log(step=0)
         if wandb is not None:
             self.logger.init_wandb({'config': config, **wandb})
+
+    def _compute_losses(self, history):
+        common_params = {
+                'history':history,
+                'model':self.model,
+                'discount':self.discount,
+                'gae_lambda':self.gae_lambda,
+                'norm_adv':self.norm_adv,
+                'clip_vf_loss':self.clip_vf_loss,
+                'entropy_loss_coeff':self.entropy_loss_coeff,
+                'vf_loss_coeff':self.vf_loss_coeff,
+                'target_kl':self.target_kl,
+        }
+        if self.use_recurrence:
+            assert self.num_epochs is not None
+            return compute_ppo_losses_recurrent(
+                    **common_params,
+                    num_epochs = self.num_epochs,
+                    initial_hidden = self.model.init_hidden(self.batch_size), # type: ignore
+            )
+        else:
+            observation_space = self.env.observation_space
+            action_space = self.env.action_space
+            assert self.num_minibatches is not None
+            assert self.minibatch_size is not None
+            return compute_ppo_losses(
+                    **common_params,
+                    observation_space = observation_space,
+                    action_space = action_space,
+                    minibatch_size = self.minibatch_size,
+                    num_minibatches = self.num_minibatches,
+            )
 
     def train_steps(self):
         history = VecHistoryBuffer(
@@ -216,7 +273,6 @@ class PPOTrainer():
         episode_steps = np.zeros(self.batch_size)
         while True:
             # Check if we've trained for long enough
-            tqdm.write(str(self._steps))
             if self._steps >= self.num_steps:
                 break
 
@@ -224,6 +280,7 @@ class PPOTrainer():
             for i in range(self.rollout_length):
                 action = agent.act()
                 obs, reward, done, info = self.env.step(action)
+                agent.observe(obs, done)
 
                 history.append_action(action)
                 episode_reward += reward
@@ -239,6 +296,7 @@ class PPOTrainer():
                     if 'lives' in info:
                         done = info['lives'] == 0
                 if done.any():
+                    tqdm.write(f'{self._steps:,}\t reward: {episode_reward[done].mean():.2f}\t len: {episode_steps[done].mean()}')
                     self.logger.log(
                             reward = episode_reward[done].mean().item(),
                             episode_length = episode_steps[done].mean().item(),
@@ -248,19 +306,7 @@ class PPOTrainer():
                     episode_steps[done] = 0
 
             # Train
-            losses = compute_ppo_losses_recurrent(
-                    history=history,
-                    model=self.model,
-                    initial_hidden=self.model.init_hidden(self.batch_size), # type: ignore
-                    discount=self.discount,
-                    gae_lambda=self.gae_lambda,
-                    norm_adv=self.norm_adv,
-                    clip_vf_loss=self.clip_vf_loss,
-                    entropy_loss_coeff=self.entropy_loss_coeff,
-                    vf_loss_coeff=self.vf_loss_coeff,
-                    target_kl=self.target_kl,
-                    num_epochs = self.num_epochs,
-            )
+            losses = self._compute_losses(history)
             for x in losses:
                 self.optimizer.zero_grad()
                 x['loss'].backward()
@@ -278,7 +324,7 @@ class PPOTrainer():
                     last_loss_entropy=x['loss_entropy'].item(), # type: ignore
                     last_loss_total=x['loss'].item(), # type: ignore
                     #last_approx_kl=approx_kl.item(), # type: ignore
-                    #learning_rate=self.scheduler.get_lr()[0], # type: ignore
+                    learning_rate=self.lr_scheduler.get_lr()[0], # type: ignore
                     step=self._steps,
             )
             # Update learning rate
@@ -304,15 +350,6 @@ class PPOTrainer():
         self._steps = state['_steps']
 
 
-def make_action_fn(action_space):
-    if isinstance(action_space, gym.spaces.Discrete):
-        return lambda x: int(x)
-    elif isinstance(action_space, gym.spaces.Box):
-        return lambda x: x
-    else:
-        raise NotImplementedError
-
-
 class AgentVec():
     def __init__(self, observation_space, action_space, model, batch_size=None):
         self.observation_space = observation_space
@@ -331,10 +368,11 @@ class AgentVec():
     def observe(self, obs, done=None):
         self.prev_obs = obs
         if done is not None and done.any():
-            self.hidden = torch.where(
-                    done,
-                    self.model.init_hidden(self.batch_size),
-                    self.hidden)
+            init_hidden = self.model.init_hidden(self.batch_size)
+            self.hidden = tuple(
+                    torch.where(done, h0, h1)
+                    for h0, h1 in zip(init_hidden, self.hidden)
+            )
 
     def act_dist(self):
         obs = to_tensor(self.prev_obs, device=self.device)
@@ -399,7 +437,7 @@ def main2():
             )
             self.v = layer_init(torch.nn.Linear(in_features=512,out_features=1),std=1)
             self.pi = layer_init(torch.nn.Linear(in_features=512,out_features=num_actions),std=0.01)
-        def forward(self, x, h):
+        def forward(self, x, h=()):
             x = x.float()/255.0
             x = self.conv(x)
             x = x.view(-1,64*7*7)
@@ -432,7 +470,7 @@ def main2():
             'atari_config': {
                 'num_envs': num_envs,
                 'stack_num': 4,
-                'repeat_action_probability': 0.25,
+                #'repeat_action_probability': 0.25,
                 'episodic_life': True,
                 #'reward_clip': True,
             }
@@ -446,7 +484,7 @@ def main2():
             optimizer,
             start_factor=1,
             end_factor=1e-7,
-            total_iters=1_000_000)
+            total_iters=int(10_000_000/num_envs/128))
     trainer = PPOTrainer(
         env = env,
         model = model,
@@ -456,8 +494,15 @@ def main2():
         num_steps = 10_000_000,
         reward_clip=(-1,1),
         rollout_length = 128,
+        vf_loss_coeff = 0.5,
+        entropy_loss_coeff = 0.01,
         max_grad_norm = 0.5,
+        norm_adv = True,
         gae_lambda = 0.95,
+        use_recurrence = False,
+        #num_epochs = 1,
+        minibatch_size = 256,
+        num_minibatches = 4*128*num_envs//256,
         device = device,
         wandb = {'project': f'PPOTrainer-{env_name}'},
     )
@@ -466,6 +511,14 @@ def main2():
 
 def main():
     from rl.experiments.pathways.models import ModularPolicy5
+    
+    if torch.cuda.is_available():
+        print('Using GPU')
+        device = torch.device('cuda')
+    else:
+        print('Using CPU')
+        device = torch.device('cpu')
+
     num_envs = 8
     env_name = 'Breakout-v5'
     env_config = {
@@ -483,12 +536,78 @@ def main():
         }
     }
     env = make_vec_env(**env_config)
-    model = ModularPolicy5()
+
+    def make_input_config():
+        observation_space = env.observation_space
+        assert isinstance(observation_space, gym.spaces.Dict)
+        action_space = env.action_space
+        assert isinstance(action_space, gym.spaces.Discrete)
+        inputs = {
+            'obs (image)': {
+                'type': 'ImageInput56',
+                'config': {
+                    'in_channels': observation_space['obs (image)'].shape[0]
+                },
+            },
+            'reward': {
+                'type': 'ScalarInput',
+            },
+            'action': {
+                'type': 'DiscreteInput',
+                'config': {
+                    'input_size': action_space.n
+                },
+            },
+        }
+        if 'obs (reward_permutation)' in observation_space.keys():
+            inputs['obs (reward_permutation)'] = {
+                'type': 'LinearInput',
+                'config': {
+                    'input_size': observation_space['obs (reward_permutation)'].shape[0]
+                }
+            }
+        return inputs
+    def make_output_config():
+        action_space = env.action_space
+        assert isinstance(action_space, gym.spaces.Discrete)
+        outputs = {
+            'value': {
+                'type': 'LinearOutput',
+                'config': {
+                    'output_size': 1,
+                }
+            },
+            'action': {
+                'type': 'LinearOutput',
+                'config': {
+                    'output_size': action_space.n,
+                }
+            },
+        }
+        return outputs
+    model = ModularPolicy5(
+        inputs = make_input_config(),
+        outputs = make_output_config(),
+        input_size = 512,
+        key_size = 512,
+        value_size = 512,
+        num_heads = 8,
+        ff_size = 1024,
+        architecture = [3,3],
+    )
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     trainer = PPOTrainer(
         env = env,
         model = model,
         optimizer = optimizer,
+        lr_scheduler = None,
+        discount = 0.99,
+        num_steps = 10_000_000,
+        reward_clip=(-1,1),
+        rollout_length = 128,
+        max_grad_norm = 0.5,
+        gae_lambda = 0.95,
+        device = device,
         wandb = {'project': f'PPOTrainer-{env_name}'},
     )
     trainer.train()
