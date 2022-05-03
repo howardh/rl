@@ -1,3 +1,4 @@
+import time
 import os
 import itertools
 from pathlib import Path
@@ -15,9 +16,13 @@ from experiment import load_checkpoint, make_experiment_runner
 from experiment.logger import Logger
 import gym_minigrid.minigrid
 import gym_minigrid.register
+from torch.utils.data.dataloader import default_collate
+
+from frankenstein.buffer.vec_history import VecHistoryBuffer
 
 from rl.experiments.training.vectorized import TrainExperiment, make_vec_env
 from rl.experiments.training._utils import ExperimentConfigs
+from rl.trainer.ppo import PPOTrainer, AgentVec
 
 
 class GoalDeterministic(gym_minigrid.minigrid.Goal):
@@ -125,6 +130,125 @@ def get_params():
     })
 
     return params
+
+
+class PPOTrainer2(PPOTrainer):
+    def __init__(self, core_module_targets, **kwargs):
+        super().__init__(**kwargs)
+        self.core_module_targets = core_module_targets
+
+    def train_steps(self):
+        history = VecHistoryBuffer(
+                num_envs = self.batch_size,
+                max_len=self.rollout_length+1,
+                device=self.device)
+        agent = AgentVec(
+                observation_space=self.env.observation_space,
+                action_space=self.env.single_action_space,
+                model=self.model,
+                batch_size=self.batch_size,
+        )
+        start_time = time.time()
+        start_steps = self._steps
+
+        obs = self.env.reset()
+        history.append_obs(obs)
+        agent.observe(obs)
+        episode_reward = np.zeros(self.batch_size)
+        episode_steps = np.zeros(self.batch_size)
+        while True:
+            # Check if we've trained for long enough
+            if self._steps >= self.num_steps:
+                break
+
+            core_targets = [[] for _ in self.core_module_targets]
+
+            # Gather data
+            for i in range(self.rollout_length):
+                with torch.no_grad():
+                    action = agent.act()
+                obs, reward, done, info = self.env.step(action)
+                for ct_idx, target_fn in enumerate(self.core_module_targets):
+                    core_targets[ct_idx].append(target_fn(
+                        action, obs, reward, done, info))
+                agent.observe(obs, done)
+
+                history.append_action(action)
+                episode_reward += reward
+                episode_steps += 1
+
+                reward *= self.reward_scale
+                if self.reward_clip is not None:
+                    reward = np.clip(reward, *self.reward_clip)
+
+                history.append_obs(obs, reward, done)
+
+                if done.any():
+                    tqdm.write(f'{self._steps:,}\t reward: {episode_reward[done].mean():.2f}\t len: {episode_steps[done].mean()}')
+                    self.logger.log(
+                            reward = episode_reward[done].mean().item(),
+                            episode_length = episode_steps[done].mean().item(),
+                            step = self._steps + i*self.batch_size,
+                    )
+                    episode_reward[done] = 0
+                    episode_steps[done] = 0
+            core_targets = [default_collate(ct) for ct in core_targets]
+
+            # Train
+            losses = self._compute_losses(history)
+            for x in losses:
+                core_target_loss = []
+                for i,targ in enumerate(core_targets):
+                    targ['key'] = targ['key'].to(self.device)
+                    targ['value'] = targ['value'].to(self.device)
+                    targ['mask'] = targ['mask'].to(self.device)
+                    attn_output = { # torch.Size([129, 3, 16, 512])
+                            'key': x['output']['misc']['core_output']['key'][:-1,i,...], # type: ignore
+                            'value': x['output']['misc']['core_output']['value'][:-1,i,...], # type: ignore
+                    }
+                    key_mse = (attn_output['key'] - targ['key']) ** 2
+                    val_mse = (attn_output['value'] - targ['value']) ** 2
+                    mask = torch.logical_not(targ['mask'])
+                    core_target_loss.append(
+                            torch.masked_select(key_mse, mask.unsqueeze(2)).mean() +
+                            torch.masked_select(val_mse, mask.unsqueeze(2)).mean()
+                    )
+                core_target_loss = torch.stack(core_target_loss).mean()
+                self.optimizer.zero_grad()
+                loss = x['loss'] + core_target_loss
+                loss.backward()
+                if self.max_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                self.optimizer.step()
+
+            # Clear data
+            history.clear()
+            # Log
+            self._steps += self.rollout_length*self.batch_size
+            self.logger.log(
+                    last_loss_pi=x['loss_pi'].item(), # type: ignore
+                    last_loss_v=x['loss_vf'].item(), # type: ignore
+                    last_loss_entropy=x['loss_entropy'].item(), # type: ignore
+                    last_loss_total=x['loss'].item(), # type: ignore
+                    last_loss_core=core_target_loss.item(), # type: ignore
+                    #last_approx_kl=approx_kl.item(), # type: ignore
+                    #learning_rate=self.lr_scheduler.get_lr()[0], # type: ignore
+                    step=self._steps,
+            )
+            # Update learning rate
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
+
+            # Timing
+            elapsed_time = time.time() - start_time
+            steps_per_sec = (self._steps - start_steps) / elapsed_time
+            remaining_time = int((self.num_steps - self._steps) / steps_per_sec)
+            remaining_hours = remaining_time // 3600
+            remaining_minutes = (remaining_time % 3600) // 60
+            remaining_seconds = (remaining_time % 3600) % 60
+            tqdm.write(f"Step {self._steps:,}/{self.num_steps:,} \t Remaining: {remaining_hours:02d}:{remaining_minutes:02d}:{remaining_seconds:02d}")
+
+            yield
 
 
 def make_app():
@@ -334,6 +458,156 @@ def make_app():
             })
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
+
+    @app.command()
+    def run3(max_iterations : int = 50_000_000,
+            wandb : bool = typer.Option(False, '--wandb')):
+        from rl.experiments.pathways.models import ModularPolicy5
+
+        # Environment
+        num_envs = 16
+        env_name = 'MiniGrid-NRoomBanditsSmall-v0'
+        env_config = {
+            'env_type': 'gym_async',
+            'env_configs': [{
+                'env_name': env_name,
+                'minigrid': True,
+                'minigrid_config': {},
+                'meta_config': {
+                    'episode_stack': 100,
+                    'dict_obs': True,
+                    'randomize': True,
+                },
+                'config': {
+                    'rewards': [1, -1],
+                    'shuffle_goals_on_reset': False,
+                    'include_reward_permutation': False,
+                }
+            }] * num_envs
+        }
+        env = make_vec_env(**env_config)
+        if isinstance(env, gym.vector.VectorEnv):
+            observation_space = env.single_observation_space
+            action_space = env.single_action_space
+        else:
+            observation_space = env.observation_space
+            action_space = env.action_space
+
+        # Pretrained module
+        reward_permutation_module = LinearInput(
+            key_size=512,
+            value_size=512,
+            #input_size = observation_space['obs (reward_permutation)'].shape[0]
+            input_size = 2,
+        )
+        reward_permutation_module.load_state_dict(torch.load('reward_perm.pt'))
+
+        def make_input_config():
+            inputs = {
+                'obs (image)': {
+                    'type': 'ImageInput56',
+                    'config': {
+                        'in_channels': observation_space['obs (image)'].shape[0],
+                        'scale': 1.0 / 255.0,
+                    },
+                },
+                'reward': {
+                    'type': 'ScalarInput',
+                },
+                'action': {
+                    'type': 'DiscreteInput',
+                    'config': {
+                        'input_size': action_space.n
+                    },
+                },
+            }
+            if 'obs (reward_permutation)' in observation_space.keys():
+                inputs['obs (reward_permutation)'] = {
+                    'type': 'LinearInput',
+                    'config': {
+                        'input_size': observation_space['obs (reward_permutation)'].shape[0]
+                    }
+                }
+            return inputs
+        def make_output_config():
+            outputs = {
+                'value': {
+                    'type': 'LinearOutput',
+                    'config': {
+                        'output_size': 1,
+                    }
+                },
+                'action': {
+                    'type': 'LinearOutput',
+                    'config': {
+                        'output_size': action_space.n,
+                    }
+                },
+            }
+            return outputs
+        model = ModularPolicy5(
+            inputs = make_input_config(),
+            outputs = make_output_config(),
+            input_size = 512,
+            key_size = 512,
+            value_size = 512,
+            num_heads = 8,
+            ff_size = 1024,
+            recurrence_type = 'RecurrentAttention11',
+            architecture = [3,3],
+        )
+        def target_fn(action=None, obs=None, reward=None, done=None, info=None):
+            action = action
+            obs = obs
+            reward = reward
+            done = done
+            info = info
+            indices = [i for i in range(len(info)) if 'reward_permutation' in info[i].keys()]
+            mask = torch.zeros(len(info))
+            key = torch.zeros(len(info), 512)
+            value = torch.zeros(len(info), 512)
+            if len(indices) == 0:
+                return {
+                    'key': key,
+                    'value': value,
+                    'mask': mask,
+                }
+            else:
+                reward_permutation = torch.tensor([info[i]['reward_permutation'] for i in indices])
+                output = reward_permutation_module(reward_permutation.float())
+                key[indices, :] = output['key']
+                value[indices, :] = output['value']
+                return {
+                    'key': key,
+                    'value': value,
+                    'mask': mask,
+                }
+        core_module_targets = [
+                target_fn
+        ]
+        optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
+        trainer = PPOTrainer2(
+            env = env,
+            model = model,
+            optimizer = optimizer,
+            lr_scheduler = None,
+            discount = 0.99,
+            num_steps = max_iterations,
+            reward_clip=(-1,1),
+            rollout_length = 128,
+            vf_loss_coeff = 0.5,
+            entropy_loss_coeff = 0.01,
+            max_grad_norm = 0.5,
+            norm_adv = True,
+            gae_lambda = 0.95,
+            use_recurrence = True,
+            num_epochs = 1,
+            #minibatch_size = 256,
+            #num_minibatches = 4*128*num_envs//256,
+            core_module_targets = core_module_targets,
+            wandb = {'project': f'PPO-minigrid-bandits'} if wandb else None,
+        )
+        trainer.train()
 
     @app.command()
     def checkpoint(filename):
@@ -675,6 +949,7 @@ def make_app():
     commands = {
             'run': run,
             'run2': run2,
+            'run3': run3,
             'checkpoint': checkpoint,
             'plot': plot,
             'test': test,

@@ -675,8 +675,9 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
 
     def step(self, action):
         obs, reward, done, info = super().step(action)
+        info['reward_permutation'] = [g.reward for g in self.goals]
         if self.include_reward_permutation:
-            obs['reward_permutation'] = [g.reward for g in self.goals]
+            obs['reward_permutation'] = info['reward_permutation']
         return obs, reward, done, info
 
 

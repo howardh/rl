@@ -501,8 +501,9 @@ class GreyscaleImageInput(torch.nn.Module):
 
 
 class ImageInput56(torch.nn.Module):
-    def __init__(self, key_size: int, value_size: int, in_channels: int):
+    def __init__(self, key_size: int, value_size: int, in_channels: int, scale: float = 1.0):
         super().__init__()
+        self.scale = scale
         self.conv = torch.nn.Sequential(
             torch.nn.Conv2d(
                 in_channels=in_channels,out_channels=32,kernel_size=8,stride=4),
@@ -520,7 +521,7 @@ class ImageInput56(torch.nn.Module):
         self.fc_key = torch.nn.Linear(in_features=512, out_features=key_size)
         self.fc_value = torch.nn.Linear(in_features=512, out_features=value_size)
     def forward(self, x: TensorType['batch_size','channels','height','width',float]):
-        x = self.conv(x)
+        x = self.conv(x.float() * self.scale)
         return {
             'key': self.fc_key(x),
             'value': self.fc_value(x),
@@ -1524,7 +1525,10 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
 
         return {
             **output,
-            'hidden': (new_keys, new_values, *new_internal_state)
+            'hidden': (new_keys, new_values, *new_internal_state),
+            'misc': {
+                'core_output': layer_output,
+            }
         }
 
     def init_hidden(self, batch_size: int = 1):

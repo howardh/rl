@@ -1,4 +1,5 @@
 from typing import Generator, Optional, Dict, Tuple
+import time
 
 from tqdm import tqdm
 from torchtyping import TensorType
@@ -59,7 +60,7 @@ def compute_ppo_losses_recurrent(
         hidden = initial_hidden
         for o,t in zip2(obs,terminal):
             hidden = tuple([
-                torch.where(t, init_h, h)
+                torch.where(t.view(1,-1,1), init_h, h)
                 for init_h,h in zip(initial_hidden,hidden)
             ])
             no = model(o,hidden)
@@ -89,7 +90,7 @@ def compute_ppo_losses_recurrent(
         hidden = initial_hidden
         for o,t in zip2(obs,terminal):
             hidden = tuple([
-                torch.where(t, init_h, h)
+                torch.where(t.view(1,-1,1), init_h, h)
                 for init_h,h in zip(initial_hidden,hidden)
             ])
             no = model(o,hidden)
@@ -141,6 +142,7 @@ def compute_ppo_losses_recurrent(
                 'loss_vf': v_loss,
                 'loss_entropy': -entropy_loss,
                 'approx_kl': approx_kl,
+                'output': net_output,
         }
 
         if target_kl is not None:
@@ -179,9 +181,17 @@ class PPOTrainer():
             clip_vf_loss: float = 0.1,
             norm_adv: bool = True,
             target_kl: float = None,
-            device: torch.device = torch.device('cpu'),
+            device: torch.device = None,
             wandb: dict = None,
             ) -> None:
+        if device is None:
+            if torch.cuda.is_available():
+                print('Using GPU')
+                device = torch.device('cuda')
+            else:
+                print('Using CPU')
+                device = torch.device('cpu')
+
         config = locals()
         self.env = env
         self.model = model
@@ -265,6 +275,8 @@ class PPOTrainer():
                 model=self.model,
                 batch_size=self.batch_size,
         )
+        start_time = time.time()
+        start_steps = self._steps
 
         obs = self.env.reset()
         history.append_obs(obs)
@@ -331,6 +343,15 @@ class PPOTrainer():
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
+            # Timing
+            elapsed_time = time.time() - start_time
+            steps_per_sec = (self._steps - start_steps) / elapsed_time
+            remaining_time = int((self.num_steps - self._steps) / steps_per_sec)
+            remaining_hours = remaining_time // 3600
+            remaining_minutes = (remaining_time % 3600) // 60
+            remaining_seconds = (remaining_time % 3600) % 60
+            tqdm.write(f"Step {self._steps:,}/{self.num_steps:,} \t Remaining: {remaining_hours:02d}:{remaining_minutes:02d}:{remaining_seconds:02d}")
+
             yield
 
     def train(self):
@@ -369,6 +390,7 @@ class AgentVec():
         self.prev_obs = obs
         if done is not None and done.any():
             init_hidden = self.model.init_hidden(self.batch_size)
+            done = torch.tensor(done, dtype=torch.uint8, device=self.device).view(1,-1,1)
             self.hidden = tuple(
                     torch.where(done, h0, h1)
                     for h0, h1 in zip(init_hidden, self.hidden)
@@ -528,8 +550,8 @@ def main():
             'atari': True,
             'atari_config': {
                 'num_envs': num_envs,
-                'stack_num': 1,
-                'repeat_action_probability': 0.25,
+                'stack_num': 4,
+                #'repeat_action_probability': 0.25,
                 'episodic_life': True,
                 #'reward_clip': True,
             }
@@ -595,7 +617,7 @@ def main():
         ff_size = 1024,
         architecture = [3,3],
     )
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
     trainer = PPOTrainer(
         env = env,
         model = model,
@@ -605,8 +627,15 @@ def main():
         num_steps = 10_000_000,
         reward_clip=(-1,1),
         rollout_length = 128,
+        vf_loss_coeff = 0.5,
+        entropy_loss_coeff = 0.01,
         max_grad_norm = 0.5,
+        norm_adv = True,
         gae_lambda = 0.95,
+        use_recurrence = True,
+        num_epochs = 1,
+        #minibatch_size = 256,
+        #num_minibatches = 4*128*num_envs//256,
         device = device,
         wandb = {'project': f'PPOTrainer-{env_name}'},
     )
