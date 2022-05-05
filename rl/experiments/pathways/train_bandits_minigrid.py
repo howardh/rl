@@ -14,8 +14,6 @@ import dill
 import experiment.logger
 from experiment import load_checkpoint, make_experiment_runner
 from experiment.logger import Logger
-import gym_minigrid.minigrid
-import gym_minigrid.register
 from torch.utils.data.dataloader import default_collate
 
 from frankenstein.buffer.vec_history import VecHistoryBuffer
@@ -23,12 +21,6 @@ from frankenstein.buffer.vec_history import VecHistoryBuffer
 from rl.experiments.training.vectorized import TrainExperiment, make_vec_env
 from rl.experiments.training._utils import ExperimentConfigs
 from rl.trainer.ppo import PPOTrainer, AgentVec
-
-
-class GoalDeterministic(gym_minigrid.minigrid.Goal):
-    def __init__(self, reward):
-        super().__init__()
-        self.reward = reward
 
 
 def get_params():
@@ -128,6 +120,72 @@ def get_params():
         'env_train': env_config,
         #'save_model_frequency': 1_000_000,
     })
+
+    # Stochastic rewards
+    env_name = 'MiniGrid-NRoomBanditsSmallBernoulli-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 100,
+                'dict_obs': True,
+                'randomize': True,
+            },
+            'config': {
+                'reward_scale': 1,
+                'prob': 0.9,
+                'shuffle_goals_on_reset': False,
+                'include_reward_permutation': True,
+            }
+        }] * num_envs
+    }
+    params.add('exp-004', {
+        'agent': {
+            'type': AgentPPO,
+            'parameters': {
+                'num_train_envs': num_envs,
+                'num_test_envs': 1,
+                'obs_scale': {
+                    'obs (image)': 1.0 / 255.0,
+                },
+                'max_rollout_length': 128,
+                'model_type': 'ModularPolicy5',
+                'recurrence_type': 'RecurrentAttention11',
+                'architecture': [3, 3]
+            },
+        },
+        'env_test': env_config,
+        'env_train': env_config,
+        'test_frequency': None,
+        'save_model_frequency': None,
+        'verbose': True,
+    }) 
+
+    # Remove reward permutation from observation
+    env_config = {
+        'env_configs': [{
+            'config': {
+                'include_reward_permutation': False,
+            }
+        }] * num_envs
+    }
+    params.add_change('exp-005', {
+        'env_test': env_config,
+        'env_train': env_config,
+    }) 
+    # This keeps getting NaNs
+
+    # Decreasing learning rate from default (1e-4) to 1e-5
+    params.add_change('exp-006', {
+        'agent': {
+            'parameters': {
+                'learning_rate': 1e-5,
+            },
+        },
+    }) 
 
     return params
 
@@ -260,6 +318,7 @@ def make_app():
             trial_id : Optional[str] = None,
             results_directory : Optional[str] = None,
             max_iterations : int = 5_000_000,
+            starting_model: Optional[str] = None,
             slurm : bool = typer.Option(False, '--slurm'),
             wandb : bool = typer.Option(False, '--wandb'),
             debug : bool = typer.Option(False, '--debug')):
@@ -301,6 +360,19 @@ def make_app():
             exp_runner.exp.logger.init_wandb({
                 'project': f'PPO-minigrid-bandits-{exp_name}'
             })
+
+        if starting_model is not None:
+            print(f'Starting training from pretrained weights: {starting_model}')
+            try:
+                loaded_data = torch.load(starting_model)
+            except:
+                with open(starting_model, 'rb') as f:
+                    loaded_data = dill.load(f)
+            if 'exp' in loaded_data:
+                exp_runner.exp.agent.net.load_state_dict(loaded_data['exp']['agent']['net'])
+            else:
+                exp_runner.exp.agent.net.load_state_dict(loaded_data)
+
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
 
@@ -653,9 +725,12 @@ def make_app():
     @app.command()
     def test(
             checkpoint_filename: Path,
+            env_name: str = 'MiniGrid-NRoomBanditsSmall-v0',
             output: Path = None,
             num_trials: int = 10,
-            reward_config: Tuple[float,float] = (1, -1)):
+            reward_config: Tuple[float,float] = (1, -1),
+            reward_scale: float = 1.0,
+            prob: float = 0.9):
         import matplotlib
         if output is not None:
             matplotlib.use('Agg')
@@ -663,23 +738,47 @@ def make_app():
 
         exp = load_checkpoint(TrainExperiment, checkpoint_filename)
         num_steps = exp._steps * exp.exp.agent.num_training_envs
-        env = make_vec_env(
-            env_type = 'gym_sync',
-            env_configs = [{
-                'env_name': 'MiniGrid-NRoomBanditsSmall-v0',
-                'minigrid': True,
-                'minigrid_config': {},
-                'meta_config': {
-                    'episode_stack': 100,
-                    'dict_obs': True,
-                    'randomize': False,
-                },
-                'config': {
-                    'rewards': reward_config,
-                    'shuffle_goals_on_reset': False,
-                }
-            }]
-        )
+        if env_name == 'MiniGrid-NRoomBanditsSmall-v0':
+            env = make_vec_env(
+                env_type = 'gym_sync',
+                env_configs = [{
+                    'env_name': env_name,
+                    'minigrid': True,
+                    'minigrid_config': {},
+                    'meta_config': {
+                        'episode_stack': 100,
+                        'dict_obs': True,
+                        'randomize': False,
+                    },
+                    'config': {
+                        'rewards': reward_config,
+                        'shuffle_goals_on_reset': False,
+                        'include_reward_permutation': False,
+                    }
+                }]
+            )
+        elif env_name == 'MiniGrid-NRoomBanditsSmallBernoulli-v0':
+            env = make_vec_env(
+                env_type = 'gym_sync',
+                env_configs = [{
+                    'env_name': env_name,
+                    'minigrid': True,
+                    'minigrid_config': {},
+                    'meta_config': {
+                        'episode_stack': 100,
+                        'dict_obs': True,
+                        'randomize': False,
+                    },
+                    'config': {
+                        'reward_scale': reward_scale,
+                        'prob': prob,
+                        'shuffle_goals_on_reset': False,
+                        'include_reward_permutation': False,
+                    }
+                }]
+            )
+        else:
+            raise ValueError(f'Unknown env_name: {env_name}')
 
         agent = exp.exp.agent
         results = {}
@@ -707,7 +806,7 @@ def make_app():
                 results['reward'][-1].append(reward[0])
                 #print(f'{len(results["total_reward"][-1])} {action} {reward} {total_reward}')
                 if obs['done'].any():
-                    tqdm.write(str([g.reward for g in env.envs[0].goals])) # type: ignore
+                    tqdm.write(str(env.envs[0].reward_permutation)) # type: ignore
                     tqdm.write('ep done')
                 if done.any():
                     tqdm.write('-'*80)
@@ -727,7 +826,8 @@ def make_app():
             data[1].append(mean_r_2)
         plt.boxplot(data, labels=['1st half','2nd half'])
         plt.ylabel('Average Rewards')
-        plt.title(f'{num_trials} Trials on {str(reward_config)} after {num_steps:,} steps')
+        rp = env.envs[0].reward_permutation # type: ignore
+        plt.title(f'{num_trials} Trials on {str(rp)} after {num_steps:,} steps', wrap=True)
         if output is not None:
             plt.savefig(output)
             print(f'Saved to {os.path.abspath(output)}')
@@ -736,31 +836,58 @@ def make_app():
         breakpoint()
 
     @app.command()
-    def video(checkpoint_filename : Path, reward_config: Tuple[float,float] = (1, -1)):
+    def video(checkpoint_filename : Path,
+            env_name: str = 'MiniGrid-NRoomBanditsSmall-v0',
+            reward_config: Tuple[float,float] = (1, -1),
+            reward_scale: float = 1,
+            prob: float = 0.9):
         import cv2
         import PIL.Image, PIL.ImageDraw, PIL.ImageFont
         from fonts.ttf import Roboto # type: ignore
 
         num_trials = 1
         exp = load_checkpoint(TrainExperiment, checkpoint_filename)
-        env = make_vec_env(
-            env_type = 'gym_sync',
-            env_configs = [{
-                'env_name': 'MiniGrid-NRoomBanditsSmall-v0',
-                'minigrid': True,
-                'minigrid_config': {},
-                'meta_config': {
-                    'episode_stack': 100,
-                    'dict_obs': True,
-                    'randomize': False,
-                },
-                'config': {
-                    'rewards': reward_config,
-                    'shuffle_goals_on_reset': False,
-                    'include_reward_permutation': False,
-                }
-            }]
-        )
+        if env_name == 'MiniGrid-NRoomBanditsSmall-v0':
+            env = make_vec_env(
+                env_type = 'gym_sync',
+                env_configs = [{
+                    'env_name': env_name,
+                    'minigrid': True,
+                    'minigrid_config': {},
+                    'meta_config': {
+                        'episode_stack': 100,
+                        'dict_obs': True,
+                        'randomize': False,
+                    },
+                    'config': {
+                        'rewards': reward_config,
+                        'shuffle_goals_on_reset': False,
+                        'include_reward_permutation': False,
+                    }
+                }]
+            )
+        elif env_name == 'MiniGrid-NRoomBanditsSmallBernoulli-v0':
+            env = make_vec_env(
+                env_type = 'gym_sync',
+                env_configs = [{
+                    'env_name': env_name,
+                    'minigrid': True,
+                    'minigrid_config': {},
+                    'meta_config': {
+                        'episode_stack': 100,
+                        'dict_obs': True,
+                        'randomize': False,
+                    },
+                    'config': {
+                        'reward_scale': reward_scale,
+                        'prob': prob,
+                        'shuffle_goals_on_reset': False,
+                        'include_reward_permutation': False,
+                    }
+                }]
+            )
+        else:
+            raise ValueError(f'Unknown env_name: {env_name}')
 
         def concat_images(images, padding=0, direction='h', align=0):
             if direction == 'h':
@@ -892,6 +1019,7 @@ def make_app():
         fps = 25
 
         results['agent'] = []
+        results['reward'] = []
         agent = exp.exp.agent
         for i in range(num_trials):
             video_writer = cv2.VideoWriter( # type: ignore
@@ -910,6 +1038,7 @@ def make_app():
             num_frames = 0
 
             results['agent'].append([])
+            results['reward'].append([])
             agent.reset()
             obs = env.reset()
             done = np.array([False] * env.num_envs)
@@ -922,6 +1051,7 @@ def make_app():
                 action = agent.act(obs)
                 obs, reward, done, _ = env.step(action)
                 agent.observe(obs, reward, done, testing=True)
+                results['reward'][-1].append(reward[0])
                 num_frames += 1
                 print(f'{num_frames} {action} {reward}')
                 frame = env.envs[0].render(mode=None) # type: ignore
@@ -945,6 +1075,8 @@ def make_app():
             video_writer2.release()
             if video_writer3 is not None:
                 video_writer3.release()
+            print(f'Trial {i} total reward: {np.sum(results["reward"][-1])}')
+            breakpoint()
 
     commands = {
             'run': run,

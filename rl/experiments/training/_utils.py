@@ -602,6 +602,20 @@ class GoalDeterministic(gym_minigrid.minigrid.Goal):
         self.reward = reward
 
 
+class GoalMultinomial(gym_minigrid.minigrid.Goal):
+    def __init__(self, rewards, probs):
+        super().__init__()
+        self.rewards = rewards
+        self.probs = probs
+
+    def sample_reward(self):
+        return self.rewards[np.random.choice(len(self.rewards), p=self.probs)]
+
+    @property
+    def expected_value(self):
+        return (np.array(self.rewards) * np.array(self.probs)).sum() # type: ignore
+
+
 class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
     def __init__(self, rewards=[-1,1], shuffle_goals_on_reset=True, include_reward_permutation=False, seed=None):
         self.mission = 'Reach the goal with the highest reward.'
@@ -668,14 +682,14 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
         obs = super().reset()
         if self.include_reward_permutation:
             assert isinstance(obs, dict)
-            obs['reward_permutation'] = [g.reward for g in self.goals]
+            obs['reward_permutation'] = self.reward_permutation
         if self.shuffle_goals_on_reset:
             self._shuffle_goals()
         return obs
 
     def step(self, action):
         obs, reward, done, info = super().step(action)
-        info['reward_permutation'] = [g.reward for g in self.goals]
+        info['reward_permutation'] = self.reward_permutation
         if self.include_reward_permutation:
             obs['reward_permutation'] = info['reward_permutation']
         return obs, reward, done, info
@@ -684,6 +698,97 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
 gym_minigrid.register.register(
     id='MiniGrid-NRoomBanditsSmall-v0',
     entry_point=NRoomBanditsSmall
+)
+
+
+class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
+    def __init__(self, reward_scale=1, prob=0.9, shuffle_goals_on_reset=True, include_reward_permutation=False, seed=None):
+        self.mission = 'Reach the goal with the highest reward.'
+        self.reward_scale = reward_scale
+        self.prob = prob
+        self.goals = [
+            GoalMultinomial(rewards=[reward_scale,-reward_scale], probs=[prob,1-prob]),
+            GoalMultinomial(rewards=[reward_scale,-reward_scale], probs=[1-prob,prob]),
+        ]
+        self.shuffle_goals_on_reset = shuffle_goals_on_reset
+        self.include_reward_permutation = include_reward_permutation
+
+        super().__init__(width=5, height=5)
+
+        if include_reward_permutation:
+            self.observation_space = gym.spaces.Dict({
+                **self.observation_space.spaces,
+                'reward_permutation': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
+            })
+
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+        self.np_random.seed(seed)
+
+    @property
+    def reward_permutation(self):
+        return [g.expected_value for g in self.goals]
+
+    def randomize(self):
+        self._shuffle_goals()
+
+    def _shuffle_goals(self):
+        permutation = self.np_random.permutation(2)
+        probs = [
+                [self.prob, 1-self.prob],
+                [1-self.prob, self.prob],
+        ]
+        for g,i in zip(self.goals,permutation):
+            g.probs = probs[i]
+
+    def _gen_grid(self, width, height):
+        self.grid = gym_minigrid.minigrid.Grid(width, height)
+
+        self.grid.horz_wall(0, 0)
+        self.grid.horz_wall(0, height - 1)
+        self.grid.vert_wall(0, 0)
+        self.grid.vert_wall(width - 1, 0)
+
+        self.agent_pos = (2, height-2)
+        self.agent_dir = self._rand_int(0, 4)
+
+        if self.shuffle_goals_on_reset:
+            self._shuffle_goals()
+
+        for i,g in enumerate(self.goals):
+            self.put_obj(g, 1+i*2, 1)
+
+    def _reward(self):
+        curr_cell = self.grid.get(*self.agent_pos) # type: ignore (where is self.grid assigned?)
+        if curr_cell != None and hasattr(curr_cell,'rewards') and hasattr(curr_cell,'probs'):
+            return self.np_random.choice(curr_cell.rewards, p=curr_cell.probs)
+        breakpoint()
+        return 0
+
+    def reset(self):
+        obs = super().reset()
+        if self.include_reward_permutation:
+            assert isinstance(obs, dict)
+            obs['reward_permutation'] = self.reward_permutation
+        if self.shuffle_goals_on_reset:
+            self._shuffle_goals()
+        return obs
+
+    def step(self, action):
+        obs, reward, done, info = super().step(action)
+        info['reward_permutation'] = self.reward_permutation
+        if self.include_reward_permutation:
+            obs['reward_permutation'] = info['reward_permutation']
+        return obs, reward, done, info
+
+
+gym_minigrid.register.register(
+    id='MiniGrid-NRoomBanditsSmallBernoulli-v0',
+    entry_point=NRoomBanditsSmallBernoulli
 )
 
 
