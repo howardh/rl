@@ -1,3 +1,4 @@
+import os
 from abc import abstractmethod
 import cProfile
 import copy
@@ -211,10 +212,14 @@ class ImpalaTrainer:
             raise ValueError(f'Rollout length must be >= 1. Received {max_rollout_length}.')
 
         self._steps = 0 # Number of steps experienced
-        self.net = net
 
-        #self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate)
-        self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=learning_rate)
+        self.net = copy.deepcopy(net).to(torch.device('cpu')) # Make a copy of the model to give to the actor processes. We need to make a copy because multiprocessing + working doesn't support CUDA models, but we want the training to be done with CUDA.
+        self.net.share_memory()
+
+        self.learner_net = net.to(self.device)
+
+        #self.optimizer = torch.optim.Adam(self.learner_net.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.RMSprop(self.learner_net.parameters(), lr=learning_rate)
 
         # Logging
         if logger is None:
@@ -231,7 +236,14 @@ class ImpalaTrainer:
         else:
             raise NotImplementedError(f'Unsupported action space of type {type(action_space)}')
 
-    def _actor_loop(self, env, task_id, net, buffer):
+    def _actor_loop(self, env, task_id, net, buffer, seed=None):
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+        torch.random.manual_seed(seed)
+
         device = torch.device('cpu')
         with torch.no_grad():
             hidden = net.init_hidden()
@@ -297,12 +309,14 @@ class ImpalaTrainer:
                     output.append(o)
                     hidden = o['hidden']
                 output = default_collate(output)
-                log_action_probs = torch.log_softmax(output['action'], dim=2).gather(2,batch.action[:-1].long())
+                #log_action_probs = torch.log_softmax(output['action'], dim=2).gather(2,batch.action[:-1].long())
+                action_dist = torch.distributions.Categorical(logits=output['action'])
+                log_action_probs = action_dist.log_prob(batch.action.squeeze(2)).unsqueeze(2)
 
                 # Misc computations
                 with torch.no_grad():
                     v_trace = v_trace_return(
-                        log_action_probs = log_action_probs,
+                        log_action_probs = log_action_probs[:-1],
                         old_log_action_probs = batch.misc['action_log_prob'][:-1],
                         state_values = output['state_value'][:-1],
                         next_state_values = output['state_value'][1:],
@@ -321,7 +335,7 @@ class ImpalaTrainer:
 
                 # Policy loss
                 pg_loss = advantage_policy_gradient_loss(
-                    log_action_probs = log_action_probs,
+                    log_action_probs = log_action_probs[:-1],
                     advantages = advantages,
                     terminals = batch.terminal[1:],
                 )
@@ -352,10 +366,20 @@ class ImpalaTrainer:
                     returns_by_label[l].append(r.item())
                 self.logger.log(
                     step = self._steps,
+                    losses = {
+                        'v_loss': v_loss.item(),
+                        'pg_loss': pg_loss.item(),
+                        'entropy_loss': entropy_loss.item(),
+                        'loss': loss.item(),
+                    },
                     returns = {
                         label: torch.tensor(returns).mean().item()
                         for label, returns in returns_by_label.items()
                     },
+                    v_trace = v_trace.mean().item(),
+                    advantages = advantages.mean().item(),
+                    entropy = entropy.mean().item(),
+                    state_value = output['state_value'][:-1].mean().item(),
                 )
                 if len(returns_by_label) > 0:
                     pprint.pprint(returns_by_label)
@@ -366,9 +390,6 @@ class ImpalaTrainer:
                 batch.release()
 
     def train(self):
-        learner_net = copy.deepcopy(self.net).to(self.device) # Train on a copy of the model because CUDA can't be used with multiprocessing + forking. The actor processes need a CPU copy of the model, and the training loop needs a CUDA model.
-        self.net.share_memory()
-
         envs = [make_env(**conf) for conf in self._env_configs]
         bins = bin_envs(envs)
         if max(bins) > 0:
@@ -441,26 +462,27 @@ class ImpalaTrainer:
             actor_processes.append(process)
 
         # Start training processes/threads
+        profilers = [cProfile.Profile() for _ in range(self.num_train_loop_workers)]
         #self._train_loop(
         #        shared_net = self.net,
-        #        net = learner_net,
+        #        net = self.learner_net,
         #        buffer = buffer,
         #        optimizer = self.optimizer,
         #        batch_size = 2,
         #        action_space = envs[0].action_space,
+        #        profiler = profilers[0],
         #)
 
         timer = timeit.default_timer
         start_time = timer()
 
-        profilers = [cProfile.Profile() for _ in range(self.num_train_loop_workers)]
         train_threads = []
         for i in range(self.num_train_loop_workers):
             thread = threading.Thread(
                 target=self._train_loop,
                 args=(
                     self.net,
-                    learner_net,
+                    self.learner_net,
                     buffer,
                     self.optimizer,
                     self.batch_size,
