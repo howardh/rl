@@ -178,6 +178,10 @@ def get_slice(x, indices):
 class ImpalaTrainer:
     """
     Implementation of Impala. See https://arxiv.org/abs/1802.01561.
+
+    Hyperparameters for Atari are in table G.1
+
+    See original implementation here: https://github.com/deepmind/scalable_agent
     """
     def __init__(self,
             env_configs : List[Mapping],
@@ -186,8 +190,20 @@ class ImpalaTrainer:
             total_steps : int,
             net : RecurrentModel,
             discount_factor : float = 0.99,
-            learning_rate : float = 1e-4,
-            max_rollout_length : int = 80,
+            learning_rate : float = 6e-4,
+            lr_scheduler : dict = {
+                'type': 'LinearLR',
+                'parameters': {
+                    'start_factor': 1.0,
+                    'end_factor': 0,
+                    'total_iters': 200_000_000/32/20, # Total steps / batch size / rollout length
+                }
+            },
+            reward_clip : Tuple[float,float] = (-1,1),
+            vf_loss_coeff : float = 0.5,
+            entropy_loss_coeff : float = 0.01,
+            max_grad_norm : float = 40.0,
+            max_rollout_length : int = 20,
             batch_size : int = 32,
             num_train_loop_workers : int = 2,
             num_buffers_per_env : int = 2,
@@ -201,6 +217,10 @@ class ImpalaTrainer:
         self.total_steps = total_steps
 
         self.discount_factor = discount_factor
+        self.reward_clip = reward_clip
+        self.vf_loss_coeff = vf_loss_coeff
+        self.entropy_loss_coeff = entropy_loss_coeff
+        self.max_grad_norm = max_grad_norm
         self.max_rollout_length = max_rollout_length
         self.batch_size = batch_size
         self.num_train_loop_workers = num_train_loop_workers
@@ -219,7 +239,8 @@ class ImpalaTrainer:
         self.learner_net = net.to(self.device)
 
         #self.optimizer = torch.optim.Adam(self.learner_net.parameters(), lr=learning_rate)
-        self.optimizer = torch.optim.RMSprop(self.learner_net.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.RMSprop(self.learner_net.parameters(), lr=learning_rate, momentum=0, eps=0.01)
+        self.scheduler = self._init_lr_scheduler(self.optimizer, config=lr_scheduler)
 
         # Logging
         if logger is None:
@@ -227,6 +248,19 @@ class ImpalaTrainer:
             self.logger.log(step=0)
         else:
             self.logger = logger
+
+    def _init_lr_scheduler(self, optimizer, config):
+        if config is None:
+            return None
+        valid_schedulers = {
+                cls.__name__: cls
+                for cls in [
+                    torch.optim.lr_scheduler.LinearLR
+                ]
+        }
+        if config['type'] not in valid_schedulers:
+            raise Exception(f'Invalid lr_scheduler type: "{config["type"]}". Valid types are: {list(valid_schedulers.keys())}.')
+        return valid_schedulers[config['type']](optimizer, **config['parameters'])
 
     def _action_dist(self, action_space, output):
         if isinstance(action_space, gym.spaces.Box):
@@ -309,8 +343,9 @@ class ImpalaTrainer:
                     output.append(o)
                     hidden = o['hidden']
                 output = default_collate(output)
-                #log_action_probs = torch.log_softmax(output['action'], dim=2).gather(2,batch.action[:-1].long())
-                action_dist = torch.distributions.Categorical(logits=output['action'])
+
+                action_dist = self._action_dist(action_space, output)
+                entropy = action_dist.entropy()
                 log_action_probs = action_dist.log_prob(batch.action.squeeze(2)).unsqueeze(2)
 
                 # Misc computations
@@ -320,15 +355,13 @@ class ImpalaTrainer:
                         old_log_action_probs = batch.misc['action_log_prob'][:-1],
                         state_values = output['state_value'][:-1],
                         next_state_values = output['state_value'][1:],
-                        rewards = batch.reward[1:],
+                        rewards = batch.reward[1:].clip(*self.reward_clip) if self.reward_clip is not None else batch.reward[1:],
                         terminals = batch.terminal[1:],
                         discount = self.discount_factor,
                         max_c = 1,
                         max_rho = 1,
                     )
                     advantages = v_trace-output['state_value'][:-1]
-                action_dist = self._action_dist(action_space, output)
-                entropy = action_dist.entropy()
 
                 # Value loss
                 v_loss = (output['state_value'][:-1] - v_trace).pow(2).mean()
@@ -337,7 +370,7 @@ class ImpalaTrainer:
                 pg_loss = advantage_policy_gradient_loss(
                     log_action_probs = log_action_probs[:-1],
                     advantages = advantages,
-                    terminals = batch.terminal[1:],
+                    terminals = batch.terminal[:-1],
                 )
                 pg_loss = pg_loss.mean()
 
@@ -345,12 +378,16 @@ class ImpalaTrainer:
                 entropy_loss = -entropy.mean()
 
                 # Total loss
-                loss = v_loss + pg_loss + 0.01*entropy_loss
+                loss = self.vf_loss_coeff*v_loss + pg_loss + self.entropy_loss_coeff*entropy_loss
 
                 # Train the network
                 optimizer.zero_grad()
                 loss.backward()
+                if self.max_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(net.parameters(), self.max_grad_norm)
                 optimizer.step()
+                if self.scheduler is not None:
+                    self.scheduler.step()
 
                 shared_net.load_state_dict(net.state_dict())
 
@@ -662,11 +699,12 @@ def train_resnet():
             #'mode': 0,
             #'difficulty': 0,
             #'repeat_action_probability': 0.25,
+            'repeat_action_probability': 0,
             #'full_action_space': False,
         },
         'atari_config': {
             #'repeat_action_probability': 0.25,
-            #'terminal_on_life_loss': False,
+            'terminal_on_life_loss': True,
         }
     }
 
@@ -692,12 +730,10 @@ def train_resnet():
             env_configs = [env_config]*24,
             buffer_obs_space = buffer_obs_space,
             buffer_act_space = buffer_act_space,
-            total_steps = 300_000_000,
+            total_steps = 200_000_000,
             net = net, # type: ignore
             num_train_loop_workers = 2,
             num_buffers_per_env = 4,
-            batch_size = 8,
-            learning_rate = 4.8e-4,
             device = device,
     )
     trainer.logger.init_wandb(wandb_params={
