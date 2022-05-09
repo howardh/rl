@@ -362,12 +362,15 @@ class PPOTrainer():
         return {
             'model': self.model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
+            'lr_scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None,
             '_steps': self._steps,
         }
 
     def load_state_dict(self, state):
         self.model.load_state_dict(state['model'])
         self.optimizer.load_state_dict(state['optimizer'])
+        if state['lr_scheduler'] is not None and self.lr_scheduler is not None:
+            self.lr_scheduler.load_state_dict(state['lr_scheduler'])
         self._steps = state['_steps']
 
 

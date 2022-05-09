@@ -186,6 +186,18 @@ def get_params():
             },
         },
     }) 
+    # Still diverges
+
+    ## Keep the lower learning rate
+    ## Try a different model that passes the query through a tanh
+    #params.add_change('exp-007', {
+    #    'agent': {
+    #        'parameters': {
+    #            'model_type': 'ModularPolicy6',
+    #            'recurrence_type': 'RecurrentAttention12',
+    #        },
+    #    },
+    #}) 
 
     return params
 
@@ -289,6 +301,9 @@ class PPOTrainer2(PPOTrainer):
                     last_loss_entropy=x['loss_entropy'].item(), # type: ignore
                     last_loss_total=x['loss'].item(), # type: ignore
                     last_loss_core=core_target_loss.item(), # type: ignore
+                    last_attn_output_key=x['output']['misc']['core_output']['key'].abs().mean().item(), # type: ignore
+                    last_attn_output_value=x['output']['misc']['core_output']['value'].abs().mean().item(), # type: ignore
+                    last_attn_output_query=x['output']['misc']['core_output']['x'].abs().mean().item(), # type: ignore
                     #last_approx_kl=approx_kl.item(), # type: ignore
                     #learning_rate=self.lr_scheduler.get_lr()[0], # type: ignore
                     step=self._steps,

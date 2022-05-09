@@ -778,6 +778,7 @@ def compute_ppo_losses_recurrent(
                 'loss_vf': v_loss,
                 'loss_entropy': -entropy_loss,
                 'approx_kl': approx_kl,
+                'output': net_output,
         }
 
         if target_kl is not None:
@@ -2424,6 +2425,9 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
                 last_loss_v=x['loss_vf'].item(), # type: ignore
                 last_loss_entropy=x['loss_entropy'].item(), # type: ignore
                 last_loss_total=x['loss'].item(), # type: ignore
+                last_attn_output_key=x['output']['misc']['core_output']['key'].abs().mean().item(), # type: ignore
+                last_attn_output_value=x['output']['misc']['core_output']['value'].abs().mean().item(), # type: ignore
+                last_attn_output_query=x['output']['misc']['core_output']['x'].abs().mean().item(), # type: ignore
                 #last_approx_kl=approx_kl.item(), # type: ignore
                 #learning_rate=self.scheduler.get_lr()[0], # type: ignore
         )
