@@ -217,6 +217,7 @@ class ImpalaTrainer:
         self.total_steps = total_steps
 
         self.discount_factor = discount_factor
+        self.learning_rate = learning_rate
         self.reward_clip = reward_clip
         self.vf_loss_coeff = vf_loss_coeff
         self.entropy_loss_coeff = entropy_loss_coeff
@@ -304,7 +305,9 @@ class ImpalaTrainer:
 
                 output = net(unsqueeze(to_tensor(obs, device), 0), hidden)
                 action_dist = self._action_dist(env.action_space, output)
-                action = action_dist.sample().item()
+                action = action_dist.sample()
+                action_log_prob = action_dist.log_prob(action)
+                action = action.item()
                 hidden = output['hidden']
 
                 buffer.append_obs(
@@ -315,6 +318,7 @@ class ImpalaTrainer:
                             'episode_step_count': episode_step_count,
                             'episode_return': episode_return,
                             'state_value': output['state_value'],
+                            'action_log_prob': action_log_prob,
                             'task': task_id,
                             'hidden': output['hidden'],
                         }
@@ -403,6 +407,7 @@ class ImpalaTrainer:
                     returns_by_label[l].append(r.item())
                 self.logger.log(
                     step = self._steps,
+                    learning_rate = self.scheduler.get_last_lr()[0] if self.scheduler is not None else self.learning_rate, # type: ignore
                     losses = {
                         'v_loss': v_loss.item(),
                         'pg_loss': pg_loss.item(),
