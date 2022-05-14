@@ -165,6 +165,7 @@ class PPOTrainer():
             model: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
             lr_scheduler = None,
+            *,
             discount: float = 0.99,
             reward_scale: float = 1,
             reward_clip: Tuple[float,float] = None,
@@ -227,7 +228,7 @@ class PPOTrainer():
             self.num_minibatches = num_minibatches
             self.minibatch_size = minibatch_size
 
-        self.logger = Logger(key_name='step', allow_implicit_key=True)
+        self.logger = Logger(key_name='step', allow_implicit_key=True, in_memory=False)
         self.logger.log(step=0)
         if wandb is not None:
             self.logger.init_wandb({'config': config, **wandb})
@@ -364,6 +365,7 @@ class PPOTrainer():
             'optimizer': self.optimizer.state_dict(),
             'lr_scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None,
             '_steps': self._steps,
+            'logger': self.logger.state_dict(),
         }
 
     def load_state_dict(self, state):
@@ -372,6 +374,8 @@ class PPOTrainer():
         if state['lr_scheduler'] is not None and self.lr_scheduler is not None:
             self.lr_scheduler.load_state_dict(state['lr_scheduler'])
         self._steps = state['_steps']
+        if 'logger' in state:
+            self.logger.load_state_dict(state['logger'], wandb_method='copy')
 
 
 class AgentVec():

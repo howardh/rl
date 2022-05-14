@@ -534,10 +534,12 @@ class ScalarInput(torch.nn.Module):
         self.value_size = value_size
         self.key = torch.nn.Parameter(torch.rand([key_size]))
     def forward(self, value: TensorType['batch_size',float]):
-        batch_size = value.shape[0]
+        batch_size = int(torch.tensor(value.shape).prod().item())
+        batch_shape = value.shape
+        assert batch_shape[-1] == 1, 'Last dimension of input to ScalarInput has to be size 1.'
         return {
-            'key': self.key.view(1,-1).expand(batch_size, -1),
-            'value': value.view(-1,1).expand(batch_size,self.value_size)
+            'key': self.key.view(1,-1).expand(batch_size, -1).view(*batch_shape[:-1],-1),
+            'value': value.view(-1,1).expand(batch_size,self.value_size).view(*batch_shape[:-1],-1)
         }
 
 
@@ -583,10 +585,12 @@ class DiscreteInput(torch.nn.Module):
         else:
             self.key = torch.nn.Parameter(torch.rand([input_size, key_size])-0.5)
     def forward(self, x: TensorType['batch_size',int]):
-        x = x.long()
+        batch_size = int(torch.tensor(x.shape).prod().item())
+        batch_shape = x.shape
+        x = x.long().flatten()
         return {
-            'key': self.key[x,:],
-            'value': self.value[x,:]
+            'key': self.key.expand(batch_size, -1).view(*batch_shape, -1) if self._shared_key else self.key[x,:].view(*batch_shape, -1),
+            'value': self.value[x,:].view(*batch_shape, -1)
         }
 
 
@@ -1451,6 +1455,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
         self.last_output_attention = {}
 
         # Compute input to core module
+        input_labels = []
         input_keys = []
         input_vals = []
         for k,module in self.input_modules.items():
@@ -1465,11 +1470,13 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                     module_inputs[dest_key] = inputs[src_key]
                 if module_inputs is not None:
                     y = module(**module_inputs)
+                    input_labels.append(k)
                     input_keys.append(y['key'].unsqueeze(0))
                     input_vals.append(y['value'].unsqueeze(0))
             else:
                 module_inputs = inputs[k]
                 y = module(module_inputs)
+                input_labels.append(k)
                 input_keys.append(y['key'].unsqueeze(0))
                 input_vals.append(y['value'].unsqueeze(0))
 
@@ -1528,6 +1535,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
             'hidden': (new_keys, new_values, *new_internal_state),
             'misc': {
                 'core_output': layer_output,
+                'input_labels': input_labels,
             }
         }
 

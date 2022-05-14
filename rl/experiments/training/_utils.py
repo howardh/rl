@@ -537,20 +537,23 @@ def merge(source, destination):
     True
     """
     destination = copy.deepcopy(destination)
-    for key, value in source.items():
-        if isinstance(value, dict):
-            # get node or create one
-            node = destination.setdefault(key, {})
-            destination[key] = merge(value, node)
-        elif isinstance(value, list):
-            if isinstance(destination[key],list):
-                destination[key] = [merge(s,d) for s,d in zip(source[key],destination[key])]
+    if isinstance(source, Mapping):
+        for key, value in source.items():
+            if isinstance(value, dict):
+                # get node or create one
+                node = destination.setdefault(key, {})
+                destination[key] = merge(value, node)
+            elif isinstance(value, list):
+                if isinstance(destination[key],list):
+                    destination[key] = [merge(s,d) for s,d in zip(source[key],destination[key])]
+                else:
+                    destination[key] = value
             else:
                 destination[key] = value
-        else:
-            destination[key] = value
 
-    return destination
+        return destination
+    else:
+        return source
 
 
 def zip2(*args) -> Iterable[Union[Tuple,Mapping]]:
@@ -613,7 +616,7 @@ class GoalMultinomial(gym_minigrid.minigrid.Goal):
 
     @property
     def expected_value(self):
-        return (np.array(self.rewards) * np.array(self.probs)).sum() # type: ignore
+        return (np.array(self.rewards, dtype=np.float32) * np.array(self.probs, dtype=np.float32)).sum() # type: ignore
 
 
 class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):

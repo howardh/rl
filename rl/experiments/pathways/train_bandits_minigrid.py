@@ -187,17 +187,56 @@ def get_params():
         },
     }) 
     # Still diverges
+    # But then it works if I keep trying.
 
-    ## Keep the lower learning rate
-    ## Try a different model that passes the query through a tanh
+    # Train on many different randomness settings simultaneously
+    # Testing with the reward permutation provided to start
+    env_name = 'MiniGrid-NRoomBanditsSmallBernoulli-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 100,
+                'dict_obs': True,
+                'randomize': True,
+            },
+            'config': {
+                'reward_scale': 1,
+                'prob': 1-(i/num_envs)*0.5,
+                'shuffle_goals_on_reset': False,
+                'include_reward_permutation': True,
+            }
+        } for i in range(num_envs)],
+    }
+    params.add_change('exp-007', {
+        'env_test': env_config,
+        'env_train': env_config,
+    }) # Not working?
+
+    # Increase model size
+    params.add_change('exp-008', {
+        'agent': {
+            'parameters': {
+                'architecture': [6, 6],
+            },
+        },
+    }) 
+
+    ## Same thing, just without the reward permutation
+    #env_config = {
+    #    'env_configs': [{
+    #        'config': {
+    #            'include_reward_permutation': False,
+    #        }
+    #    }] * num_envs
+    #}
     #params.add_change('exp-007', {
-    #    'agent': {
-    #        'parameters': {
-    #            'model_type': 'ModularPolicy6',
-    #            'recurrence_type': 'RecurrentAttention12',
-    #        },
-    #    },
-    #}) 
+    #    'env_test': env_config,
+    #    'env_train': env_config,
+    #})
 
     return params
 

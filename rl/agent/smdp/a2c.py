@@ -2400,7 +2400,7 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
         losses = compute_ppo_losses_recurrent(
                 history=history,
                 model=model,
-                initial_hidden=self.net.init_hidden(self.num_training_envs),
+                initial_hidden=self.net.init_hidden(self.num_training_envs), # type: ignore
                 discount=history.misc_history[-1]['discount'].flatten()[0],
                 gae_lambda=self.gae_lambda,
                 norm_adv=self.norm_adv,
