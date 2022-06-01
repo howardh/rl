@@ -430,18 +430,26 @@ class MetaWrapper(gym.Wrapper):
                 }
 
         if done:
-            if self.episode_count > self.episode_stack: # Episode count starts at 1
+            if 'expected_return' in info and 'max_return' in info:
+                regret = info['max_return'] - info['expected_return']
+                self._regret.append(regret)
+                info['regret'] = self._regret
+
+            if self.episode_count >= self.episode_stack: # Episode count starts at 1
                 self.episode_count = 0
                 return obs, reward, done, info
             else:
                 return obs, reward, False, info
         return obs, reward, done, info
 
-    def reset(self, **kwargs):
+    def reset(self, *args, **kwargs):
         self.episode_count = 0
         if self.randomize:
             self.env.randomize()
-        obs = self.env.reset(**kwargs)
+
+        self._regret = []
+
+        obs = self.env.reset(*args, **kwargs)
         if self.dict_obs:
             if isinstance(self.env.observation_space, gym.spaces.Dict):
                 return {
@@ -732,6 +740,9 @@ class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
             seed = seed % (2**32 - 1)
         self.np_random.seed(seed)
 
+        # Info
+        self._expected_return = 0
+
     @property
     def reward_permutation(self):
         return [g.expected_value for g in self.goals]
@@ -772,6 +783,20 @@ class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
         breakpoint()
         return 0
 
+    def _expected_reward(self):
+        """ Expected reward of the current state """
+        curr_cell = self.grid.get(*self.agent_pos) # type: ignore (where is self.grid assigned?)
+        if curr_cell is None:
+            return 0
+        if hasattr(curr_cell,'expected_value'):
+            return curr_cell.expected_value
+        return 0
+    
+    @property
+    def max_return(self):
+        """ Expected return (undiscounted sum) of the optimal policy """
+        return max(self.reward_permutation)
+
     def reset(self):
         obs = super().reset()
         if self.include_reward_permutation:
@@ -779,6 +804,9 @@ class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
             obs['reward_permutation'] = self.reward_permutation
         if self.shuffle_goals_on_reset:
             self._shuffle_goals()
+
+        self._expected_return = 0
+
         return obs
 
     def step(self, action):
@@ -786,12 +814,132 @@ class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
         info['reward_permutation'] = self.reward_permutation
         if self.include_reward_permutation:
             obs['reward_permutation'] = info['reward_permutation']
+        self._expected_return += self._expected_reward()
+        info['expected_return'] = self._expected_return
+        info['max_return'] = self.max_return
         return obs, reward, done, info
 
 
 gym_minigrid.register.register(
     id='MiniGrid-NRoomBanditsSmallBernoulli-v0',
     entry_point=NRoomBanditsSmallBernoulli
+)
+
+
+class BanditsFetch(gym_minigrid.minigrid.MiniGridEnv):
+    """
+    Environment in which the agent has to fetch a random object
+    named using English text strings
+    """
+
+    def __init__(
+        self,
+        size=8,
+        num_objs=3,
+        num_trials=1,
+        reward_correct=1,
+        reward_incorrect=-1,
+        seed=None,
+    ):
+        self.numObjs = num_objs
+
+        super().__init__(
+            grid_size=size,
+            max_steps=5*size**2*num_trials,
+            # Set this to True for maximum speed
+            see_through_walls=True
+        )
+
+        self.num_trials = num_trials
+        self.reward_correct = reward_correct
+        self.reward_incorrect = reward_incorrect
+        self.trial_count = 0
+        self.objects = []
+
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+        self.np_random.seed(seed)
+
+    def _gen_grid(self, width, height):
+        self.grid = gym_minigrid.minigrid.Grid(width, height)
+
+        # Generate the surrounding walls
+        self.grid.horz_wall(0, 0)
+        self.grid.horz_wall(0, height-1)
+        self.grid.vert_wall(0, 0)
+        self.grid.vert_wall(width-1, 0)
+
+        types = ['key', 'ball']
+
+        objs = []
+
+        # For each object to be generated
+        while len(objs) < self.numObjs:
+            objType = self._rand_elem(types)
+            objColor = self._rand_elem(gym_minigrid.minigrid.COLOR_NAMES)
+
+            if objType == 'key':
+                obj = gym_minigrid.minigrid.Key(objColor)
+            elif objType == 'ball':
+                obj = gym_minigrid.minigrid.Ball(objColor)
+            else:
+                raise ValueError(f'Unknown object type: {objType}')
+
+            self.place_obj(obj)
+            objs.append(obj)
+
+        self.objects = objs
+
+        # Randomize the player start position and orientation
+        self.place_agent()
+
+        # Choose a random object to be picked up
+        target = objs[self._rand_int(0, len(objs))]
+        self.targetType = target.type
+        self.targetColor = target.color
+
+        descStr = '%s %s' % (self.targetColor, self.targetType)
+
+        # Generate the mission string
+        idx = self._rand_int(0, 5)
+        if idx == 0:
+            self.mission = 'get a %s' % descStr
+        elif idx == 1:
+            self.mission = 'go get a %s' % descStr
+        elif idx == 2:
+            self.mission = 'fetch a %s' % descStr
+        elif idx == 3:
+            self.mission = 'go fetch a %s' % descStr
+        elif idx == 4:
+            self.mission = 'you must fetch a %s' % descStr
+        assert hasattr(self, 'mission')
+
+    def step(self, action):
+        obs, reward, done, info = gym_minigrid.minigrid.MiniGridEnv.step(self, action)
+
+        if self.carrying:
+            if self.carrying.color == self.targetColor and \
+               self.carrying.type == self.targetType:
+                reward = self.reward_correct
+            else:
+                reward = self.reward_incorrect
+            self.place_obj(self.carrying)
+            self.carrying = None
+            self.trial_count += 1
+            if self.trial_count >= self.num_trials:
+                done = True
+                self.trial_count = 0
+
+        return obs, reward, done, info
+
+
+gym_minigrid.register.register(
+    id='MiniGrid-BanditsFetch-v0',
+    entry_point=BanditsFetch,
 )
 
 

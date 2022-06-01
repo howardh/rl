@@ -149,7 +149,8 @@ class TrainExperiment(Experiment):
                         tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}')
                 else:
                     mean_reward = self._ep_rewards[done].mean().item()
-                    self.logger.log(reward=mean_reward)
+                    mean_length = self._ep_len[done].mean().item()
+                    self.logger.log(reward=mean_reward, episode_length=mean_length)
                     self._ep_rewards = self._ep_rewards*(1-done)
                     self._ep_len = self._ep_len*(1-done)
                     tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}')

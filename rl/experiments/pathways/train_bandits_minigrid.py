@@ -2,6 +2,9 @@ import time
 import os
 import itertools
 from pathlib import Path
+from collections import OrderedDict
+#from torch import multiprocessing as mp
+
 from rl.experiments.pathways.models import LinearInput
 from typing import Optional, Tuple
 from pprint import pprint
@@ -225,18 +228,130 @@ def get_params():
         },
     }) 
 
-    ## Same thing, just without the reward permutation
-    #env_config = {
-    #    'env_configs': [{
-    #        'config': {
-    #            'include_reward_permutation': False,
-    #        }
-    #    }] * num_envs
-    #}
-    #params.add_change('exp-007', {
-    #    'env_test': env_config,
-    #    'env_train': env_config,
-    #})
+    env_name = 'MiniGrid-NRoomBanditsSmallBernoulli-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 100,
+                'dict_obs': True,
+                'randomize': True,
+            },
+            'config': {
+                'reward_scale': 1,
+                'prob': 1-(i%2)*0.1,
+                'shuffle_goals_on_reset': False,
+                'include_reward_permutation': True,
+            }
+        } for i in range(num_envs)],
+    }
+    params.add_change('exp-009', {
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Same thing, just without the reward permutation
+    env_config = {
+        'env_configs': [{
+            'config': {
+                'include_reward_permutation': False,
+            }
+        }] * num_envs
+    }
+    params.add_change('exp-010', {
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Retry setup of exp-007, but with the larger model
+    env_name = 'MiniGrid-NRoomBanditsSmallBernoulli-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 100,
+                'dict_obs': True,
+                'randomize': True,
+            },
+            'config': {
+                'reward_scale': 1,
+                'prob': 1-(i/num_envs)*0.5,
+                'shuffle_goals_on_reset': False,
+                'include_reward_permutation': False,
+            }
+        } for i in range(num_envs)],
+    }
+    params.add_change('exp-011', {
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Try a smaller range of probabilities
+    env_config = {
+        'env_configs': [{
+            'config': {
+                'prob': 1-(i/num_envs)*0.8,
+            }
+        } for i in range(num_envs)],
+    }
+    params.add_change('exp-012', {
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    env_name = 'MiniGrid-BanditsFetch-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-013', {
+        **params['exp-012'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    env_name = 'MiniGrid-BanditsFetch-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'reward_incorrect': 0,
+                'num_objs': 2,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-014', {
+        **params['exp-012'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
 
     return params
 
@@ -361,6 +476,33 @@ class PPOTrainer2(PPOTrainer):
             tqdm.write(f"Step {self._steps:,}/{self.num_steps:,} \t Remaining: {remaining_hours:02d}:{remaining_minutes:02d}:{remaining_seconds:02d}")
 
             yield
+
+
+def test_episode(agent, env, i=0):
+    results = {}
+    agent.reset()
+    obs = env.reset()
+    done = np.array([False] * env.num_envs)
+    agent.observe(obs, testing=True)
+
+    print(f'Trial {i}')
+    results['total_reward'] = []
+    results['reward'] = []
+    total_reward = 0
+    for _ in tqdm(itertools.count()):
+        action = agent.act(obs)
+        obs, reward, done, info = env.step(action)
+        agent.observe(obs, reward, done, testing=True)
+
+        total_reward += reward[0]
+        results['total_reward'].append(total_reward)
+        results['reward'].append(reward[0])
+        if done.any():
+            tqdm.write('-'*80)
+            if 'regret' in info[0]:
+                results['regret'] = info[0]['regret']
+            break
+    return results
 
 
 def make_app():
@@ -736,6 +878,178 @@ def make_app():
         trainer.train()
 
     @app.command()
+    def run_impala(max_iterations : int = 200_000_000,
+            results_directory : str = None,
+            checkpoint_frequency: int = 1_000_000,
+            starting_model: Optional[str] = None,
+            wandb : bool = typer.Option(False, '--wandb')):
+        from experiment.experiment import get_experiment_directories
+
+        from rl.utils import get_results_root_directory
+        from rl.agent.impala import ImpalaTrainer
+        from rl.experiments.pathways.models import ModularPolicy5
+        from rl.experiments.training._utils import make_env
+
+        # Directories
+        directories = get_experiment_directories(
+                root_directory = get_results_root_directory(),
+                results_directory = results_directory,
+                experiment_name = 'impala-minigrid-bandits',
+                trial_id = None,
+        )
+
+        # Environment
+        num_envs = 24
+        env_name = 'MiniGrid-NRoomBanditsSmallBernoulli-v0'
+        env_config = [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 100,
+                'dict_obs': True,
+                'randomize': True,
+            },
+            'config': {
+                'reward_scale': 1,
+                'prob': 0.9,
+                'shuffle_goals_on_reset': False,
+                'include_reward_permutation': True,
+            }
+        }] * num_envs
+        env = make_env(**env_config[0])
+        observation_space = env.observation_space
+        action_space = env.action_space
+        assert observation_space is not None
+        assert action_space is not None
+
+        def make_input_config(observation_space, action_space):
+            inputs = {
+                'obs (image)': {
+                    'type': 'ImageInput56',
+                    'config': {
+                        'in_channels': observation_space['obs (image)'].shape[0],
+                        'scale': 1.0 / 255.0,
+                    },
+                },
+                'reward': {
+                    'type': 'ScalarInput',
+                },
+                'action': {
+                    'type': 'DiscreteInput',
+                    'config': {
+                        'input_size': action_space.n
+                    },
+                },
+            }
+            if 'obs (reward_permutation)' in observation_space.keys():
+                inputs['obs (reward_permutation)'] = {
+                    'type': 'LinearInput',
+                    'config': {
+                        'input_size': observation_space['obs (reward_permutation)'].shape[0]
+                    }
+                }
+            return inputs
+        def make_output_config(action_space):
+            outputs = {
+                'state_value': {
+                    'type': 'LinearOutput',
+                    'config': {
+                        'output_size': 1,
+                    }
+                },
+                'action': {
+                    'type': 'LinearOutput',
+                    'config': {
+                        'output_size': action_space.n,
+                    }
+                },
+            }
+            return outputs
+        model = ModularPolicy5(
+            inputs = make_input_config(observation_space, action_space),
+            outputs = make_output_config(action_space),
+            input_size = 512,
+            key_size = 512,
+            value_size = 512,
+            num_heads = 8,
+            ff_size = 1024,
+            recurrence_type = 'RecurrentAttention11',
+            architecture = [3,3],
+        )
+
+        if starting_model:
+            with open(starting_model, 'rb') as f:
+                checkpoint = dill.load(f)
+            if 'exp' in checkpoint.keys():
+                model_state_dict = OrderedDict([
+                        (k.replace('output_modules.value.','output_modules.state_value.'), v*0.9)
+                        for k,v in checkpoint['exp']['agent']['net'].items()
+                ])
+            else:
+                raise NotImplementedError('Starting model file format not supported.')
+            model.load_state_dict(model_state_dict, strict=False)
+
+        def make_buffer_space(observation_space):
+            buffer_obs_space = {
+                'type': 'dict',
+                'data': {
+                    'obs (image)': {
+                        'type': 'box',
+                        'shape': observation_space['obs (image)'].shape,
+                        'dtype': torch.uint8,
+                    },
+                    'reward': {
+                        'type': 'box',
+                        'shape': (1,),
+                        'dtype': torch.float32,
+                    },
+                    'action': {
+                        'type': 'box',
+                        'shape': (),
+                        'dtype': torch.uint8,
+                    },
+                }
+            }
+            if 'obs (reward_permutation)' in observation_space.keys():
+                buffer_obs_space['data']['obs (reward_permutation)'] = {
+                    'type': 'box',
+                    'shape': observation_space['obs (reward_permutation)'].shape,
+                    'dtype': torch.float32,
+                }
+            buffer_act_space = {
+                'type': 'discrete'
+            }
+            return buffer_obs_space, buffer_act_space
+        buffer_obs_space, buffer_act_space = make_buffer_space(observation_space)
+        #optimizer = torch.optim.Adam(model.parameters(), lr=2.5e-4)
+        trainer = ImpalaTrainer(
+            env_configs = env_config,
+            net = model, # type: ignore
+            #optimizer = optimizer,
+            learning_rate=1e-1,
+            lr_scheduler = None,
+            buffer_obs_space=buffer_obs_space,
+            buffer_act_space=buffer_act_space,
+            num_train_loop_workers = 2,
+            num_buffers_per_env = 2,
+            batch_size = 16,
+            discount_factor = 0.99,
+            reward_clip=(-1,1),
+            max_rollout_length = 128,
+            vf_loss_coeff = 0.5*0.5,
+            entropy_loss_coeff = 0.01,
+            max_grad_norm = 0.5,
+            total_steps=max_iterations,
+            ignore_obs = ['obs (mission)','obs (direction)','done'],
+            wandb = {'project': f'IMPALA-minigrid-bandits'} if wandb else None,
+        )
+        trainer.train(
+                results_directory = directories['results'],
+                checkpoint_frequency = checkpoint_frequency,
+        )
+
+    @app.command()
     def checkpoint(filename):
         exp = load_checkpoint(TrainExperiment, filename)
         exp.run()
@@ -782,15 +1096,21 @@ def make_app():
             env_name: str = 'MiniGrid-NRoomBanditsSmall-v0',
             output: Path = None,
             num_trials: int = 10,
+            reward_permutation: bool = False,
             reward_config: Tuple[float,float] = (1, -1),
             reward_scale: float = 1.0,
             prob: float = 0.9):
         import matplotlib
         if output is not None:
             matplotlib.use('Agg')
+        import matplotlib.transforms
         from matplotlib import pyplot as plt
 
+        #episode_stack = 100
+        episode_stack = 5
+
         exp = load_checkpoint(TrainExperiment, checkpoint_filename)
+
         num_steps = exp._steps * exp.exp.agent.num_training_envs
         if env_name == 'MiniGrid-NRoomBanditsSmall-v0':
             env = make_vec_env(
@@ -800,14 +1120,14 @@ def make_app():
                     'minigrid': True,
                     'minigrid_config': {},
                     'meta_config': {
-                        'episode_stack': 100,
+                        'episode_stack': episode_stack,
                         'dict_obs': True,
                         'randomize': False,
                     },
                     'config': {
                         'rewards': reward_config,
                         'shuffle_goals_on_reset': False,
-                        'include_reward_permutation': False,
+                        'include_reward_permutation': reward_permutation,
                     }
                 }]
             )
@@ -819,7 +1139,7 @@ def make_app():
                     'minigrid': True,
                     'minigrid_config': {},
                     'meta_config': {
-                        'episode_stack': 100,
+                        'episode_stack': episode_stack,
                         'dict_obs': True,
                         'randomize': False,
                     },
@@ -827,18 +1147,65 @@ def make_app():
                         'reward_scale': reward_scale,
                         'prob': prob,
                         'shuffle_goals_on_reset': False,
-                        'include_reward_permutation': False,
+                        'include_reward_permutation': reward_permutation,
                     }
                 }]
             )
         else:
             raise ValueError(f'Unknown env_name: {env_name}')
 
+        ##################################################
+        # Bandit algorithms
+        # Test with plain bandit algorithms for comparison
+
+        # UCB
+        if env_name == 'MiniGrid-NRoomBanditsSmall-v0':
+            rewards = reward_config
+            arms = [
+                torch.distributions.Categorical(probs=torch.tensor([1,0])),
+                torch.distributions.Categorical(probs=torch.tensor([0,1])),
+            ]
+        elif env_name == 'MiniGrid-NRoomBanditsSmallBernoulli-v0':
+            rewards = [-reward_scale, reward_scale]
+            arms = [
+                torch.distributions.Categorical(probs=torch.tensor([prob, 1-prob])),
+                torch.distributions.Categorical(probs=torch.tensor([1-prob, prob])),
+            ]
+        mean_return = [ (np.array(rewards) * a.probs.numpy()).sum() for a in arms ]
+        max_return = max(mean_return)
+        mean_regret = max_return - np.array(mean_return).mean()
+
+        regret = []
+        #confidence = 0.05
+        #logd = -np.log(confidence)
+        for _ in tqdm(range(num_trials*100), desc='UCB'):
+            regret.append([])
+            total = [0. for _ in arms]
+            count = [0 for _ in arms]
+
+            for t in range(episode_stack):
+                if min(count) == 0:
+                    action = np.array(count).argmin()
+                else:
+                    action = np.array([
+                        x/n + np.sqrt(2*np.log(t)/n)
+                        for x,n in zip(total,count)
+                    ]).argmax()
+                
+                r = arms[action].sample().item()
+                total[action] += rewards[r]
+                count[action] += 1
+                regret[-1].append(max_return - mean_return[action])
+
+        ##################################################
+        # Test agent
+
         agent = exp.exp.agent
         results = {}
 
         results['total_reward'] = []
         results['reward'] = []
+        results['regret'] = []
         agent = exp.exp.agent
 
         agent.reset()
@@ -852,41 +1219,78 @@ def make_app():
             total_reward = 0
             for _ in tqdm(itertools.count()):
                 action = agent.act(obs)
-                obs, reward, done, _ = env.step(action)
+                obs, reward, done, info = env.step(action)
                 agent.observe(obs, reward, done, testing=True)
 
                 total_reward += reward[0]
                 results['total_reward'][-1].append(total_reward)
                 results['reward'][-1].append(reward[0])
                 #print(f'{len(results["total_reward"][-1])} {action} {reward} {total_reward}')
-                if obs['done'].any():
-                    tqdm.write(str(env.envs[0].reward_permutation)) # type: ignore
-                    tqdm.write('ep done')
+                #if obs['done'].any():
+                #    tqdm.write(str(env.envs[0].reward_permutation)) # type: ignore
+                #    tqdm.write('ep done')
                 if done.any():
                     tqdm.write('-'*80)
+                    if 'regret' in info[0]:
+                        results['regret'].append(info[0]['regret'])
                     break
+        #ctx = mp.get_context('fork')
+        #with ctx.Pool(2) as pool:
+        #    results = pool.starmap(test_episode, zip([agent]*2, [env]*2, range(2)))
+        #breakpoint()
 
-        data = [[],[]]
-        for i in range(num_trials):
-            r = np.array(results['reward'][i])
-            nzr = r[r.nonzero()]
-            halfway_index = len(nzr)//2
-            mean_r_1 = np.mean(nzr[:halfway_index])
-            mean_r_2 = np.mean(nzr[halfway_index:])
-            if not np.isfinite(mean_r_1) or not np.isfinite(mean_r_2):
-                breakpoint()
-                continue
-            data[0].append(mean_r_1)
-            data[1].append(mean_r_2)
-        plt.boxplot(data, labels=['1st half','2nd half'])
-        plt.ylabel('Average Rewards')
+        ##################################################
+        # Plot
+
+        ## Boxplot
+        #data = [[],[]]
+        #for i in range(num_trials):
+        #    r = np.array(results['reward'][i])
+        #    nzr = r[r.nonzero()]
+        #    halfway_index = len(nzr)//2
+        #    mean_r_1 = np.mean(nzr[:halfway_index])
+        #    mean_r_2 = np.mean(nzr[halfway_index:])
+        #    if not np.isfinite(mean_r_1) or not np.isfinite(mean_r_2):
+        #        breakpoint()
+        #        continue
+        #    data[0].append(mean_r_1)
+        #    data[1].append(mean_r_2)
+        #plt.boxplot(data, labels=['1st half','2nd half'])
+        #plt.ylabel('Average Rewards')
+        #rp = env.envs[0].reward_permutation # type: ignore
+        #plt.title(f'{num_trials} Trials on {str(rp)} after {num_steps:,} steps', wrap=True)
+        #if output is not None:
+        #    plt.savefig(output)
+        #    print(f'Saved to {os.path.abspath(output)}')
+        #else:
+        #    plt.show()
+
+        # Regret
+        ucb_regret = np.array(regret).mean(0)
+        agent_regret = np.array(results['regret']).mean(0)
+
+        fig, ax = plt.subplots(1,1)
+        line1, = ax.plot(range(len(ucb_regret)), ucb_regret.cumsum(), label='UCB')
+        line2, = ax.plot(range(len(agent_regret)), agent_regret.cumsum(), label='agent')
+        ax.plot([0, len(ucb_regret)-1], [mean_regret, (len(ucb_regret)+1)*mean_regret], 'k--', label='uniform random')
+        # Don't scale with the uniform random plot (https://python.tutorialink.com/make-matplotlib-autoscaling-ignore-some-of-the-plots/)
+        ax.dataLim = matplotlib.transforms.Bbox.unit()
+        ax.dataLim.update_from_data_xy(np.vstack(line1.get_data()).T, ignore=False)
+        ax.dataLim.update_from_data_xy(np.vstack(line2.get_data()).T, ignore=False)
+        ax.autoscale_view()
+
+        ax.grid()
+        ax.set_ylabel('Regret')
+        ax.set_xlabel('Steps')
+        ax.legend()
         rp = env.envs[0].reward_permutation # type: ignore
-        plt.title(f'{num_trials} Trials on {str(rp)} after {num_steps:,} steps', wrap=True)
+        ax.set_title(f'Evaluation on {str(rp)} after {num_steps:,} steps', wrap=True)
         if output is not None:
-            plt.savefig(output)
+            fig.savefig(output)
             print(f'Saved to {os.path.abspath(output)}')
         else:
-            plt.show()
+            fig.show()
+
         breakpoint()
 
     @app.command()
@@ -937,6 +1341,25 @@ def make_app():
                         'prob': prob,
                         'shuffle_goals_on_reset': False,
                         'include_reward_permutation': False,
+                    }
+                }]
+            )
+        elif env_name == 'MiniGrid-BanditsFetch-v0':
+            env = make_vec_env(
+                env_type = 'gym_sync',
+                env_configs = [{
+                    'env_name': env_name,
+                    'minigrid': True,
+                    'minigrid_config': {},
+                    'meta_config': {
+                        'episode_stack': 1,
+                        'dict_obs': True,
+                        'randomize': False,
+                    },
+                    'config': {
+                        'num_trials': 100,
+                        'num_objs': 2,
+                        'reward_incorrect': 0,
                     }
                 }]
             )
@@ -1130,12 +1553,13 @@ def make_app():
             if video_writer3 is not None:
                 video_writer3.release()
             print(f'Trial {i} total reward: {np.sum(results["reward"][-1])}')
-            breakpoint()
+            #breakpoint()
 
     commands = {
             'run': run,
             'run2': run2,
             'run3': run3,
+            'run_impala': run_impala,
             'checkpoint': checkpoint,
             'plot': plot,
             'test': test,
