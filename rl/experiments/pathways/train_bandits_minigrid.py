@@ -353,6 +353,48 @@ def get_params():
         'env_train': env_config,
     })
 
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'size': 5,
+                'num_trials': 100,
+                'reward_correct': 1,
+                'reward_incorrect': -1,
+                'num_objs': 2,
+                'num_obj_types': 2,
+                'num_obj_colors': 1,
+                'unique_objs': True,
+                'include_reward_permutation': True,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-015', {
+        **params['exp-012'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    env_config = {
+        'env_configs': [{
+            'config': {
+                'include_reward_permutation': False,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add_change('exp-016', {
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
     return params
 
 

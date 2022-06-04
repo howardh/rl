@@ -637,6 +637,14 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
         self.shuffle_goals_on_reset = shuffle_goals_on_reset
         self.include_reward_permutation = include_reward_permutation
 
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+        self.seed(seed)
+
         super().__init__(width=5, height=5)
 
         if include_reward_permutation:
@@ -644,14 +652,6 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
                 **self.observation_space.spaces,
                 'reward_permutation': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.rewards),), dtype=np.float32),
             })
-
-        if seed is None:
-            seed = os.getpid() + int(time.time())
-            thread_id = threading.current_thread().ident
-            if thread_id is not None:
-                seed += thread_id
-            seed = seed % (2**32 - 1)
-        self.np_random.seed(seed)
 
     @property
     def reward_permutation(self):
@@ -724,6 +724,14 @@ class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
         self.shuffle_goals_on_reset = shuffle_goals_on_reset
         self.include_reward_permutation = include_reward_permutation
 
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+        self.seed(seed)
+
         super().__init__(width=5, height=5)
 
         if include_reward_permutation:
@@ -731,14 +739,6 @@ class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
                 **self.observation_space.spaces,
                 'reward_permutation': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
             })
-
-        if seed is None:
-            seed = os.getpid() + int(time.time())
-            thread_id = threading.current_thread().ident
-            if thread_id is not None:
-                seed += thread_id
-            seed = seed % (2**32 - 1)
-        self.np_random.seed(seed)
 
         # Info
         self._expected_return = 0
@@ -839,9 +839,47 @@ class BanditsFetch(gym_minigrid.minigrid.MiniGridEnv):
         num_trials=1,
         reward_correct=1,
         reward_incorrect=-1,
+        num_obj_types=2,
+        num_obj_colors=6,
+        unique_objs=False,
+        include_reward_permutation=False,
         seed=None,
     ):
+        """
+        Args:
+            size (int): Size of the grid
+            num_objs (int): Number of objects in the environment
+            num_trials (int): Number of trials to run with the same set of objects and goal
+            reward_correct (int): Reward for picking up the correct object
+            reward_incorrect (int): Reward for picking up the incorrect object
+            num_obj_types (int): Number of possible object types
+            num_obj_colors (int): Number of possible object colors
+            unique_objs (bool): If True, each object is unique
+            include_reward_permutation (bool): If True, include the reward permutation in the observation
+        """
         self.numObjs = num_objs
+
+        self.num_trials = num_trials
+        self.reward_correct = reward_correct
+        self.reward_incorrect = reward_incorrect
+        self.num_obj_types = num_obj_types
+        self.num_obj_colors = num_obj_colors
+        self.unique_objs = unique_objs
+        self.include_reward_permutation = include_reward_permutation
+
+        self.types = ['key', 'ball']
+        self.colors = gym_minigrid.minigrid.COLOR_NAMES
+
+        self.types = self.types[:self.num_obj_types]
+        self.colors = self.colors[:self.num_obj_colors]
+
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+        self.seed(seed)
 
         super().__init__(
             grid_size=size,
@@ -850,19 +888,14 @@ class BanditsFetch(gym_minigrid.minigrid.MiniGridEnv):
             see_through_walls=True
         )
 
-        self.num_trials = num_trials
-        self.reward_correct = reward_correct
-        self.reward_incorrect = reward_incorrect
         self.trial_count = 0
         self.objects = []
 
-        if seed is None:
-            seed = os.getpid() + int(time.time())
-            thread_id = threading.current_thread().ident
-            if thread_id is not None:
-                seed += thread_id
-            seed = seed % (2**32 - 1)
-        self.np_random.seed(seed)
+        if include_reward_permutation:
+            self.observation_space = gym.spaces.Dict({
+                **self.observation_space.spaces,
+                'reward_permutation': gym.spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.types)*len(self.colors),), dtype=np.float32),
+            })
 
     def _gen_grid(self, width, height):
         self.grid = gym_minigrid.minigrid.Grid(width, height)
@@ -873,14 +906,18 @@ class BanditsFetch(gym_minigrid.minigrid.MiniGridEnv):
         self.grid.vert_wall(0, 0)
         self.grid.vert_wall(width-1, 0)
 
-        types = ['key', 'ball']
+        types = self.types
+        colors = self.colors
+
+        type_color_pairs = [(t,c) for t in types for c in colors]
 
         objs = []
 
         # For each object to be generated
         while len(objs) < self.numObjs:
-            objType = self._rand_elem(types)
-            objColor = self._rand_elem(gym_minigrid.minigrid.COLOR_NAMES)
+            objType, objColor = self._rand_elem(type_color_pairs)
+            if self.unique_objs:
+                type_color_pairs.remove((objType, objColor))
 
             if objType == 'key':
                 obj = gym_minigrid.minigrid.Key(objColor)
@@ -918,6 +955,13 @@ class BanditsFetch(gym_minigrid.minigrid.MiniGridEnv):
             self.mission = 'you must fetch a %s' % descStr
         assert hasattr(self, 'mission')
 
+    def reset(self):
+        obs = super().reset()
+        if self.include_reward_permutation:
+            assert isinstance(obs, dict)
+            obs['reward_permutation'] = self.reward_permutation
+        return obs
+
     def step(self, action):
         obs, reward, done, info = gym_minigrid.minigrid.MiniGridEnv.step(self, action)
 
@@ -934,7 +978,19 @@ class BanditsFetch(gym_minigrid.minigrid.MiniGridEnv):
                 done = True
                 self.trial_count = 0
 
+        if self.include_reward_permutation:
+            assert isinstance(obs, dict)
+            obs['reward_permutation'] = self.reward_permutation
+
         return obs, reward, done, info
+
+    @property
+    def reward_permutation(self):
+        r = [self.reward_incorrect, self.reward_correct]
+        return [
+            r[t == self.targetType and c == self.targetColor]
+            for t in self.types for c in self.colors
+        ]
 
 
 gym_minigrid.register.register(

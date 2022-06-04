@@ -2415,6 +2415,10 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
             x['loss'].backward()
             if self.max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
+            for p in self.net.parameters():
+                if p._grad.isnan().any():
+                    print('NaNs in gradients!')
+                    breakpoint()
             self.optimizer.step()
 
         # Clear data

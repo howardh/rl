@@ -187,6 +187,9 @@ class TrainExperiment(Experiment):
             '_ep_rewards',
         ])
     def load_state_dict(self, state):
+        if 'logger' in state:
+            #self.logger.load_state_dict(state.pop('logger'), wandb_method='copy', init_wandb=True)
+            self.logger.load_state_dict(state.pop('logger'), wandb_method=None)
         default_load_state_dict(self, state)
         self.done = np.array([False] * self._num_train_envs)
         self._ep_len = np.array([0] * self._num_train_envs)
