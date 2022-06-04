@@ -395,6 +395,19 @@ def get_params():
         'env_train': env_config,
     })
 
+    env_config = {
+        'env_configs': [{
+            'config': {
+                'num_obj_types': 1,
+                'num_obj_colors': 2,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add_change('exp-017', {
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
     return params
 
 
@@ -1399,9 +1412,12 @@ def make_app():
                         'randomize': False,
                     },
                     'config': {
+                        'size': 5,
                         'num_trials': 100,
                         'num_objs': 2,
-                        'reward_incorrect': 0,
+                        'num_obj_types': 2,
+                        'num_obj_colors': 1,
+                        'unique_objs': True,
                     }
                 }]
             )
@@ -1595,7 +1611,8 @@ def make_app():
             if video_writer3 is not None:
                 video_writer3.release()
             print(f'Trial {i} total reward: {np.sum(results["reward"][-1])}')
-            #breakpoint()
+            print(env.envs[0].reward_permutation) # type: ignore
+            breakpoint()
 
     commands = {
             'run': run,

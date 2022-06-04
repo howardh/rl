@@ -643,9 +643,8 @@ class NRoomBanditsSmall(gym_minigrid.minigrid.MiniGridEnv):
             if thread_id is not None:
                 seed += thread_id
             seed = seed % (2**32 - 1)
-        self.seed(seed)
 
-        super().__init__(width=5, height=5)
+        super().__init__(width=5, height=5, seed=seed)
 
         if include_reward_permutation:
             self.observation_space = gym.spaces.Dict({
@@ -730,9 +729,8 @@ class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
             if thread_id is not None:
                 seed += thread_id
             seed = seed % (2**32 - 1)
-        self.seed(seed)
 
-        super().__init__(width=5, height=5)
+        super().__init__(width=5, height=5, seed=seed)
 
         if include_reward_permutation:
             self.observation_space = gym.spaces.Dict({
@@ -879,13 +877,13 @@ class BanditsFetch(gym_minigrid.minigrid.MiniGridEnv):
             if thread_id is not None:
                 seed += thread_id
             seed = seed % (2**32 - 1)
-        self.seed(seed)
 
         super().__init__(
             grid_size=size,
             max_steps=5*size**2*num_trials,
             # Set this to True for maximum speed
-            see_through_walls=True
+            see_through_walls=True,
+            seed=seed,
         )
 
         self.trial_count = 0
