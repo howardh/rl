@@ -378,6 +378,65 @@ class RecurrentAttention12(RecurrentAttention11):
         }
 
 
+class RecurrentAttention13(RecurrentAttention3):
+    """ Same as RecurrentAttention12, but without the weight sharing. This is meant to be used with ModularPolicy4.
+    Added some ReLUs as well so we don't have two consecutive linear layers.
+    """
+    def __init__(self, input_size, key_size, value_size, num_heads, ff_size):
+        super(RecurrentAttention3, self).__init__()
+        self.fc_key = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, key_size),
+                torch.nn.ReLU(),
+        )
+        self.fc_value = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, value_size),
+                torch.nn.ReLU(),
+        )
+        self.fc_output = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size*2, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, input_size),
+                torch.nn.ReLU(),
+        )
+        self.fc_gate = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                torch.nn.Linear(input_size*2, ff_size),
+                torch.nn.ReLU(),
+                torch.nn.Linear(ff_size, 1),
+                torch.nn.Sigmoid(),
+        )
+        self.attention = torch.nn.MultiheadAttention(key_size, num_heads=num_heads, batch_first=False)
+        self.initial_hidden_state = torch.nn.Parameter(
+                torch.rand([input_size], requires_grad=True))
+    def forward(self,
+            x: TensorType['batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float],
+        ):
+        #initial_x: TensorType['batch_size', 'value_size',float] = self.initial_hidden_state.expand(x.size(0), -1)
+        query = x.unsqueeze(0) # (1, batch_size, key_size)
+        attn_output, attn_output_weights = self.attention(query, input_keys, input_values) # (1, batch_size, value_size)
+        output_keys = self.fc_key(attn_output) # (1, batch_size, key_size)
+        output_values = self.fc_value(attn_output) # (1, batch_size, value_size)
+        output_x = self.fc_output(torch.cat([attn_output.squeeze(0),x], dim=1)) # (batch_size, value_size)
+        output_gate = self.fc_gate(torch.cat([attn_output.squeeze(0),x], dim=1)) # (batch_size)
+        return { # seq_len = number of inputs receives
+            'attn_output': attn_output.squeeze(0), # (batch_size, value_size)
+            'attn_output_weights': attn_output_weights.squeeze(1), # (batch_size, seq_len)
+            'output_gate': output_gate.squeeze(1), # (batch_size)
+            'key': output_keys.squeeze(0).tanh(), # (batch_size, key_size)
+            'value': output_values.squeeze(0).tanh(), # (batch_size, value_size)
+            'x': output_gate*output_x.tanh() + (1-output_gate)*self.initial_hidden_state.tanh() # (batch_size, value_size)
+        }
+
+
 # Batched stuff
 
 class NonBatchMultiHeadAttention(torch.nn.Module):
@@ -541,6 +600,116 @@ class BatchMultiHeadAttention(torch.nn.Module):
         attn_output = attn_output.squeeze(3)
 
         return attn_output.transpose(0,1)
+
+
+class BatchMultiHeadAttentionEinsum(torch.nn.Module):
+    def __init__(self, modules: List[torch.nn.MultiheadAttention], key_size, num_heads):
+        super(BatchMultiHeadAttentionEinsum, self).__init__()
+
+        self.num_heads = num_heads
+        self.key_size = key_size
+
+        self.attentions = torch.nn.ModuleList(modules)
+
+    def forward(self, query, key, value, batched=False):
+        if batched:
+            return self.forward_batch(query, key, value)
+        else:
+            return self.forward_unbatched(query, key, value)
+
+    def forward_unbatched(self, query, key, value):
+        """ Feed the same inputs to all MHA modules """
+        #nbmha = NonBatchMultiHeadAttention(self.attentions, self.key_size, self.num_heads)
+        #y = nbmha(query, key, value, batched=False)
+
+        num_heads = self.num_heads
+        embed_dim = self.key_size
+        head_dim = embed_dim // num_heads
+        batch_size, embed_dim = query.shape
+        num_inputs, _, _ = key.shape
+
+        num_modules = len(self.attentions)
+
+        w_q, w_k, w_v = default_collate([a.in_proj_weight.chunk(3) for a in self.attentions]) # type: ignore
+        b_q, b_k, b_v = default_collate([a.in_proj_bias.chunk(3) for a in self.attentions]) # type: ignore
+
+        q = query.unsqueeze(0) @ w_q.transpose(-2,-1) + b_q.unsqueeze(1)
+        k = torch.einsum('ijk,lmk -> lijm', key, w_k) + b_k.unsqueeze(1).unsqueeze(2)
+        v = torch.einsum('ijk,lmk -> lijm', value, w_v) + b_v.unsqueeze(1).unsqueeze(2)
+
+        #(torch.cat([q for q,k,v in y], dim=0) - q).abs() < 1e-7
+        #(torch.stack([k for q,k,v in y], dim=0) - k).abs() < 1e-7
+        #(torch.stack([v for q,k,v in y], dim=0) - v).abs() < 1e-7
+
+        q = q.contiguous().view(1, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
+        k = k.transpose(0,1).contiguous().view(num_inputs, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
+        v = v.transpose(0,1).contiguous().view(num_inputs, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
+
+        # (torch.cat([q for q,k,v in y], dim=0) - q).abs() < 1e-7
+
+        # (torch.cat([q for q,k,v in y], dim=1) - q).abs() < 1e-7
+        # pp (torch.cat([q for q,k,v in y], dim=1) - q[0,1,:]).abs() < 1e-7
+
+        q = q / math.sqrt(head_dim)
+        attn_output_weights = torch.bmm(q, k.transpose(-2, -1))
+        #attn_output_weights = torch.einsum('nij,nkj -> nik', q, k)
+        #breakpoint()
+        attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
+        attn_output = torch.bmm(attn_output_weights, v)
+
+        # (torch.cat(y,dim=0) - attn_output).abs() < 1e-6
+
+        attn_output = attn_output.transpose(0, 1).contiguous().view(num_modules, batch_size, embed_dim)
+        # (torch.cat(y,dim=1) - attn_output.squeeze()).abs() < 1e-6
+        out_proj_weight = default_collate([a.out_proj.weight for a in self.attentions]) # type: ignore
+        out_proj_bias = default_collate([a.out_proj.bias for a in self.attentions]) # type: ignore
+        attn_output = torch.einsum ('nbi,nji-> nbj', attn_output, out_proj_weight) + out_proj_bias.unsqueeze(1)
+
+        attn_output = attn_output.unsqueeze(1)
+
+        return attn_output
+
+    def forward_batch(self, query, key, value):
+        num_heads = self.num_heads
+        embed_dim = self.key_size
+        head_dim = embed_dim // num_heads
+        num_modules, batch_size, embed_dim = query.shape
+        num_modules, num_inputs, batch_size, embed_dim = key.shape
+
+        assert num_modules == len(self.attentions)
+
+        w_q, w_k, w_v = default_collate([a.in_proj_weight.chunk(3) for a in self.attentions]) # type: ignore
+        b_q, b_k, b_v = default_collate([a.in_proj_bias.chunk(3) for a in self.attentions]) # type: ignore
+
+        q = query @ w_q.transpose(-2,-1) + b_q.unsqueeze(1)
+        k = torch.einsum('lijk,lmk -> lijm', key, w_k) + b_k.unsqueeze(1).unsqueeze(2)
+        v = torch.einsum('lijk,lmk -> lijm', value, w_v) + b_v.unsqueeze(1).unsqueeze(2)
+
+        q = q.contiguous().view(1, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
+        k = k.transpose(0,1).contiguous().view(num_inputs, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
+        v = v.transpose(0,1).contiguous().view(num_inputs, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
+
+        # (torch.cat([q for q,k,v in y], dim=0) - q).abs() < 1e-7
+
+        # (torch.cat([q for q,k,v in y], dim=1) - q).abs() < 1e-7
+        # pp (torch.cat([q for q,k,v in y], dim=1) - q[0,1,:]).abs() < 1e-7
+
+        q = q / math.sqrt(head_dim)
+        attn_output_weights = torch.bmm(q, k.transpose(-2, -1))
+        attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
+        attn_output = torch.bmm(attn_output_weights, v)
+
+        # (torch.cat(y,dim=0) - attn_output).abs() < 1e-6
+
+        attn_output = attn_output.transpose(0, 1).contiguous().view(num_modules, batch_size, embed_dim)
+        # (torch.cat(y,dim=1) - attn_output.squeeze()).abs() < 1e-6
+        out_proj_weight = default_collate([a.out_proj.weight for a in self.attentions]) # type: ignore
+        out_proj_bias = default_collate([a.out_proj.bias for a in self.attentions]) # type: ignore
+        attn_output = torch.einsum ('nbi,nji-> nbj', attn_output, out_proj_weight) + out_proj_bias.unsqueeze(1)
+
+        attn_output = attn_output.unsqueeze(1)
+
+        return attn_output
 
 
 class NonBatchLinear(torch.nn.Module):
@@ -1321,7 +1490,7 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
                 architecture = architecture,
         )
 
-        self._cuda_streams = self._init_cuda_streams()
+        #self._cuda_streams = self._init_cuda_streams()
 
         # Store the attention for analysis purposes
         self.last_attention = None
@@ -1381,6 +1550,7 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
                     RecurrentAttention7,
                     RecurrentAttention8,
                     RecurrentAttention9,
+                    RecurrentAttention13,
                 ]
         }
 
@@ -1416,8 +1586,8 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
     def forward(self,
             inputs: Dict[str,TensorType['batch_size','observation_shape']],
             hidden: List[TensorType['num_blocks','batch_size','hidden_size']]):
-        #return self.forward_cpu(inputs, hidden)
-        return self.forward_cuda(inputs, hidden)
+        return self.forward_cpu(inputs, hidden)
+        #return self.forward_cuda(inputs, hidden)
 
     def forward_cpu(self,
             inputs: Dict[str,TensorType['batch_size','observation_shape']],
@@ -1429,6 +1599,7 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
         self.last_output_attention = []
 
         # Compute input to core module
+        input_labels = []
         input_keys = []
         input_vals = []
         for k,x in inputs.items():
@@ -1437,17 +1608,18 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
             y = self.input_modules[k](x)
             input_keys.append(y['key'].unsqueeze(0))
             input_vals.append(y['value'].unsqueeze(0))
+            input_labels.append(k)
 
+        # Core module computation
         keys = torch.cat([
             *input_keys,
-            hidden[0]
+            hidden[0],
         ], dim=0)
         values = torch.cat([
             *input_vals,
-            hidden[1]
+            hidden[1],
         ], dim=0)
 
-        # Core module computation
         new_keys = hidden[0]
         new_values = hidden[1]
         internal_state : List[TensorType] = hidden[2:]
@@ -1460,9 +1632,11 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
             ]
             layer_output = default_collate(layer_output)
             new_internal_state.append(layer_output['x'])
-        if layer_output is not None: # Save output from last layer
+            #if layer_output is not None: # Save output from last layer
             new_keys = layer_output['key']
             new_values = layer_output['value']
+            keys = new_keys
+            values = new_values
             self.last_attention.append([h.cpu().detach() for h in layer_output['attn_output_weights']])
             self.last_ff_gating.append(layer_output['output_gate'].cpu().detach())
 
@@ -1485,7 +1659,11 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
 
         return {
             **output,
-            'hidden': (new_keys, new_values, *new_internal_state)
+            'hidden': (new_keys, new_values, *new_internal_state),
+            'misc': {
+                'core_output': layer_output,
+                'input_labels': input_labels,
+            }
         }
 
     def forward_cuda(self,
@@ -1501,7 +1679,7 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
         # Compute input to core module
         input_keys = []
         input_vals = []
-        streams = iter(self._cuda_streams)
+        streams = iter(self._cuda_streams) # type: ignore
         for k,x in inputs.items():
             if k not in self.input_modules:
                 continue
@@ -1553,7 +1731,7 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
             new_values
         ], dim=0)
 
-        for (k,v),s in zip(self.output_modules.items(), self._cuda_streams):
+        for (k,v),s in zip(self.output_modules.items(), self._cuda_streams): # type: ignore
             with torch.cuda.stream(s):
                 y = v(keys, values)
                 output[k] = y['output']
@@ -1716,11 +1894,11 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
 
         keys = torch.cat([
             *input_keys,
-            hidden[0]
+            hidden[0],
         ], dim=0)
         values = torch.cat([
             *input_vals,
-            hidden[1]
+            hidden[1],
         ], dim=0)
 
         # Core module computation
@@ -2075,6 +2253,237 @@ if __name__ == '__main__':
         #bmha.forward_batch(bl_q(x), bl_k(x), bl_v(x))
         pass
 
+    def benchmark_functorch():
+        import functorch
+        import timeit
+
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+            input_size = 512
+            key_size = 512
+            value_size = 512
+            num_heads = 8
+            ff_size = 1024
+            seq_len = 7
+            batch_size = 8
+            num_modules = 3
+            num_iterations = 1_000
+        else:
+            device = torch.device('cpu')
+            input_size = 32
+            key_size = 32
+            value_size = 32
+            num_heads = 4
+            ff_size = 64
+            seq_len = 7
+            batch_size = 8
+            num_modules = 3
+            num_iterations = 10
+
+        models = [RecurrentAttention9(
+                input_size=input_size,
+                key_size=key_size,
+                value_size=value_size,
+                num_heads=num_heads,
+                ff_size=ff_size,
+        ).to(device) for _ in range(num_modules)]
+
+        q = torch.randn([batch_size, input_size], device=device)
+        k = torch.randn([seq_len, batch_size, input_size], device=device)
+        v = torch.randn([seq_len, batch_size, input_size], device=device)
+
+        fmodel, params, buffers = functorch.combine_state_for_ensemble(models)
+
+        output = functorch.vmap(fmodel, (0, 0, None, None, None))(params, buffers, q, k, v) # type: ignore
+
+        for i in range(num_modules):
+            for key in output.keys():
+                assert torch.isclose(
+                    models[i](q,k,v)[key], output[key][i,...],
+                    atol=1e-7,
+                ).all()
+
+        def run_functorch():
+            output = functorch.vmap(fmodel, (0, 0, None, None, None))(params, buffers, q, k, v) # type: ignore
+            return output
+
+        def run_loop():
+            output = default_collate([
+                model(q,k,v) for model in models
+            ])
+            return output
+
+        def run_functorch_backward():
+            func = lambda p: functorch.vmap(fmodel, (0, 0, None, None, None))(p, buffers, q, k, v)['value'].sum() # type: ignore
+            g = functorch.grad(func)(params)
+            return g
+
+        def run_loop_backward():
+            output = default_collate([
+                model(q,k,v) for model in models
+            ])
+            output['value'].sum().backward()
+
+        output_functorch = run_functorch()
+        output_loop = run_loop()
+        for key in output_functorch.keys():
+            assert torch.isclose(
+                output_functorch[key], output_loop[key],
+                atol=1e-7,
+            ).all()
+
+        grad_functorch = run_functorch_backward()
+        run_loop_backward()
+        for i in range(num_modules):
+            for p,g in zip(models[i].parameters(), grad_functorch):
+                if p._grad is None:
+                    assert (g == 0).all()
+                else:
+                    assert torch.isclose(
+                        p._grad, g[i,...],
+                        atol=1e-6,
+                    ).all()
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of functorch')
+        total_time = timeit.Timer(run_functorch).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of loop')
+        total_time = timeit.Timer(run_loop).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of functorch backward')
+        total_time = timeit.Timer(run_functorch_backward).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of loop backward')
+        total_time = timeit.Timer(run_loop_backward).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        breakpoint()
+
+        pass
+
+    def benchmark_functorch_mha():
+        import functorch
+        import timeit
+
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+            embed_dim = 512
+            num_heads = 8
+            seq_len = 7
+            batch_size = 8
+            num_modules = 3
+            num_iterations = 1_000
+        else:
+            device = torch.device('cpu')
+            embed_dim = 32
+            num_heads = 4
+            seq_len = 7
+            batch_size = 8
+            num_modules = 3
+            num_iterations = 10
+
+        models = [torch.nn.MultiheadAttention(
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+        ).to(device) for _ in range(num_modules)]
+
+        q = torch.randn([1, batch_size, embed_dim], device=device)
+        k = torch.randn([seq_len, batch_size, embed_dim], device=device)
+        v = torch.randn([seq_len, batch_size, embed_dim], device=device)
+
+        fmodel, params, buffers = functorch.combine_state_for_ensemble(models)
+
+        def run_functorch():
+            output = functorch.vmap(fmodel, (0, 0, None, None, None))(params, buffers, q, k, v) # type: ignore
+            return output
+
+        def run_loop():
+            output = default_collate([
+                model(q,k,v) for model in models
+            ])
+            return output
+
+        def run_functorch_backward():
+            func = lambda p: functorch.vmap(fmodel, (0, 0, None, None, None))(p, buffers, q, k, v)[0].sum() # type: ignore
+            g = functorch.grad(func)(params)
+            return g
+
+        def run_loop_backward():
+            output = default_collate([
+                model(q,k,v) for model in models
+            ])
+            output[0].sum().backward()
+
+        # Check outputs are correct
+        output_functorch = run_functorch()
+        output_loop = run_loop()
+        assert torch.isclose(
+            output_functorch[0], output_loop[0],
+            atol=1e-6,
+        ).all()
+
+        grad_functorch = run_functorch_backward()
+        run_loop_backward()
+        for i in range(num_modules):
+            for p,g in zip(models[i].parameters(), grad_functorch):
+                if p._grad is None:
+                    assert (g == 0).all()
+                else:
+                    assert torch.isclose(
+                        p._grad, g[i,...],
+                        atol=1e-5,
+                    ).all()
+
+        # Test performance
+        print('-'*80)
+        print(f'{num_iterations} iterations of functorch')
+        total_time = timeit.Timer(run_functorch).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of loop')
+        total_time = timeit.Timer(run_loop).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of functorch backward')
+        total_time = timeit.Timer(run_functorch_backward).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        print('-'*80)
+        print(f'{num_iterations} iterations of loop backward')
+        total_time = timeit.Timer(run_loop_backward).timeit(number=num_iterations)
+        print(f'{num_iterations} iterations took {total_time} seconds')
+        print(f'{num_iterations / total_time} iterations per second')
+        print(f'{total_time / num_iterations} seconds per iteration')
+
+        breakpoint()
+
+        pass
+
     #benchmark_mp4()
     #benchmark_mp5()
-    test_batching()
+    #test_batching()
+    #benchmark_functorch()
+    benchmark_functorch_mha()
