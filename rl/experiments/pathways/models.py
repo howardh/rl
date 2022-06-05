@@ -437,13 +437,99 @@ class RecurrentAttention13(RecurrentAttention3):
         }
 
 
+class RecurrentAttention14(RecurrentAttention11):
+    """ """
+    def __init__(self, input_size, key_size, value_size, num_heads, ff_size, num_modules):
+        super(RecurrentAttention11, self).__init__()
+        self.fc_key = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                BatchLinear([
+                    torch.nn.Linear(input_size, ff_size) for _ in range(num_modules)
+                ], default_batch=True),
+                torch.nn.ReLU(),
+                BatchLinear([
+                    torch.nn.Linear(ff_size, key_size) for _ in range(num_modules)
+                ], default_batch=True),
+                torch.nn.ReLU(),
+        )
+        self.fc_value = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                BatchLinear([
+                    torch.nn.Linear(input_size, ff_size) for _ in range(num_modules)
+                ], default_batch=True),
+                torch.nn.ReLU(),
+                BatchLinear([
+                    torch.nn.Linear(ff_size, value_size) for _ in range(num_modules)
+                ], default_batch=True),
+                torch.nn.ReLU(),
+        )
+        self.fc_output = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                BatchLinear([
+                    torch.nn.Linear(input_size*2, ff_size) for _ in range(num_modules)
+                ], default_batch=True),
+                torch.nn.ReLU(),
+                BatchLinear([
+                    torch.nn.Linear(ff_size, input_size) for _ in range(num_modules)
+                ], default_batch=True),
+                torch.nn.ReLU(),
+        )
+        self.fc_gate = torch.nn.Sequential(
+                torch.nn.ReLU(),
+                BatchLinear([
+                    torch.nn.Linear(input_size*2, ff_size) for _ in range(num_modules)
+                ], default_batch=True),
+                torch.nn.ReLU(),
+                BatchLinear([
+                    torch.nn.Linear(ff_size, 1) for _ in range(num_modules)
+                ], default_batch=True),
+                torch.nn.Sigmoid(),
+        )
+        self.attention = BatchMultiHeadAttentionEinsum([
+            torch.nn.MultiheadAttention(key_size, num_heads=num_heads, batch_first=False)
+            for _ in range(num_modules)
+        ], key_size=key_size, num_heads=num_heads, default_batch=True)
+        #self.attention = NonBatchMultiHeadAttention([
+        #    torch.nn.MultiheadAttention(key_size, num_heads=num_heads, batch_first=False)
+        #    for _ in range(num_modules)
+        #], key_size=key_size, num_heads=num_heads, default_batch=True)
+    def forward(self,
+            x: TensorType['num_blocks','batch_size','input_size',float],
+            input_keys: TensorType['seq_len','batch_size','key_size',float],
+            input_values: TensorType['seq_len','batch_size','value_size',float],
+            initial_x: TensorType['num_blocks','input_size',float],
+        ):
+        num_modules = x.size(0)
+        query = x # (num_blocks, batch_size, input_size)
+        attn_output, attn_output_weights = self.attention(
+                query, 
+                input_keys.expand([num_modules, *input_keys.shape]),
+                input_values.expand([num_modules, *input_values.shape])
+        ) # (num_blocks, 1, batch_size, value_size), (num_modules, batch_size, 1, seq_len) -- Extra size 1 dimension is the number of queries. We only provide 1 query per module, so it's size 1.
+        attn_output = attn_output.squeeze(1) # (num_blocks, batch_size, value_size)
+        attn_output_weights = attn_output_weights.squeeze(2) # (num_blocks, batch_size, seq_len)
+        output_keys = self.fc_key(attn_output) # (num_blocks, batch_size, key_size)
+        output_values = self.fc_value(attn_output) # (num_blocks, batch_size, value_size)
+        output_x = self.fc_output(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size, value_size)
+        output_gate = self.fc_gate(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size)
+        return { # seq_len = number of inputs receives
+            'attn_output': attn_output, # (num_blocks, batch_size, value_size)
+            'attn_output_weights': attn_output_weights.permute(1,0,2), # (num_blocks, batch_size, seq_len)
+            'output_gate': output_gate.squeeze(2), # (num_blocks, batch_size)
+            'key': output_keys, # (num_blocks, batch_size, key_size)
+            'value': output_values.tanh(), # (num_blocks, batch_size, value_size)
+            'x': output_gate*output_x + (1-output_gate)*initial_x # (num_blocks, batch_size, value_size)
+        }
+
+
 # Batched stuff
 
 class NonBatchMultiHeadAttention(torch.nn.Module):
-    def __init__(self, modules, key_size, num_heads):
+    def __init__(self, modules, key_size, num_heads, default_batch=False):
         super(NonBatchMultiHeadAttention, self).__init__()
         self.num_heads = num_heads
         self.key_size = key_size
+        self.default_batch = default_batch
         self.attentions = torch.nn.ModuleList(modules)
 
     def forward_module(self, query, key, value, attention):
@@ -452,6 +538,7 @@ class NonBatchMultiHeadAttention(torch.nn.Module):
         num_heads = self.num_heads
         embed_dim = self.key_size
         head_dim = embed_dim // num_heads
+        num_inputs, batch_size, _ = key.shape
 
         w_q, w_k, w_v = attention.in_proj_weight.chunk(3)
         b_q, b_k, b_v = attention.in_proj_bias.chunk(3)
@@ -473,37 +560,48 @@ class NonBatchMultiHeadAttention(torch.nn.Module):
         attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
         attn_output = attn_output @ attention.out_proj.weight.transpose(-2,-1) + attention.out_proj.bias
 
-        return attn_output
+        return attn_output, attn_output_weights.view(batch_size, num_heads, 1, num_inputs).mean(1)
 
-    def forward(self, query, key, value, batched=False):
+    def forward(self, query, key, value, batched=None):
+        if batched is None:
+            batched = self.default_batch
         if batched:
             return self.forward_batch(query, key, value)
         else:
             return self.forward_unbatched(query, key, value)
 
     def forward_unbatched(self, query, key, value):
-        return torch.stack([
-            self.forward_module(query, key, value, attention)
-            for attention in self.attentions
-        ])
+        return tuple(
+            torch.stack(o)
+            for o in zip(*[
+                self.forward_module(query, key, value, attention)
+                for attention in self.attentions
+            ])
+        )
 
     def forward_batch(self, query, key, value):
-        return torch.stack([
-            self.forward_module(q, k, v, a)
-            for q, k, v, a in zip(query, key, value, self.attentions)
-        ])
+        return tuple(
+            torch.stack(o)
+            for o in zip(*[
+                self.forward_module(q, k, v, a)
+                for q, k, v, a in zip(query, key, value, self.attentions)
+            ])
+        )
 
 
 class BatchMultiHeadAttention(torch.nn.Module):
-    def __init__(self, modules: List[torch.nn.MultiheadAttention], key_size, num_heads):
+    def __init__(self, modules: List[torch.nn.MultiheadAttention], key_size, num_heads, default_batch=False):
         super(BatchMultiHeadAttention, self).__init__()
 
         self.num_heads = num_heads
         self.key_size = key_size
+        self.default_batch = default_batch
 
         self.attentions = torch.nn.ModuleList(modules)
 
-    def forward(self, query, key, value, batched=False):
+    def forward(self, query, key, value, batched=None):
+        if batched is None:
+            batched = self.default_batch
         if batched:
             return self.forward_batch(query, key, value)
         else:
@@ -557,7 +655,7 @@ class BatchMultiHeadAttention(torch.nn.Module):
 
         attn_output = attn_output.squeeze(3).transpose(0,1)
 
-        return attn_output
+        return attn_output, attn_output_weights.view(num_modules, batch_size, num_heads, 1, num_inputs).mean(2)
 
     def forward_batch(self, query, key, value):
         num_heads = self.num_heads
@@ -599,19 +697,36 @@ class BatchMultiHeadAttention(torch.nn.Module):
 
         attn_output = attn_output.squeeze(3)
 
-        return attn_output.transpose(0,1)
+        return attn_output.transpose(0,1), attn_output_weights.view(num_modules, batch_size, num_heads, 1, num_inputs).mean(2)
 
 
 class BatchMultiHeadAttentionEinsum(torch.nn.Module):
-    def __init__(self, modules: List[torch.nn.MultiheadAttention], key_size, num_heads):
+    def __init__(self, modules: List[torch.nn.MultiheadAttention], key_size, num_heads, default_batch=False):
         super(BatchMultiHeadAttentionEinsum, self).__init__()
 
+        self.num_modules = len(modules)
         self.num_heads = num_heads
         self.key_size = key_size
+        self.default_batch = default_batch
 
-        self.attentions = torch.nn.ModuleList(modules)
+        self.in_weight = torch.nn.ParameterList([
+            torch.nn.Parameter(x.detach())
+            for x in default_collate([a.in_proj_weight.chunk(3) for a in modules])
+        ])
+        self.in_bias = torch.nn.ParameterList([
+            torch.nn.Parameter(x.detach())
+            for x in default_collate([a.in_proj_bias.chunk(3) for a in modules])
+        ])
+        self.out_weight = torch.nn.Parameter(
+            default_collate([a.out_proj.weight for a in modules]).detach()
+        )
+        self.out_bias = torch.nn.Parameter(
+            default_collate([a.out_proj.bias for a in modules]).unsqueeze(1).detach()
+        )
 
-    def forward(self, query, key, value, batched=False):
+    def forward(self, query, key, value, batched=None):
+        if batched is None:
+            batched = self.default_batch
         if batched:
             return self.forward_batch(query, key, value)
         else:
@@ -628,46 +743,30 @@ class BatchMultiHeadAttentionEinsum(torch.nn.Module):
         batch_size, embed_dim = query.shape
         num_inputs, _, _ = key.shape
 
-        num_modules = len(self.attentions)
+        num_modules = self.num_modules
 
-        w_q, w_k, w_v = default_collate([a.in_proj_weight.chunk(3) for a in self.attentions]) # type: ignore
-        b_q, b_k, b_v = default_collate([a.in_proj_bias.chunk(3) for a in self.attentions]) # type: ignore
+        w_q, w_k, w_v = self.in_weight
+        b_q, b_k, b_v = self.in_bias
 
         q = query.unsqueeze(0) @ w_q.transpose(-2,-1) + b_q.unsqueeze(1)
         k = torch.einsum('ijk,lmk -> lijm', key, w_k) + b_k.unsqueeze(1).unsqueeze(2)
         v = torch.einsum('ijk,lmk -> lijm', value, w_v) + b_v.unsqueeze(1).unsqueeze(2)
 
-        #(torch.cat([q for q,k,v in y], dim=0) - q).abs() < 1e-7
-        #(torch.stack([k for q,k,v in y], dim=0) - k).abs() < 1e-7
-        #(torch.stack([v for q,k,v in y], dim=0) - v).abs() < 1e-7
-
         q = q.contiguous().view(1, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
         k = k.transpose(0,1).contiguous().view(num_inputs, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
         v = v.transpose(0,1).contiguous().view(num_inputs, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
 
-        # (torch.cat([q for q,k,v in y], dim=0) - q).abs() < 1e-7
-
-        # (torch.cat([q for q,k,v in y], dim=1) - q).abs() < 1e-7
-        # pp (torch.cat([q for q,k,v in y], dim=1) - q[0,1,:]).abs() < 1e-7
-
         q = q / math.sqrt(head_dim)
         attn_output_weights = torch.bmm(q, k.transpose(-2, -1))
-        #attn_output_weights = torch.einsum('nij,nkj -> nik', q, k)
-        #breakpoint()
         attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
         attn_output = torch.bmm(attn_output_weights, v)
 
-        # (torch.cat(y,dim=0) - attn_output).abs() < 1e-6
-
         attn_output = attn_output.transpose(0, 1).contiguous().view(num_modules, batch_size, embed_dim)
-        # (torch.cat(y,dim=1) - attn_output.squeeze()).abs() < 1e-6
-        out_proj_weight = default_collate([a.out_proj.weight for a in self.attentions]) # type: ignore
-        out_proj_bias = default_collate([a.out_proj.bias for a in self.attentions]) # type: ignore
-        attn_output = torch.einsum ('nbi,nji-> nbj', attn_output, out_proj_weight) + out_proj_bias.unsqueeze(1)
+        attn_output = torch.einsum ('nbi,nji-> nbj', attn_output, self.out_weight) + self.out_bias
 
         attn_output = attn_output.unsqueeze(1)
 
-        return attn_output
+        return attn_output, attn_output_weights.view(num_modules, batch_size, num_heads, 1, num_inputs).mean(2)
 
     def forward_batch(self, query, key, value):
         num_heads = self.num_heads
@@ -676,10 +775,10 @@ class BatchMultiHeadAttentionEinsum(torch.nn.Module):
         num_modules, batch_size, embed_dim = query.shape
         num_modules, num_inputs, batch_size, embed_dim = key.shape
 
-        assert num_modules == len(self.attentions)
+        assert num_modules == self.num_modules
 
-        w_q, w_k, w_v = default_collate([a.in_proj_weight.chunk(3) for a in self.attentions]) # type: ignore
-        b_q, b_k, b_v = default_collate([a.in_proj_bias.chunk(3) for a in self.attentions]) # type: ignore
+        w_q, w_k, w_v = self.in_weight
+        b_q, b_k, b_v = self.in_bias
 
         q = query @ w_q.transpose(-2,-1) + b_q.unsqueeze(1)
         k = torch.einsum('lijk,lmk -> lijm', key, w_k) + b_k.unsqueeze(1).unsqueeze(2)
@@ -689,34 +788,25 @@ class BatchMultiHeadAttentionEinsum(torch.nn.Module):
         k = k.transpose(0,1).contiguous().view(num_inputs, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
         v = v.transpose(0,1).contiguous().view(num_inputs, num_modules * batch_size * num_heads, head_dim).transpose(0, 1)
 
-        # (torch.cat([q for q,k,v in y], dim=0) - q).abs() < 1e-7
-
-        # (torch.cat([q for q,k,v in y], dim=1) - q).abs() < 1e-7
-        # pp (torch.cat([q for q,k,v in y], dim=1) - q[0,1,:]).abs() < 1e-7
-
         q = q / math.sqrt(head_dim)
         attn_output_weights = torch.bmm(q, k.transpose(-2, -1))
         attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
         attn_output = torch.bmm(attn_output_weights, v)
 
-        # (torch.cat(y,dim=0) - attn_output).abs() < 1e-6
-
         attn_output = attn_output.transpose(0, 1).contiguous().view(num_modules, batch_size, embed_dim)
-        # (torch.cat(y,dim=1) - attn_output.squeeze()).abs() < 1e-6
-        out_proj_weight = default_collate([a.out_proj.weight for a in self.attentions]) # type: ignore
-        out_proj_bias = default_collate([a.out_proj.bias for a in self.attentions]) # type: ignore
-        attn_output = torch.einsum ('nbi,nji-> nbj', attn_output, out_proj_weight) + out_proj_bias.unsqueeze(1)
+        attn_output = torch.einsum ('nbi,nji-> nbj', attn_output, self.out_weight) + self.out_bias
 
         attn_output = attn_output.unsqueeze(1)
 
-        return attn_output
+        return attn_output, attn_output_weights.view(num_modules, batch_size, num_heads, 1, num_inputs).mean(2)
 
 
 class NonBatchLinear(torch.nn.Module):
-    def __init__(self, modules):
+    def __init__(self, modules, default_batch=False):
         super(NonBatchLinear, self).__init__()
 
-        self.linear = modules
+        self.default_batch = default_batch
+        self.linear = torch.nn.ModuleList(modules)
 
     def forward_module(self, x, module):
         y = module(x)
@@ -729,7 +819,9 @@ class NonBatchLinear(torch.nn.Module):
 
         return output
 
-    def forward(self, x, batched=False):
+    def forward(self, x, batched=None):
+        if batched is None:
+            batched = self.default_batch
         if batched:
             return self.forward_batch(x)
         else:
@@ -749,28 +841,33 @@ class NonBatchLinear(torch.nn.Module):
 
 
 class BatchLinear(torch.nn.Module):
-    def __init__(self, modules: List[torch.nn.Linear]):
+    def __init__(self, modules: List[torch.nn.Linear], default_batch=False):
         super(BatchLinear, self).__init__()
 
-        self.linear = modules
+        self.default_batch = default_batch
 
-    def forward(self, x, batched=False):
+        self.weight = torch.nn.Parameter(
+            torch.stack([l.weight for l in modules]).permute(0,2,1).detach()
+        )
+        self.bias = torch.nn.Parameter(
+            torch.stack([l.bias for l in modules]).unsqueeze(1).detach()
+        )
+
+    def forward(self, x, batched=None):
+        if batched is None:
+            batched = self.default_batch
         if batched:
             return self.forward_batch(x)
         else:
             return self.forward_unbatched(x)
 
     def forward_unbatched(self, x):
-        weight = torch.stack([l.weight for l in self.linear]).permute(0,2,1)
-        bias = torch.stack([l.bias for l in self.linear]).unsqueeze(1)
-        output = x @ weight + bias
+        output = x @ self.weight + self.bias
 
         return output
 
     def forward_batch(self, batched_x):
-        weight = torch.stack([l.weight for l in self.linear]).permute(0,2,1)
-        bias = torch.stack([l.bias for l in self.linear]).unsqueeze(1)
-        output = batched_x @ weight + bias
+        output = batched_x @ self.weight + self.bias
 
         return output
 
@@ -1780,7 +1877,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                 architecture = architecture,
         )
         self.initial_hidden_state = torch.nn.ParameterList([
-            torch.nn.Parameter(torch.rand([size, input_size]))
+            torch.nn.Parameter(torch.zeros([size, input_size]))
             for size in architecture
         ])
 
@@ -1838,6 +1935,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                 for cls in [
                     RecurrentAttention10,
                     RecurrentAttention11,
+                    RecurrentAttention14,
                 ]
         }
 
@@ -1847,10 +1945,16 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
         else:
             raise ValueError('Unknown recurrence type: {}'.format(recurrence_type))
 
-        output = torch.nn.ModuleList([
-            cls(input_size, key_size, value_size, num_heads, ff_size)
-            for _ in architecture
-        ])
+        try: # Some architectures need the number of modules to be specified
+            output = torch.nn.ModuleList([
+                cls(input_size, key_size, value_size, num_heads, ff_size, layer_size)
+                for layer_size in architecture
+            ])
+        except:
+            output = torch.nn.ModuleList([
+                cls(input_size, key_size, value_size, num_heads, ff_size)
+                for _ in architecture
+            ])
         return output
 
     def forward(self,
@@ -2157,14 +2261,14 @@ if __name__ == '__main__':
                 value_size=512,
                 num_heads=8,
                 ff_size=1024,
-                recurrence_type='RecurrentAttention10',
+                recurrence_type='RecurrentAttention14',
                 architecture=[24,24]
         ).to(device)
 
         batch_size = 1024
         rand_input = {
                 'obs (image)': torch.randn(batch_size,3,56,56, device=device),
-                'reward': torch.randn(batch_size, device=device),
+                'reward': torch.randn([batch_size,1], device=device),
                 'action': torch.randint(0, 5, (batch_size,), device=device),
         }
 
@@ -2483,7 +2587,7 @@ if __name__ == '__main__':
         pass
 
     #benchmark_mp4()
-    #benchmark_mp5()
+    benchmark_mp5()
     #test_batching()
     #benchmark_functorch()
-    benchmark_functorch_mha()
+    #benchmark_functorch_mha()

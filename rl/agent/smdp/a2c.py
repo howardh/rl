@@ -1622,7 +1622,8 @@ class A2CAgentVec(DeployableAgent):
         else:
             self.net = net
             self.net.to(device)
-        self.target_net = copy.deepcopy(self.net)
+        #self.target_net = copy.deepcopy(self.net)
+        self.target_net = self.net # TODO: Remove
         if optimizer == 'adam':
             self.optimizer = torch.optim.Adam(self.net.parameters(), lr=learning_rate, eps=1e-5)
         elif optimizer == 'rmsprop':
@@ -1825,7 +1826,7 @@ class A2CAgentVec(DeployableAgent):
             '_steps',
             '_training_steps',
             'net',
-            'target_net',
+            #'target_net',
             'optimizer',
 
             'logger',

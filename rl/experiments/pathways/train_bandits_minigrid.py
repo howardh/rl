@@ -408,6 +408,17 @@ def get_params():
         'env_train': env_config,
     })
 
+    # Independent core modules
+    params.add_change('exp-018', {
+        'agent': {
+            'parameters': {
+                'model_type': 'ModularPolicy5',
+                'recurrence_type': 'RecurrentAttention14',
+                'architecture': [3, 3]
+            },
+        },
+    })
+
     return params
 
 
@@ -1353,7 +1364,11 @@ def make_app():
             env_name: str = 'MiniGrid-NRoomBanditsSmall-v0',
             reward_config: Tuple[float,float] = (1, -1),
             reward_scale: float = 1,
-            prob: float = 0.9):
+            prob: float = 0.9,
+            num_objs: int = 2,
+            num_obj_types: int = 2,
+            num_obj_colors: int = 1,
+            size: int = 5):
         import cv2
         import PIL.Image, PIL.ImageDraw, PIL.ImageFont
         from fonts.ttf import Roboto # type: ignore
@@ -1412,17 +1427,33 @@ def make_app():
                         'randomize': False,
                     },
                     'config': {
-                        'size': 5,
+                        'size': size,
                         'num_trials': 100,
-                        'num_objs': 2,
-                        'num_obj_types': 2,
-                        'num_obj_colors': 1,
+                        'num_objs': num_objs,
+                        'num_obj_types': num_obj_types,
+                        'num_obj_colors': num_obj_colors,
                         'unique_objs': True,
                     }
                 }]
             )
         else:
-            raise ValueError(f'Unknown env_name: {env_name}')
+            try:
+                env = make_vec_env(
+                    env_type = 'gym_sync',
+                    env_configs = [{
+                        'env_name': env_name,
+                        'minigrid': True,
+                        'minigrid_config': {},
+                        'meta_config': {
+                            'episode_stack': 10,
+                            'dict_obs': True,
+                            'randomize': False,
+                        },
+                        'config': {}
+                    }]
+                )
+            except:
+                raise ValueError(f'Unknown env_name: {env_name}')
 
         def concat_images(images, padding=0, direction='h', align=0):
             if direction == 'h':

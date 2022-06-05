@@ -29,12 +29,18 @@ def test_match_module_unbatched(MHAModule):
 
     mha = MHAModule(modules, key_size=key_size, num_heads=num_heads)
 
-    output = mha(input_query, input_key, input_value)
-    expected_output = torch.stack([m(input_query.unsqueeze(0), input_key, input_value)[0] for m in modules])
+    expected_output = torch.stack([
+        m(input_query.unsqueeze(0), input_key, input_value)[0] for m in modules
+    ])
+    expected_output_weights = torch.stack([
+        m(input_query.unsqueeze(0), input_key, input_value)[1] for m in modules
+    ])
+    output, output_weights = mha(input_query, input_key, input_value)
 
     assert output.shape[0] == num_modules
     assert output.shape == expected_output.shape
     assert torch.allclose(output, expected_output, atol=1e-7)
+    assert torch.allclose(output_weights, expected_output_weights, atol=1e-7)
 
 
 @pytest.mark.parametrize("MHAModule", [BatchMultiHeadAttention, NonBatchMultiHeadAttention, BatchMultiHeadAttentionEinsum])
@@ -62,7 +68,7 @@ def test_match_module_batched(MHAModule):
 
     mha = MHAModule(modules, key_size=key_size, num_heads=num_heads)
 
-    output = mha(input_query, input_key, input_value, batched=True)
+    output = mha(input_query, input_key, input_value, batched=True)[0]
     expected_output = torch.stack([
         m(q.unsqueeze(0), k, v)[0]
         for m,q,k,v in zip(modules, input_query, input_key, input_value)
@@ -97,12 +103,13 @@ def test_batch_non_batch_match_one_input():
     nbmha = NonBatchMultiHeadAttention(modules, key_size=key_size, num_heads=num_heads)
     bmha = BatchMultiHeadAttention(modules, key_size=key_size, num_heads=num_heads)
 
-    output = bmha(input_query, input_key, input_value)
-    expected_output = nbmha(input_query, input_key, input_value)
+    output, output_weights = bmha(input_query, input_key, input_value)
+    expected_output, expected_output_weights = nbmha(input_query, input_key, input_value)
 
     assert output.shape[0] == num_modules
     assert output.shape == expected_output.shape
     assert torch.allclose(output, expected_output, atol=1e-7)
+    assert torch.allclose(output_weights, expected_output_weights, atol=1e-7)
 
 
 def test_batch_non_batch_match_multiple_inputs():
@@ -129,12 +136,13 @@ def test_batch_non_batch_match_multiple_inputs():
     nbmha = NonBatchMultiHeadAttention(modules, key_size=key_size, num_heads=num_heads)
     bmha = BatchMultiHeadAttention(modules, key_size=key_size, num_heads=num_heads)
 
-    output = bmha(input_query, input_key, input_value, batched=True)
-    expected_output = nbmha(input_query, input_key, input_value, batched=True)
+    output, output_weights = bmha(input_query, input_key, input_value, batched=True)
+    expected_output, expected_output_weights = nbmha(input_query, input_key, input_value, batched=True)
 
     assert output.shape[0] == num_modules
     assert output.shape == expected_output.shape
     assert torch.allclose(output, expected_output, atol=1e-7)
+    assert torch.allclose(output_weights, expected_output_weights, atol=1e-7)
 
 
 @pytest.mark.skip(reason="Performance benchmark")
