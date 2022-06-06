@@ -514,11 +514,11 @@ class RecurrentAttention14(RecurrentAttention11):
         output_gate = self.fc_gate(torch.cat([attn_output,x], dim=2)) # (num_blocks, batch_size)
         return { # seq_len = number of inputs receives
             'attn_output': attn_output, # (num_blocks, batch_size, value_size)
-            'attn_output_weights': attn_output_weights.permute(1,0,2), # (num_blocks, batch_size, seq_len)
+            'attn_output_weights': attn_output_weights, # (num_blocks, batch_size, seq_len)
             'output_gate': output_gate.squeeze(2), # (num_blocks, batch_size)
-            'key': output_keys, # (num_blocks, batch_size, key_size)
+            'key': output_keys.tanh(), # (num_blocks, batch_size, key_size)
             'value': output_values.tanh(), # (num_blocks, batch_size, value_size)
-            'x': output_gate*output_x + (1-output_gate)*initial_x # (num_blocks, batch_size, value_size)
+            'x': output_gate*output_x.tanh() + (1-output_gate)*initial_x.tanh() # (num_blocks, batch_size, value_size)
         }
 
 
@@ -2059,7 +2059,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
         device = next(self.parameters()).device
         return (
                 torch.zeros([self._architecture[-1], batch_size, self._key_size], device=device), # Key
-                torch.zeros([self._architecture[-1], batch_size, self._key_size], device=device), # Query
+                torch.zeros([self._architecture[-1], batch_size, self._key_size], device=device), # Value
                 *[x.view(-1, 1, self._input_size).expand(-1, batch_size, self._input_size) for x in self.initial_hidden_state], # Internal State
         )
 
