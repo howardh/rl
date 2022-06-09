@@ -419,6 +419,100 @@ def get_params():
         },
     })
 
+    # Try a faster learning rate
+    params.add_change('exp-019', {
+        'agent': {
+            'parameters': {
+                'learning_rate': 1e-3,
+            },
+        },
+    })
+
+    # Decreased rate for value function
+    params.add_change('exp-020', {
+        'agent': {
+            'parameters': {
+                'vf_loss_coeff': 0.05,
+            },
+        },
+    }) # Converges too fast
+
+    # Try a lower learning rate. Lower variance in the updates might also lead to faster learning.
+    params.add_change('exp-021', {
+        'agent': {
+            'parameters': {
+                'learning_rate': 1e-5,
+                'vf_loss_coeff': 0.5,
+            },
+        },
+    })
+
+    # Train on a larger variety of objects
+    env_config = {
+        'env_configs': [{
+            'config': {
+                'num_obj_types': 2,
+                'num_obj_colors': 2,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-022', {
+        'env_test': env_config,
+        'env_train': env_config,
+    }, inherit='exp-018')
+
+    # Train on a larger environment
+    env_config = {
+        'env_configs': [{
+            'config': {
+                'num_obj_types': 2,
+                'num_obj_colors': 2,
+                'num_objs': 2,
+                'size': [5,6,7,8][i%4]
+            }
+        } for i in range(num_envs)],
+    }
+    params.add('exp-023', {
+        'env_test': env_config,
+        'env_train': env_config,
+    }, inherit='exp-018')
+    # Maybe this was too big of a jump
+
+    # Train on larger environments, but fewer of them
+    for j in [6,7,8]:
+        env_config = {
+            'env_configs': [{
+                'config': {
+                    'num_obj_types': 2,
+                    'num_obj_colors': 2,
+                    'num_objs': 2,
+                    'size': list(range(5,j+1))[i%(j+1-5)]
+                }
+            } for i in range(num_envs)],
+        }
+        params.add(f'exp-023-{j}', {
+            'env_test': env_config,
+            'env_train': env_config,
+        }, inherit='exp-018')
+    # It's not learning size 7+ properly, despite the reward plot looking good
+
+    # Train on a single size only
+    for j in [6,7,8]:
+        env_config = {
+            'env_configs': [{
+                'config': {
+                    'num_obj_types': 2,
+                    'num_obj_colors': 2,
+                    'num_objs': 2,
+                    'size': j,
+                }
+            } for _ in range(num_envs)],
+        }
+        params.add(f'exp-024-{j}', {
+            'env_test': env_config,
+            'env_train': env_config,
+        }, inherit='exp-018')
+
     return params
 
 
@@ -1375,6 +1469,7 @@ def make_app():
 
         num_trials = 1
         exp = load_checkpoint(TrainExperiment, checkpoint_filename)
+        desc_fn = lambda: None
         if env_name == 'MiniGrid-NRoomBanditsSmall-v0':
             env = make_vec_env(
                 env_type = 'gym_sync',
@@ -1436,6 +1531,7 @@ def make_app():
                     }
                 }]
             )
+            desc_fn = lambda: f'{env.envs[0].targetColor} {env.envs[0].targetType}' # type: ignore
         else:
             try:
                 env = make_vec_env(
@@ -1607,6 +1703,8 @@ def make_app():
             results['reward'].append([])
             agent.reset()
             obs = env.reset()
+            description = desc_fn()
+            print(description)
             done = np.array([False] * env.num_envs)
             agent.observe(obs, testing=True)
 
@@ -1619,7 +1717,7 @@ def make_app():
                 agent.observe(obs, reward, done, testing=True)
                 results['reward'][-1].append(reward[0])
                 num_frames += 1
-                print(f'{num_frames} {action} {reward}')
+                print(f'{num_frames} {action} {reward} {desc_fn()}')
                 frame = env.envs[0].render(mode=None) # type: ignore
                 video_writer.write(frame[:,:,::-1])
                 video_writer2.write(np.moveaxis(obs['obs (image)'].squeeze(), 0, 2)[:,:,::-1])
@@ -1643,6 +1741,7 @@ def make_app():
                 video_writer3.release()
             print(f'Trial {i} total reward: {np.sum(results["reward"][-1])}')
             print(env.envs[0].reward_permutation) # type: ignore
+            print(description) # type: ignore
             breakpoint()
 
     commands = {
