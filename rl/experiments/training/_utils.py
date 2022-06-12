@@ -775,7 +775,7 @@ class NRoomBanditsSmallBernoulli(gym_minigrid.minigrid.MiniGridEnv):
             self.put_obj(g, 1+i*2, 1)
 
     def _reward(self):
-        curr_cell = self.grid.get(*self.agent_pos) # type: ignore (where is self.grid assigned?)
+        curr_cell = self.grid.get(*self.agent_pos) # type: ignore
         if curr_cell != None and hasattr(curr_cell,'rewards') and hasattr(curr_cell,'probs'):
             return self.np_random.choice(curr_cell.rewards, p=curr_cell.probs)
         breakpoint()
@@ -997,6 +997,709 @@ gym_minigrid.register.register(
 )
 
 
+class MultiRoomEnv(gym_minigrid.minigrid.MiniGridEnv):
+    """
+    Environment with multiple rooms (subgoals)
+    """
+
+    def __init__(self,
+        min_num_rooms,
+        max_num_rooms,
+        max_room_size=10,
+        num_trials=100,
+        seed = None,
+    ):
+        assert min_num_rooms > 0
+        assert max_num_rooms >= min_num_rooms
+        assert max_room_size >= 4
+
+        self.minNumRooms = min_num_rooms
+        self.maxNumRooms = max_num_rooms
+        self.maxRoomSize = max_room_size
+
+        self.num_trials = num_trials
+
+        self.rooms = []
+
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+
+        super(MultiRoomEnv, self).__init__(
+            grid_size=25,
+            max_steps=self.maxNumRooms * 20 * self.num_trials,
+            seed = seed,
+        )
+
+    def _gen_grid(self, width, height):
+        roomList = []
+
+        # Choose a random number of rooms to generate
+        numRooms = self._rand_int(self.minNumRooms, self.maxNumRooms+1)
+
+        while len(roomList) < numRooms:
+            curRoomList = []
+
+            entryDoorPos = (
+                self._rand_int(0, width - 2),
+                self._rand_int(0, width - 2)
+            )
+
+            # Recursively place the rooms
+            self._placeRoom(
+                numRooms,
+                roomList=curRoomList,
+                minSz=4,
+                maxSz=self.maxRoomSize,
+                entryDoorWall=2,
+                entryDoorPos=entryDoorPos
+            )
+
+            if len(curRoomList) > len(roomList):
+                roomList = curRoomList
+
+        # Store the list of rooms in this environment
+        assert len(roomList) > 0
+        self.rooms = roomList
+
+        # Create the grid
+        self.grid = gym_minigrid.minigrid.Grid(width, height)
+        wall = gym_minigrid.minigrid.Wall()
+
+        prevDoorColor = None
+
+        # For each room
+        for idx, room in enumerate(roomList):
+
+            topX, topY = room.top
+            sizeX, sizeY = room.size
+
+            # Draw the top and bottom walls
+            for i in range(0, sizeX):
+                self.grid.set(topX + i, topY, wall)
+                self.grid.set(topX + i, topY + sizeY - 1, wall)
+
+            # Draw the left and right walls
+            for j in range(0, sizeY):
+                self.grid.set(topX, topY + j, wall)
+                self.grid.set(topX + sizeX - 1, topY + j, wall)
+
+            # If this isn't the first room, place the entry door
+            if idx > 0:
+                # Pick a door color different from the previous one
+                doorColors = set(gym_minigrid.minigrid.COLOR_NAMES)
+                if prevDoorColor:
+                    doorColors.remove(prevDoorColor)
+                # Note: the use of sorting here guarantees determinism,
+                # This is needed because Python's set is not deterministic
+                doorColor = self._rand_elem(sorted(doorColors))
+
+                entryDoor = gym_minigrid.minigrid.Door(doorColor)
+                self.grid.set(*room.entryDoorPos, entryDoor) # type: ignore
+                prevDoorColor = doorColor
+
+                prevRoom = roomList[idx-1]
+                prevRoom.exitDoorPos = room.entryDoorPos
+
+        # Randomize the starting agent position and direction
+        self.place_agent(roomList[0].top, roomList[0].size)
+
+        # Place the final goal in the last room
+        self.goal = gym_minigrid.minigrid.Goal()
+        self.goal_pos = self.place_obj(self.goal, roomList[-1].top, roomList[-1].size)
+
+        self.mission = 'traverse the rooms to get to the goal'
+
+    def _placeRoom(
+        self,
+        numLeft,
+        roomList,
+        minSz,
+        maxSz,
+        entryDoorWall,
+        entryDoorPos
+    ):
+        # Choose the room size randomly
+        sizeX = self._rand_int(minSz, maxSz+1)
+        sizeY = self._rand_int(minSz, maxSz+1)
+
+        # The first room will be at the door position
+        if len(roomList) == 0:
+            topX, topY = entryDoorPos
+        # Entry on the right
+        elif entryDoorWall == 0:
+            topX = entryDoorPos[0] - sizeX + 1
+            y = entryDoorPos[1]
+            topY = self._rand_int(y - sizeY + 2, y)
+        # Entry wall on the south
+        elif entryDoorWall == 1:
+            x = entryDoorPos[0]
+            topX = self._rand_int(x - sizeX + 2, x)
+            topY = entryDoorPos[1] - sizeY + 1
+        # Entry wall on the left
+        elif entryDoorWall == 2:
+            topX = entryDoorPos[0]
+            y = entryDoorPos[1]
+            topY = self._rand_int(y - sizeY + 2, y)
+        # Entry wall on the top
+        elif entryDoorWall == 3:
+            x = entryDoorPos[0]
+            topX = self._rand_int(x - sizeX + 2, x)
+            topY = entryDoorPos[1]
+        else:
+            assert False, entryDoorWall
+
+        # If the room is out of the grid, can't place a room here
+        if topX < 0 or topY < 0:
+            return False
+        if topX + sizeX > self.width or topY + sizeY >= self.height: # type: ignore
+            return False
+
+        # If the room intersects with previous rooms, can't place it here
+        for room in roomList[:-1]:
+            nonOverlap = \
+                topX + sizeX < room.top[0] or \
+                room.top[0] + room.size[0] <= topX or \
+                topY + sizeY < room.top[1] or \
+                room.top[1] + room.size[1] <= topY
+
+            if not nonOverlap:
+                return False
+
+        # Add this room to the list
+        roomList.append(gym_minigrid.envs.multiroom.Room( # type: ignore
+            (topX, topY),
+            (sizeX, sizeY),
+            entryDoorPos,
+            None
+        ))
+
+        # If this was the last room, stop
+        if numLeft == 1:
+            return True
+
+        # Try placing the next room
+        for _ in range(0, 8):
+
+            # Pick which wall to place the out door on
+            wallSet = set((0, 1, 2, 3))
+            wallSet.remove(entryDoorWall)
+            exitDoorWall = self._rand_elem(sorted(wallSet))
+            nextEntryWall = (exitDoorWall + 2) % 4
+
+            # Pick the exit door position
+            # Exit on right wall
+            if exitDoorWall == 0:
+                exitDoorPos = (
+                    topX + sizeX - 1,
+                    topY + self._rand_int(1, sizeY - 1)
+                )
+            # Exit on south wall
+            elif exitDoorWall == 1:
+                exitDoorPos = (
+                    topX + self._rand_int(1, sizeX - 1),
+                    topY + sizeY - 1
+                )
+            # Exit on left wall
+            elif exitDoorWall == 2:
+                exitDoorPos = (
+                    topX,
+                    topY + self._rand_int(1, sizeY - 1)
+                )
+            # Exit on north wall
+            elif exitDoorWall == 3:
+                exitDoorPos = (
+                    topX + self._rand_int(1, sizeX - 1),
+                    topY
+                )
+            else:
+                assert False
+
+            # Recursively create the other rooms
+            success = self._placeRoom(
+                numLeft - 1,
+                roomList=roomList,
+                minSz=minSz,
+                maxSz=maxSz,
+                entryDoorWall=nextEntryWall,
+                entryDoorPos=exitDoorPos
+            )
+
+            if success:
+                break
+
+        return True
+
+    def reset(self):
+        obs = super().reset()
+        self.trial_count = 0
+        return obs
+
+    def step(self, action):
+        obs, reward, done, info = gym_minigrid.minigrid.MiniGridEnv.step(self, action)
+
+        if done:
+            self.trial_count += 1
+            if reward > 0:
+                reward = 1
+            self.grid.set(self.goal_pos[0], self.goal_pos[1], None)
+            r = self._rand_int(0, len(self.rooms) - 1)
+            self.goal_pos = self.place_obj(self.goal, self.rooms[r].top, self.rooms[r].size)
+            if self.trial_count >= self.num_trials:
+                done = True
+                self.trial_count = 0
+            else:
+                done = False
+            if self.step_count >= self.max_steps:
+                done = True
+
+        return obs, reward, done, info
+
+
+gym_minigrid.register.register(
+    id='MiniGrid-MultiRoom-v0',
+    entry_point=MultiRoomEnv,
+)
+
+
+class Room:
+    __slots__ = ['top', 'bottom', 'left', 'right']
+
+    def __init__(self,
+            top: int,
+            bottom: int,
+            left: int,
+            right: int,
+    ):
+        self.top = top
+        self.bottom = bottom
+        self.left = left
+        self.right = right
+
+    def __repr__(self):
+        return 'Room(top={}, bottom={}, left={}, right={})'.format(
+            self.top,
+            self.bottom,
+            self.left,
+            self.right,
+        )
+
+def room_is_valid(rooms, room, width, height):
+    if room.left < 0 or room.right >= width or room.top < 0 or room.bottom >= height:
+        return False
+    for r in rooms:
+        if room.top >= r.bottom:
+            continue
+        if room.bottom <= r.top:
+            continue
+        if room.left >= r.right:
+            continue
+        if room.right <= r.left:
+            continue
+        return False
+    return True
+
+
+
+class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
+    """
+    Environment with multiple rooms (subgoals)
+    """
+
+    def __init__(self,
+        min_num_rooms,
+        max_num_rooms,
+        min_room_size=5,
+        max_room_size=10,
+        num_trials=100,
+        fetch_config: dict = None,
+        bandits_config: dict = None,
+        seed = None,
+    ):
+        assert min_num_rooms > 0
+        assert max_num_rooms >= min_num_rooms
+        assert max_room_size >= 4
+
+        self.min_num_rooms = min_num_rooms
+        self.max_num_rooms = max_num_rooms
+        self.min_room_size = min_room_size
+        self.max_room_size = max_room_size
+
+        self.num_trials = num_trials
+        self.fetch_config = fetch_config
+        self.bandits_config = bandits_config
+
+        self.rooms = []
+
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+
+        super(MultiRoomEnv_v1, self).__init__(
+            grid_size=25,
+            max_steps=self.max_num_rooms * 20 * self.num_trials,
+            see_through_walls = False,
+            seed = seed,
+        )
+
+    def _gen_grid(self, width, height):
+        room_list = []
+        self.rooms = room_list
+
+        # Choose a random number of rooms to generate
+        num_rooms = self._rand_int(self.min_num_rooms, self.max_num_rooms+1)
+
+        # Create first room
+        room_height = self._rand_int(self.min_room_size, self.max_room_size+1)
+        room_width = self._rand_int(self.min_room_size, self.max_room_size+1)
+        top = self._rand_int(1, height - room_height - 1)
+        left = self._rand_int(1, width - room_width - 1)
+        room_list.append(Room(top, top + room_height - 1, left, left + room_width - 1))
+
+        new_room_openings = [ (0, 'left'), (0, 'right'), (0, 'top'), (0, 'bottom') ]
+        while len(room_list) < num_rooms:
+            if len(new_room_openings) == 0:
+                break
+
+            # Choose a random place to connect the new room to
+            r = self._rand_int(0, len(new_room_openings))
+            starting_room_index, wall = new_room_openings[r]
+
+            temp_room = self._generate_room(
+                    room_list,
+                    idx = starting_room_index,
+                    wall = wall,
+                    min_size = self.min_room_size,
+                    max_size = self.max_room_size,
+                    width = width,
+                    height = height,
+            )
+            if temp_room is not None:
+                room_list.append(temp_room)
+                new_room_openings.append((len(room_list)-1, 'left'))
+                new_room_openings.append((len(room_list)-1, 'right'))
+                new_room_openings.append((len(room_list)-1, 'top'))
+                new_room_openings.append((len(room_list)-1, 'bottom'))
+            else:
+                new_room_openings.remove(new_room_openings[r])
+
+        self.grid = gym_minigrid.minigrid.Grid(width, height)
+        self.doors = []
+        wall = gym_minigrid.minigrid.Wall()
+        self.wall = wall
+
+        for room in room_list:
+            # Look for overlapping walls
+            overlapping_walls = {
+                'top': [],
+                'bottom': [],
+                'left': [],
+                'right': [],
+            }
+            for i in range(room.left + 1, room.right):
+                if self.grid.get(i,room.top) == wall and self.grid.get(i,room.top+1) is None and self.grid.get(i,room.top-1) is None:
+                    overlapping_walls['top'].append((room.top, i))
+                if self.grid.get(i,room.bottom) == wall and self.grid.get(i,room.bottom+1) is None and self.grid.get(i,room.bottom-1) is None:
+                    overlapping_walls['bottom'].append((room.bottom, i))
+            for j in range(room.top + 1, room.bottom):
+                if self.grid.get(room.left,j) == wall and self.grid.get(room.left+1,j) is None and self.grid.get(room.left-1,j) is None:
+                    overlapping_walls['left'].append((j, room.left))
+                if self.grid.get(room.right,j) == wall and self.grid.get(room.right+1,j) is None and self.grid.get(room.right-1,j) is None:
+                    overlapping_walls['right'].append((j, room.right))
+
+            # Create room
+            # Top wall
+            for i in range(room.left, room.right + 1):
+                self.grid.set(i, room.top, wall)
+            # Bottom wall
+            for i in range(room.left, room.right + 1):
+                self.grid.set(i, room.bottom, wall)
+            # Left wall
+            for i in range(room.top, room.bottom + 1):
+                self.grid.set(room.left, i, wall)
+            # Right wall
+            for i in range(room.top, room.bottom + 1):
+                self.grid.set(room.right, i, wall)
+
+            # Create doorways between rooms
+            for ow in overlapping_walls.values():
+                if len(ow) == 0:
+                    continue
+                opening = self._rand_elem(ow)
+                if self.np_random.rand() < 0.5:
+                    self.grid.set(opening[1], opening[0], None)
+                else:
+                    door = gym_minigrid.minigrid.Door(
+                        color = self._rand_elem(gym_minigrid.minigrid.COLOR_NAMES)
+                    )
+                    self.grid.set(opening[1], opening[0], door)
+                    self.doors.append(door)
+
+        self._init_agent()
+        self.mission = 'Do whatever'
+
+    def _init_fetch(self, num_objs, num_obj_types=2, num_obj_colors=6, unique_objs=True):
+        types = ['key', 'ball'][:num_obj_types]
+        colors = gym_minigrid.minigrid.COLOR_NAMES[:num_obj_colors]
+
+        type_color_pairs = [(t,c) for t in types for c in colors]
+
+        objs = []
+
+        # For each object to be generated
+        while len(objs) < num_objs:
+            obj_type, obj_color = self._rand_elem(type_color_pairs)
+            if unique_objs:
+                type_color_pairs.remove((obj_type, obj_color))
+
+            if obj_type == 'key':
+                obj = gym_minigrid.minigrid.Key(obj_color)
+            elif obj_type == 'ball':
+                obj = gym_minigrid.minigrid.Ball(obj_color)
+            else:
+                raise ValueError(f'Unknown object type: {obj_type}')
+
+            self.place_obj(obj)
+            objs.append(obj)
+
+        self.objects = objs
+
+        # Choose a random object to be picked up
+        target = objs[self._rand_int(0, len(objs))]
+        self.targetType = target.type
+        self.targetColor = target.color
+
+    def _init_bandits(self, probs=[1,0]):
+        reward_scale = 1
+        self.goals = [
+            GoalMultinomial(rewards=[reward_scale,-reward_scale], probs=[p,1-p])
+            for p in probs
+        ]
+
+        for g in self.goals:
+            self.place_obj(g, unobstructive=True)
+
+    def _init_agent(self):
+        # Randomize the player start position and orientation
+        self.agent_pos = self._rand_space()
+        self.agent_dir = self._rand_int(0, 4)
+
+    def _rand_space(self):
+        """ Find and return the coordinates of a random empty space in the grid """
+
+        room_indices = list(range(len(self.rooms)))
+        self.np_random.shuffle(room_indices) # type: ignore
+
+        for r in room_indices:
+            # Choose a random room
+            room = self.rooms[r]
+
+            # List all spaces in the room
+            spaces = [
+                (x, y)
+                for x in range(room.left+1, room.right)
+                for y in range(room.top+1, room.bottom)
+            ]
+            self.np_random.shuffle(spaces) # type: ignore
+
+            # Choose a random location in the room
+            for x, y in spaces:
+                # Check if the location is empty
+                if self.grid.get(x, y) is not None:
+                    continue
+                # Check if the agent is here
+                if np.array_equal((x,y), self.agent_pos):
+                    continue
+                return x, y
+
+        raise Exception('Could not find a random empty space')
+
+    def _rand_space_unobstructive(self):
+        """ Find and return the coordinates of a random empty space in the grid.
+        This space is chosen from a set of spaces that would not obstruct access to other parts of the environment if an object were to be placed there.
+        """
+
+        room_indices = list(range(len(self.rooms)))
+        self.np_random.shuffle(room_indices) # type: ignore
+
+        for r in room_indices:
+            # Choose a random room
+            room = self.rooms[r]
+
+            # List all spaces in the room
+            spaces = [
+                (x, y)
+                for x in range(room.left+1, room.right)
+                for y in range(room.top+1, room.bottom)
+            ]
+            self.np_random.shuffle(spaces) # type: ignore
+
+            # Choose a random location in the room
+            for x, y in spaces:
+                # Check if the location is empty
+                if self.grid.get(x, y) is not None:
+                    continue
+                # Check if the agent is here
+                if np.array_equal((x,y), self.agent_pos):
+                    continue
+                # Check if it blocks a doorway
+                obstructive = False
+                for d in [[0,1],[1,0],[0,-1],[-1,0]]:
+                    if self.grid.get(x+d[0], y+d[1]) is self.wall:
+                        continue
+                    c1 = [d[1]+d[0],d[1]+d[0]]
+                    c2 = [-d[1]+d[0],d[1]-d[0]]
+                    if self.grid.get(x+c1[0], y+c1[1]) is self.wall and self.grid.get(x+c2[0], y+c2[1]) is self.wall:
+                        obstructive = True
+                        break
+
+                if obstructive:
+                    continue
+
+                return x, y
+
+        raise Exception('Could not find a random empty space')
+
+    def place_obj(self, obj, unobstructive=False):
+        if unobstructive:
+            pos = self._rand_space_unobstructive()
+        else:
+            pos = self._rand_space()
+
+        self.grid.set(*pos, obj)
+
+        if obj is not None:
+            obj.init_pos = pos
+            obj.cur_pos = pos
+
+        return pos
+
+    def _generate_room(self, rooms, idx, wall, min_size, max_size, width, height):
+        starting_room = rooms[idx]
+        new_room = Room(0,0,0,0)
+        if wall == 'left' or wall == 'right':
+            min_top = max(starting_room.top - max_size + 3, 0)
+            max_top = starting_room.bottom - 2
+            min_bottom = starting_room.top + 2
+            max_bottom = starting_room.bottom + max_size - 3
+            if wall == 'left':
+                #new_room.right = starting_room.left
+                min_right = starting_room.left
+                max_right = starting_room.left
+                min_left = max(starting_room.left - max_size + 1, 0)
+                max_left = starting_room.left - min_size + 1
+            else:
+                #new_room.left = starting_room.right
+                min_left = starting_room.right
+                max_left = starting_room.right
+                min_right = starting_room.right + min_size - 1
+                max_right = starting_room.right + max_size - 1
+        else:
+            min_left = max(starting_room.left - max_size + 3, 0)
+            max_left = starting_room.right - 2
+            min_right = starting_room.left + 2
+            max_right = starting_room.right + max_size - 3
+            if wall == 'top':
+                #new_room.bottom = starting_room.top
+                min_bottom = starting_room.top
+                max_bottom = starting_room.top
+                min_top = max(starting_room.top - max_size + 1, 0)
+                max_top = starting_room.top - min_size + 1
+            else:
+                #new_room.top = starting_room.bottom
+                min_top = starting_room.bottom
+                max_top = starting_room.bottom
+                min_bottom = starting_room.bottom + min_size - 1
+                max_bottom = starting_room.bottom + max_size - 1
+        possible_rooms = [
+            (t,b,l,r)
+            for t in range(min_top, max_top + 1)
+            for b in range(max(min_bottom,t+min_size-1), min(max_bottom + 1, t+max_size))
+            for l in range(min_left, max_left + 1)
+            for r in range(max(min_right,l+min_size-1), min(max_right + 1, l+max_size))
+        ]
+        self.np_random.shuffle(possible_rooms)
+        for room in possible_rooms:
+            new_room.top = room[0]
+            new_room.bottom = room[1]
+            new_room.left = room[2]
+            new_room.right = room[3]
+            if room_is_valid(rooms, new_room, width, height):
+                return new_room
+        return None
+
+    def reset(self):
+        obs = super().reset()
+        self.trial_count = 0
+        if self.fetch_config is not None:
+            self._init_fetch(**self.fetch_config)
+        if self.bandits_config is not None:
+            self._init_bandits(**self.bandits_config)
+        return obs
+
+    def step(self, action):
+        obs, reward, done, info = gym_minigrid.minigrid.MiniGridEnv.step(self, action)
+
+        if self.fetch_config is not None:
+            if self.carrying:
+                if self.carrying.color == self.targetColor and \
+                   self.carrying.type == self.targetType:
+                    reward = self.fetch_config.get('reward_correct', 1)
+                else:
+                    reward = self.fetch_config.get('reward_incorrect', -1)
+                self.place_obj(self.carrying)
+                self.carrying = None
+                self.trial_count += 1
+
+        if self.bandits_config is not None:
+            curr_cell = self.grid.get(*self.agent_pos) # type: ignore
+            if curr_cell != None and hasattr(curr_cell,'rewards') and hasattr(curr_cell,'probs'):
+                # Give a reward
+                reward = self.np_random.choice(curr_cell.rewards, p=curr_cell.probs)
+                done = False
+                self.trial_count += 1
+                # Teleport the agent to a random location
+                self._init_agent()
+
+        if self.trial_count >= self.num_trials:
+            done = True
+            self.trial_count = 0
+
+        return obs, reward, done, info
+
+
+gym_minigrid.register.register(
+    id='MiniGrid-MultiRoom-v1',
+    entry_point=MultiRoomEnv_v1,
+)
+
+class MultiRoomBanditsLarge(MultiRoomEnv_v1):
+    def __init__(self):
+        super().__init__(min_num_rooms=5, max_num_rooms=5, max_room_size=16, fetch_config={'num_objs': 5}, bandits_config={})
+
+gym_minigrid.register.register(
+    id='MiniGrid-MultiRoom-Large-v1',
+    entry_point=MultiRoomBanditsLarge,
+)
+
 if __name__ == '__main__':
-    env = gym.make('MiniGrid-NRoomBanditsSmall-v0')
+    env = gym.make('MiniGrid-MultiRoom-v1',
+            min_num_rooms=2,
+            max_num_rooms=2,
+            min_room_size=4,
+            max_room_size=6,
+            #fetch_config={'num_objs': 5},
+            bandits_config={
+                'probs': [0.9, 0.1]
+            },
+            #seed=2349918951,
+    )
+    env.reset()
     env.render()
+    breakpoint()

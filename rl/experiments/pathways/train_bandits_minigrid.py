@@ -513,6 +513,200 @@ def get_params():
             'env_train': env_config,
         }, inherit='exp-018')
 
+    env_name = 'MiniGrid-BanditsFetch-v0'
+    env_name2 = 'MiniGrid-MultiRoom-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'size': s,
+                'num_trials': 100,
+                'reward_correct': 1,
+                'reward_incorrect': -1,
+                'num_objs': 2,
+                'num_obj_types': 2,
+                'num_obj_colors': 6,
+                'unique_objs': True,
+                'include_reward_permutation': False,
+            }
+        } for s in [5,6,7,8]] + [{
+            'env_name': env_name2,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 2,
+                'max_room_size': 4,
+            }
+        } for _ in range(num_envs-4)],
+    }
+    params.add('exp-025', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 2,
+                'min_room_size': 5,
+                'max_room_size': 8,
+                'fetch_config': {
+                    'num_objs': 2,
+                }
+            }
+        } for _ in range(num_envs//2)] + [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 2,
+                'min_room_size': 5,
+                'max_room_size': 8,
+                'bandits_config': {
+                    'probs': [1,0],
+                }
+            }
+        } for _ in range(num_envs//2)]
+    }
+    params.add('exp-026', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Modified to include single room tasks
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 1,
+                'max_num_rooms': 2,
+                'min_room_size': 5,
+                'max_room_size': 8,
+                'fetch_config': {
+                    'num_objs': 2,
+                }
+            }
+        } for _ in range(num_envs//2)] + [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 1,
+                'max_num_rooms': 2,
+                'min_room_size': 5,
+                'max_room_size': 8,
+                'bandits_config': {
+                    'probs': [1,0],
+                }
+            }
+        } for _ in range(num_envs//2)]
+    }
+    params.add('exp-027', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # BanditsFetch and MultiRoom with the same task are different enough that the agent can't generalize. Train it on both simultaneously.
+    env_name = 'MiniGrid-BanditsFetch-v0'
+    env_name2 = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'size': s,
+                'num_trials': 100,
+                'reward_correct': 1,
+                'reward_incorrect': -1,
+                'num_objs': 2,
+                'num_obj_types': 2,
+                'num_obj_colors': 6,
+                'unique_objs': True,
+                'include_reward_permutation': False,
+            }
+        } for s in [5,6,7,8]]*2 + [{
+            'env_name': env_name2,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 1,
+                'max_num_rooms': 1,
+                'max_room_size': 8,
+            }
+        } for _ in range(num_envs-8)],
+    }
+    params.add('exp-028', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
     return params
 
 
@@ -1462,6 +1656,8 @@ def make_app():
             num_objs: int = 2,
             num_obj_types: int = 2,
             num_obj_colors: int = 1,
+            num_rooms: int = 2,
+            max_room_size: int = 4,
             size: int = 5):
         import cv2
         import PIL.Image, PIL.ImageDraw, PIL.ImageFont
@@ -1528,6 +1724,56 @@ def make_app():
                         'num_obj_types': num_obj_types,
                         'num_obj_colors': num_obj_colors,
                         'unique_objs': True,
+                    }
+                }]
+            )
+            desc_fn = lambda: f'{env.envs[0].targetColor} {env.envs[0].targetType}' # type: ignore
+        elif env_name == 'MiniGrid-MultiRoom-v0':
+            env = make_vec_env(
+                env_type = 'gym_sync',
+                env_configs = [{
+                    'env_name': env_name,
+                    'minigrid': True,
+                    'minigrid_config': {},
+                    'meta_config': {
+                        'episode_stack': 1,
+                        'dict_obs': True,
+                        'randomize': False,
+                    },
+                    'config': {
+                        'num_trials': 100,
+                        'min_num_rooms': num_rooms,
+                        'max_num_rooms': num_rooms,
+                        'max_room_size': max_room_size,
+                    }
+                }]
+            )
+            desc_fn = lambda: None
+        elif env_name == 'MiniGrid-MultiRoom-v1':
+            env = make_vec_env(
+                env_type = 'gym_sync',
+                env_configs = [{
+                    'env_name': env_name,
+                    'minigrid': True,
+                    'minigrid_config': {},
+                    'meta_config': {
+                        'episode_stack': 1,
+                        'dict_obs': True,
+                        'randomize': False,
+                    },
+                    'config': {
+                        'num_trials': 100,
+                        'min_num_rooms': num_rooms,
+                        'max_num_rooms': num_rooms,
+                        'max_room_size': max_room_size,
+                        'fetch_config': {
+                            'num_objs': num_objs,
+                            'num_obj_types': num_obj_types,
+                            'num_obj_colors': num_obj_colors,
+                        },
+                        #'bandits_config': {
+                        #    'probs': [0.9, 0.1]
+                        #},
                     }
                 }]
             )

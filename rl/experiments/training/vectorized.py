@@ -28,12 +28,14 @@ def make_vec_env(env_type, env_configs):
         else:
             raise NotImplementedError()
     elif env_type == 'gym_async':
+        # Config has to be in the default parameter, or else `config` will only take on the value of the last element in `env_configs`.
+        # Previously had this as `[lambda: make_env(**config) for config in env_configs]`, which is incorrect
         return gym.vector.AsyncVectorEnv(
-            [lambda: make_env(**config) for config in env_configs]
+            [lambda c=config: make_env(**c) for config in env_configs]
         )
     elif env_type == 'gym_sync':
         return gym.vector.SyncVectorEnv(
-            [lambda: make_env(**config) for config in env_configs]
+            [lambda c=config: make_env(**c) for config in env_configs]
         )
     else:
         raise NotImplementedError()
@@ -153,7 +155,7 @@ class TrainExperiment(Experiment):
                     self.logger.log(reward=mean_reward, episode_length=mean_length)
                     self._ep_rewards = self._ep_rewards*(1-done)
                     self._ep_len = self._ep_len*(1-done)
-                    tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}')
+                    tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}\t {done.sum().item()} done')
                 for callback in self.callbacks['on_episode_end']:
                     callback(self, (obs, reward, done, info))
 
