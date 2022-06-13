@@ -698,10 +698,44 @@ def get_params():
                 'min_num_rooms': 1,
                 'max_num_rooms': 1,
                 'max_room_size': 8,
+                'fetch_config': {
+                    'num_objs': 2,
+                },
             }
         } for _ in range(num_envs-8)],
     }
     params.add('exp-028', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 1,
+                'max_num_rooms': 1,
+                'min_room_size': 5,
+                'max_room_size': 5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 2,
+                },
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-029', {
         **params['exp-018'],
         'env_test': env_config,
         'env_train': env_config,
