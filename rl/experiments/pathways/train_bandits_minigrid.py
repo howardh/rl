@@ -741,6 +741,178 @@ def get_params():
         'env_train': env_config,
     })
 
+    # Put all the other colours back in
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 1,
+                'max_num_rooms': 1,
+                'min_room_size': 5,
+                'max_room_size': 5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                },
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-030', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Add larger rooms
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 1,
+                'max_num_rooms': 1,
+                'min_room_size': 5,
+                'max_room_size': 8,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                },
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-031', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Horizontally flip the observations at random
+    env_name = 'MiniGrid-Empty-5x5-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 100,
+                'dict_obs': True,
+                'randomize': False,
+                'image_transformation': {
+                    'hflip': 0.5,
+                },
+            },
+            'config': {}
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-032', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    }) # This is getting solved with an open-loop policy
+
+    # Horizontally flip the observations at random
+    env_name = 'MiniGrid-Empty-Meta-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+                'image_transformation': {
+                    'hflip': 0.5,
+                },
+            },
+            'config': {
+                'size': 5,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-033', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Added a wall
+    env_name = 'MiniGrid-Empty-Meta-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+                'image_transformation': {
+                    'hflip': 0.5,
+                },
+            },
+            'config': {
+                'size': 5,
+                'wall': True,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-034', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Added lava
+    env_name = 'MiniGrid-Empty-Meta-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+                'image_transformation': {
+                    'hflip': 0.5,
+                },
+            },
+            'config': {
+                'size': 5,
+                'lava': True,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-035', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
     return params
 
 
@@ -1691,8 +1863,10 @@ def make_app():
             num_obj_types: int = 2,
             num_obj_colors: int = 1,
             num_rooms: int = 2,
+            min_room_size: int = 4,
             max_room_size: int = 4,
-            size: int = 5):
+            size: int = 5,
+            hflip: int = 0):
         import cv2
         import PIL.Image, PIL.ImageDraw, PIL.ImageFont
         from fonts.ttf import Roboto # type: ignore
@@ -1779,6 +1953,7 @@ def make_app():
                         'min_num_rooms': num_rooms,
                         'max_num_rooms': num_rooms,
                         'max_room_size': max_room_size,
+                        'min_room_size': min_room_size,
                     }
                 }]
             )
@@ -1812,6 +1987,28 @@ def make_app():
                 }]
             )
             desc_fn = lambda: f'{env.envs[0].targetColor} {env.envs[0].targetType}' # type: ignore
+        elif env_name == 'MiniGrid-Empty-Meta-v0':
+            env = make_vec_env(
+                env_type = 'gym_sync',
+                env_configs = [{
+                    'env_name': env_name,
+                    'minigrid': True,
+                    'minigrid_config': {},
+                    'meta_config': {
+                        'episode_stack': 1,
+                        'dict_obs': True,
+                        'randomize': False,
+                        'image_transformation': {
+                            'hflip': hflip,
+                        },
+                    },
+                    'config': {
+                        #'wall': True,
+                        'lava': True,
+                    }
+                }]
+            )
+            desc_fn = lambda: None
         else:
             try:
                 env = make_vec_env(
@@ -1821,9 +2018,12 @@ def make_app():
                         'minigrid': True,
                         'minigrid_config': {},
                         'meta_config': {
-                            'episode_stack': 10,
+                            'episode_stack': 100,
                             'dict_obs': True,
                             'randomize': False,
+                            'image_transformation': {
+                                'hflip': hflip,
+                            },
                         },
                         'config': {}
                     }]
@@ -1977,6 +2177,7 @@ def make_app():
                     env.envs[0].observation_space['obs (image)'].shape[1:], # type: ignore
             )
             video_writer3 = None
+            video_writer4 = None
             num_frames = 0
 
             results['agent'].append([])
@@ -2005,6 +2206,12 @@ def make_app():
                         core_attention = agent.net.last_attention,
                         query_gating = agent.net.last_ff_gating,
                         output_attention = agent.net.last_output_attention)
+                frame_and_attn = concat_images(
+                    [PIL.Image.fromarray(frame), attn_img],
+                    padding = 5,
+                    direction = 'v',
+                    align = 0,
+                )
                 if video_writer3 is None:
                     video_writer3 = cv2.VideoWriter( # type: ignore
                             f'video3-{i}.webm',
@@ -2012,16 +2219,27 @@ def make_app():
                             fps,
                             attn_img.size,
                     )
+                if video_writer4 is None:
+                    video_writer4 = cv2.VideoWriter( # type: ignore
+                            f'video4-{i}.webm',
+                            cv2.VideoWriter_fourcc(*'VP80'), # type: ignore
+                            fps,
+                            frame_and_attn.size,
+                    )
                 video_writer3.write(np.array(attn_img)[:,:,::-1])
+                video_writer4.write(np.array(frame_and_attn)[:,:,::-1])
                 #if num_frames > 100:
                 #    break
             video_writer.release()
             video_writer2.release()
             if video_writer3 is not None:
                 video_writer3.release()
+            if video_writer4 is not None:
+                video_writer4.release()
             print(f'Trial {i} total reward: {np.sum(results["reward"][-1])}')
-            print(env.envs[0].reward_permutation) # type: ignore
+            #print(env.envs[0].reward_permutation) # type: ignore
             print(description) # type: ignore
+
             breakpoint()
 
     commands = {

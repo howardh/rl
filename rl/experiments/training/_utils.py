@@ -11,6 +11,7 @@ import gym.spaces
 from gym.wrappers import FrameStack#, AtariPreprocessing
 from gym.spaces import Box
 import cv2
+import scipy.ndimage
 from permutation import Permutation
 import gym_minigrid.wrappers
 import gym_minigrid.minigrid
@@ -378,7 +379,9 @@ class MetaWrapper(gym.Wrapper):
             episode_stack: int,
             dict_obs: bool = False,
             randomize: bool = True,
-            action_shuffle: bool = False):
+            action_shuffle: bool = False,
+            image_transformation = None,
+            seed: int = None):
         super().__init__(env)
         self.episode_stack = episode_stack
         self.randomize = randomize
@@ -388,8 +391,28 @@ class MetaWrapper(gym.Wrapper):
         self.episode_count = 0
         self._done = True
 
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+        self.rand = np.random.RandomState(seed)
+
         if action_shuffle:
             raise NotImplementedError('Action shuffle not implemented')
+
+        self._transform = lambda x: x
+        if image_transformation is not None:
+            if self.rand.rand() < image_transformation.get('vflip', 0):
+                self._transform = lambda img, f=self._transform: f(img[:,::-1,:])
+            if self.rand.rand() < image_transformation.get('hflip', 0):
+                self._transform = lambda img, f=self._transform: f(img[:,:,::-1])
+            if self.rand.rand() < image_transformation.get('rotate', 0):
+                angle = (self.rand.rand() - 0.5) * (3.141592653 * 2) * (4 / 360)
+                self._transform = lambda img, f=self._transform: f(
+                        scipy.ndimage.rotate(img, angle, reshape=False))
+            self._transform = lambda obs, f=self._transform: {'image': f(obs['image']), **obs}
 
         if dict_obs:
             obs_space = [('obs', self.env.observation_space)]
@@ -413,6 +436,10 @@ class MetaWrapper(gym.Wrapper):
             obs, reward, done, info = self.env.step(action)
         self._done = done
 
+        # Apply transformations
+        obs = self._transform(obs)
+
+        # Convert observation to dict
         if self.dict_obs:
             if isinstance(self.env.observation_space, gym.spaces.Dict):
                 obs = {
@@ -450,6 +477,7 @@ class MetaWrapper(gym.Wrapper):
         self._regret = []
 
         obs = self.env.reset(*args, **kwargs)
+        obs = self._transform(obs)
         if self.dict_obs:
             if isinstance(self.env.observation_space, gym.spaces.Dict):
                 return {
@@ -1287,6 +1315,15 @@ class Room:
             self.right,
         )
 
+    @property
+    def width(self):
+        return self.right - self.left + 1
+
+    @property
+    def height(self):
+        return self.bottom - self.top + 1
+
+
 def room_is_valid(rooms, room, width, height):
     if room.left < 0 or room.right >= width or room.top < 0 or room.bottom >= height:
         return False
@@ -1301,7 +1338,6 @@ def room_is_valid(rooms, room, width, height):
             continue
         return False
     return True
-
 
 
 class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
@@ -1443,6 +1479,10 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
 
         self._init_agent()
         self.mission = 'Do whatever'
+
+        # Set max steps
+        total_room_sizes = sum([room.height * room.width for room in room_list])
+        self.max_steps = total_room_sizes * self.num_trials
 
     def _init_fetch(self, num_objs, num_obj_types=2, num_obj_colors=6, unique_objs=True):
         types = ['key', 'ball'][:num_obj_types]
@@ -1624,7 +1664,7 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
             for l in range(min_left, max_left + 1)
             for r in range(max(min_right,l+min_size-1), min(max_right + 1, l+max_size))
         ]
-        self.np_random.shuffle(possible_rooms)
+        self.np_random.shuffle(possible_rooms) # type: ignore
         for room in possible_rooms:
             new_room.top = room[0]
             new_room.bottom = room[1]
@@ -1688,17 +1728,128 @@ gym_minigrid.register.register(
     entry_point=MultiRoomBanditsLarge,
 )
 
+
+class EmptyEnv(gym_minigrid.minigrid.MiniGridEnv):
+    """
+    Empty grid environment, no obstacles, sparse reward
+    """
+
+    def __init__(
+        self,
+        size=5,
+        agent_start_pos=(1,1),
+        agent_start_dir=0,
+        num_trials = 100,
+        wall = False,
+        lava = False,
+        seed = None,
+    ):
+        self.num_trials = num_trials
+        self.wall = wall
+        self.lava = lava
+
+        self.agent_start_pos = agent_start_pos
+        self.agent_start_dir = agent_start_dir
+
+        if seed is None:
+            seed = os.getpid() + int(time.time())
+            thread_id = threading.current_thread().ident
+            if thread_id is not None:
+                seed += thread_id
+            seed = seed % (2**32 - 1)
+
+        super().__init__(
+            grid_size=size,
+            max_steps=4*size*size*num_trials,
+            # Set this to True for maximum speed
+            see_through_walls=True,
+            seed = seed
+        )
+
+    def _gen_grid(self, width, height):
+        # Create an empty grid
+        self.grid = gym_minigrid.minigrid.Grid(width, height)
+
+        # Generate the surrounding walls
+        self.grid.wall_rect(0, 0, width, height)
+
+        # Create a dividing wall if requested
+        if self.wall:
+            self.grid.vert_wall(width//2, height//2)
+
+        # Create a lava if requested
+        self.lava_obj = gym_minigrid.minigrid.Lava()
+        if self.lava:
+            self.place_obj(self.lava_obj)
+
+        # Place a goal square in the bottom-right corner
+        self.goal = gym_minigrid.minigrid.Goal()
+        self.put_obj(self.goal, width - 2, height - 2)
+
+        # Place the agent
+        if self.agent_start_pos is not None:
+            self.agent_pos = self.agent_start_pos
+            self.agent_dir = self.agent_start_dir
+        else:
+            self.place_agent()
+
+        self.mission = "get to the green goal square"
+
+    def reset(self):
+        obs = super().reset()
+        self.trial_count = 0
+        return obs
+
+    def step(self, action):
+        obs, reward, done, info = gym_minigrid.minigrid.MiniGridEnv.step(self, action)
+
+        curr_cell = self.grid.get(*self.agent_pos) # type: ignore
+        if curr_cell is self.goal:
+            # Give a reward
+            reward = self._reward()
+            if self.lava:
+                reward = 1 # If we also have a negative reward state, then reaching the goal state will always give a reward of 1 instead of a reward that scales on number of steps taken, since we now care about whether the agent can consistently reach the goal while avoiding bad states rather than how fast it reaches the goal.
+            done = False
+            self.trial_count += 1
+            # Move goal to a random location
+            self.grid.set(self.agent_pos[0], self.agent_pos[1], None)
+            self.place_obj(self.goal)
+        elif curr_cell is self.lava_obj:
+            # Give a reward
+            reward = -1
+            done = False
+            self.trial_count += 1
+            # Move lava to a random location
+            self.grid.set(self.agent_pos[0], self.agent_pos[1], None)
+            self.place_obj(self.lava_obj)
+
+        if self.trial_count >= self.num_trials:
+            done = True
+            self.trial_count = 0
+
+        return obs, reward, done, info
+
+
+gym_minigrid.register.register(
+    id='MiniGrid-Empty-Meta-v0',
+    entry_point=EmptyEnv,
+)
+
+
 if __name__ == '__main__':
-    env = gym.make('MiniGrid-MultiRoom-v1',
-            min_num_rooms=2,
-            max_num_rooms=2,
-            min_room_size=4,
-            max_room_size=6,
-            #fetch_config={'num_objs': 5},
-            bandits_config={
-                'probs': [0.9, 0.1]
-            },
-            #seed=2349918951,
+    #env = gym.make('MiniGrid-MultiRoom-v1',
+    #        min_num_rooms=2,
+    #        max_num_rooms=2,
+    #        min_room_size=4,
+    #        max_room_size=6,
+    #        #fetch_config={'num_objs': 5},
+    #        bandits_config={
+    #            'probs': [0.9, 0.1]
+    #        },
+    #        #seed=2349918951,
+    #)
+    env = gym.make('MiniGrid-Empty-Meta-v0',
+        wall = True
     )
     env.reset()
     env.render()

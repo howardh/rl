@@ -1991,6 +1991,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                 input_labels.append(k)
                 input_keys.append(y['key'].unsqueeze(0))
                 input_vals.append(y['value'].unsqueeze(0))
+        self.last_input_labels = input_labels
 
         #batch_size = inputs['reward'].shape[0]
         #if batch_size > 1:
