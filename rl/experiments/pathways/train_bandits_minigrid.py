@@ -913,6 +913,32 @@ def get_params():
         'env_train': env_config,
     })
 
+    # Added action shuffle
+    env_name = 'MiniGrid-Empty-Meta-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+                'action_shuffle': True,
+            },
+            'config': {
+                'size': 5,
+                'lava': True,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-036', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
     return params
 
 

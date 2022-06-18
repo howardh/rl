@@ -400,7 +400,9 @@ class MetaWrapper(gym.Wrapper):
         self.rand = np.random.RandomState(seed)
 
         if action_shuffle:
-            raise NotImplementedError('Action shuffle not implemented')
+            assert isinstance(env.action_space, gym.spaces.Discrete), 'Action shuffle only works with discrete actions'
+            self.action_map = np.arange(env.action_space.n)
+            self.rand.shuffle(self.action_map)
 
         self._transform = lambda x: x
         if image_transformation is not None:
@@ -426,6 +428,12 @@ class MetaWrapper(gym.Wrapper):
             ])
 
     def step(self, action):
+        # Map action to the shuffled action space
+        original_action = action
+        if self.action_shuffle:
+            action = self.action_map[action]
+
+        # Take a step
         if self._done:
             if self.episode_count == 0 and self.randomize:
                 self.env.randomize()
@@ -446,14 +454,14 @@ class MetaWrapper(gym.Wrapper):
                     'reward': np.array([reward], dtype=np.float32),
                     'done': np.array([done], dtype=np.float32),
                     **{f'obs ({k})': v for k,v in obs.items()},
-                    'action': action,
+                    'action': original_action,
                 }
             else:
                 obs = {
                     'reward': np.array([reward], dtype=np.float32),
                     'done': np.array([done], dtype=np.float32),
                     'obs': obs,
-                    'action': action,
+                    'action': original_action,
                 }
 
         if done:
