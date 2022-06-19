@@ -2,7 +2,7 @@ import time
 import os
 import itertools
 from pathlib import Path
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 #from torch import multiprocessing as mp
 
 from rl.experiments.pathways.models import LinearInput
@@ -939,6 +939,14 @@ def get_params():
         'env_train': env_config,
     })
 
+    params.add_change('exp-037', {
+        'agent': {
+            'parameters': {
+                'architecture': [6, 6]
+            },
+        },
+    })
+
     return params
 
 
@@ -1091,6 +1099,69 @@ def test_episode(agent, env, i=0):
     return results
 
 
+def load_state_dict(net, state):
+    """ Load state dict of a network. This will attempt to resize weights accordingly if the new model is larger than the weights being loaded. """
+    try:
+        net.load_state_dict(state)
+    except:
+        state_dict = defaultdict(lambda: {})
+        for k,v in state.items():
+            tokens = k.split('.')
+            k0 = tokens[0]
+            k1 = k[len(k0)+1:]
+            state_dict[k0][k1] = v
+        if type(net).__name__ == 'ModularPolicy5':
+            for key,s in state_dict.items():
+                if key in ['attention']:
+                    num_modules_new = [
+                        next(iter(p.parameters())).shape[0]
+                        for p in net.attention
+                    ]
+                    # Split by list index
+                    state_list = [{} for _ in num_modules_new]
+                    for k,v in s.items():
+                        tokens = k.split('.')
+                        k0 = tokens[0]
+                        k1 = k[len(k0)+1:]
+                        state_list[int(k0)][k1] = v
+                    num_modules_old = [
+                        next(iter(p.values())).shape[0]
+                        for p in state_list
+                    ]
+                    # Resize to fit new module sizes
+                    for i in range(len(num_modules_new)):
+                        n0 = num_modules_old[i]
+                        n1 = num_modules_new[i]
+                        assert n1 % n0 == 0, 'Number of modules in destination model must be a multiple of the number of modules in the loaded model' # This restriction can be loosened if we don't care about the new model behaving exactly the same as the old model
+                        state_list[i] = {
+                            k: v.repeat(n1//n0, *[1 for _ in v.shape[1:]])
+                            for k,v in state_list[i].items()
+                        }
+                    # Load weights
+                    for i,attn in enumerate(net.attention):
+                        attn.load_state_dict(state_list[i])
+                    print(f'{key} loaded')
+                elif key in ['initial_hidden_state']:
+                    num_modules_new = [
+                        p.shape[0]
+                        for p in net.initial_hidden_state
+                    ]
+                    num_modules_old = [
+                        s[str(i)].shape[0]
+                        for i in range(len(num_modules_new))
+                    ]
+                    net.initial_hidden_state.load_state_dict({
+                        i: v.repeat(num_modules_new[int(i)]//num_modules_old[int(i)], *[1 for _ in v.shape[1:]])
+                        for i,v in s.items()
+                    })
+                    print(f'{key} loaded')
+                else:
+                    net.__getattr__(key).load_state_dict(s)
+                    print(f'{key} loaded')
+        else:
+            raise
+
+
 def make_app():
     import typer
     app = typer.Typer()
@@ -1151,7 +1222,11 @@ def make_app():
                 with open(starting_model, 'rb') as f:
                     loaded_data = dill.load(f)
             if 'exp' in loaded_data:
-                exp_runner.exp.agent.net.load_state_dict(loaded_data['exp']['agent']['net'])
+                #exp_runner.exp.agent.net.load_state_dict(loaded_data['exp']['agent']['net'])
+                load_state_dict(
+                    exp_runner.exp.agent.net,
+                    loaded_data['exp']['agent']['net']
+                )
             else:
                 exp_runner.exp.agent.net.load_state_dict(loaded_data)
 
@@ -2024,9 +2099,10 @@ def make_app():
                         'episode_stack': 1,
                         'dict_obs': True,
                         'randomize': False,
-                        'image_transformation': {
-                            'hflip': hflip,
-                        },
+                        'action_shuffle': True,
+                        #'image_transformation': {
+                        #    'hflip': hflip,
+                        #},
                     },
                     'config': {
                         #'wall': True,
@@ -2034,7 +2110,7 @@ def make_app():
                     }
                 }]
             )
-            desc_fn = lambda: None
+            desc_fn = lambda: f'{env.envs[0].action_map}' # type: ignore
         else:
             try:
                 env = make_vec_env(
