@@ -17,7 +17,7 @@ kiwisolver==1.0.1
 matplotlib==3.0.3
 more-itertools==7.1.0
 multiprocess==0.70.8
-numpy==1.16.4
+numpy==1.22.0
 opencv-python==4.1.0.25
 packaging==19.0
 pandas==0.25.0
