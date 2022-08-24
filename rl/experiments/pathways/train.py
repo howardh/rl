@@ -314,6 +314,14 @@ class AttnRecAgentPPO(PPOAgentRecurrentVec):
                     'input_size': observation_space['obs (reward_permutation)'].shape[0]
                 }
             }
+        if 'action_map' in observation_space.keys():
+            inputs['action_map'] = {
+                'type': 'MatrixInput',
+                'config': {
+                    'input_size': list(observation_space['action_map'].shape),
+                    'num_heads': 8,
+                }
+            }
         outputs = {
             'value': {
                 'type': 'LinearOutput',

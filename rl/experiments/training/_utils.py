@@ -380,13 +380,19 @@ class MetaWrapper(gym.Wrapper):
             dict_obs: bool = False,
             randomize: bool = True,
             action_shuffle: bool = False,
+            include_action_map: bool = False,
             image_transformation = None,
+            task_id = None,
+            task_label = None,
             seed: int = None):
         super().__init__(env)
         self.episode_stack = episode_stack
         self.randomize = randomize
         self.dict_obs = dict_obs
         self.action_shuffle = action_shuffle
+        self.include_action_map = include_action_map
+        self.task_id = task_id
+        self.task_label = task_label
 
         self.episode_count = 0
         self._done = True
@@ -400,9 +406,10 @@ class MetaWrapper(gym.Wrapper):
         self.rand = np.random.RandomState(seed)
 
         if action_shuffle:
-            assert isinstance(env.action_space, gym.spaces.Discrete), 'Action shuffle only works with discrete actions'
-            self.action_map = np.arange(env.action_space.n)
-            self.rand.shuffle(self.action_map)
+            self._randomize_actions()
+        if self.include_action_map:
+            assert self.action_shuffle, '`action_shuffle` must be enabled along with `include_action_map`.'
+            assert self.dict_obs, '`dict_obs` must be enabled along with `include_action_map`.'
 
         self._transform = lambda x: x
         if image_transformation is not None:
@@ -420,12 +427,34 @@ class MetaWrapper(gym.Wrapper):
             obs_space = [('obs', self.env.observation_space)]
             if isinstance(self.env.observation_space, gym.spaces.Dict):
                 obs_space = [(f'obs ({k})',v) for k,v in self.env.observation_space.items()]
-            self.observation_space = gym.spaces.Dict([
+            obs_space = [
                 ('reward', gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)),
                 ('done', gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)),
                 *obs_space,
                 ('action', self.env.action_space),
-            ])
+            ]
+            if self.include_action_map:
+                assert isinstance(self.env.action_space, gym.spaces.Discrete)
+                obs_space.append((
+                    'action_map',
+                    gym.spaces.Box(
+                        low=0, high=1,
+                        shape=(self.env.action_space.n, self.env.action_space.n),
+                        dtype=np.float32
+                    )
+                ))
+            self.observation_space = gym.spaces.Dict(obs_space)
+
+    def _randomize_actions(self):
+        env = self.env
+        n = env.action_space.n
+        assert isinstance(env.action_space, gym.spaces.Discrete), 'Action shuffle only works with discrete actions'
+        self.action_map = np.arange(n)
+        self.rand.shuffle(self.action_map)
+
+        self.action_map_obs = np.zeros([n,n])
+        for i,a in enumerate(self.action_map):
+            self.action_map_obs[i,a] = 1
 
     def step(self, action):
         # Map action to the shuffled action space
@@ -443,6 +472,12 @@ class MetaWrapper(gym.Wrapper):
         else:
             obs, reward, done, info = self.env.step(action)
         self._done = done
+
+        # Add task ID
+        if self.task_id is not None:
+            info['task_id'] = self.task_id
+        if self.task_label is not None:
+            info['task_label'] = self.task_label
 
         # Apply transformations
         obs = self._transform(obs)
@@ -463,6 +498,8 @@ class MetaWrapper(gym.Wrapper):
                     'obs': obs,
                     'action': original_action,
                 }
+            if self.include_action_map:
+                obs['action_map'] = self.action_map_obs
 
         if done:
             if 'expected_return' in info and 'max_return' in info:
@@ -477,32 +514,47 @@ class MetaWrapper(gym.Wrapper):
                 return obs, reward, False, info
         return obs, reward, done, info
 
-    def reset(self, *args, **kwargs):
+    def reset(self, *, return_info=False, **_):
         self.episode_count = 0
         if self.randomize:
             self.env.randomize()
+        if self.action_shuffle:
+            self._randomize_actions()
 
         self._regret = []
 
-        obs = self.env.reset(*args, **kwargs)
+        #obs, info = self.env.reset(seed=seed, return_info=True, options=options)
+        obs = self.env.reset()
+        info = {}
+
         obs = self._transform(obs)
         if self.dict_obs:
             if isinstance(self.env.observation_space, gym.spaces.Dict):
-                return {
+                obs = {
                     'reward': np.array([0], dtype=np.float32),
                     'done': np.array([False], dtype=np.float32),
                     **{f'obs ({k})': v for k,v in obs.items()},
                     'action': self.env.action_space.sample(),
                 }
             else:
-                return {
+                obs = {
                     'reward': np.array([0], dtype=np.float32),
                     'done': np.array([False], dtype=np.float32),
                     'obs': obs,
                     'action': self.env.action_space.sample(),
                 }
-        else:
-            return obs
+            if self.include_action_map:
+                obs['action_map'] = self.action_map_obs
+
+        # Add task id
+        if self.task_id is not None:
+            info['task_id'] = self.task_id
+        if self.task_label is not None:
+            info['task_label'] = self.task_label
+
+        if return_info:
+            return obs, info
+        return obs
 
     def state_dict(self):
         return {
@@ -1358,6 +1410,7 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
         max_num_rooms,
         min_room_size=5,
         max_room_size=10,
+        door_prob=0.5,
         num_trials=100,
         fetch_config: dict = None,
         bandits_config: dict = None,
@@ -1371,6 +1424,7 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
         self.max_num_rooms = max_num_rooms
         self.min_room_size = min_room_size
         self.max_room_size = max_room_size
+        self.door_prob = door_prob
 
         self.num_trials = num_trials
         self.fetch_config = fetch_config
@@ -1476,7 +1530,7 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
                 if len(ow) == 0:
                     continue
                 opening = self._rand_elem(ow)
-                if self.np_random.rand() < 0.5:
+                if self.np_random.rand() > self.door_prob:
                     self.grid.set(opening[1], opening[0], None)
                 else:
                     door = gym_minigrid.minigrid.Door(
@@ -1792,7 +1846,7 @@ class EmptyEnv(gym_minigrid.minigrid.MiniGridEnv):
 
         # Place a goal square in the bottom-right corner
         self.goal = gym_minigrid.minigrid.Goal()
-        self.put_obj(self.goal, width - 2, height - 2)
+        self.place_obj(self.goal)
 
         # Place the agent
         if self.agent_start_pos is not None:
@@ -1845,20 +1899,21 @@ gym_minigrid.register.register(
 
 
 if __name__ == '__main__':
-    #env = gym.make('MiniGrid-MultiRoom-v1',
-    #        min_num_rooms=2,
-    #        max_num_rooms=2,
-    #        min_room_size=4,
-    #        max_room_size=6,
-    #        #fetch_config={'num_objs': 5},
-    #        bandits_config={
-    #            'probs': [0.9, 0.1]
-    #        },
-    #        #seed=2349918951,
-    #)
-    env = gym.make('MiniGrid-Empty-Meta-v0',
-        wall = True
+    env = gym.make('MiniGrid-MultiRoom-v1',
+            min_num_rooms=4,
+            max_num_rooms=6,
+            min_room_size=4,
+            max_room_size=10,
+            fetch_config={'num_objs': 5},
+            #bandits_config={
+            #    'probs': [0.9, 0.1]
+            #},
+            #seed=2349918951,
     )
+    #env = gym.make('MiniGrid-Empty-Meta-v0',
+    #    wall = False,
+    #    lava = True,
+    #)
     env.reset()
     env.render()
     breakpoint()

@@ -140,22 +140,37 @@ class TrainExperiment(Experiment):
             self._ep_rewards += reward
 
             if done.any():
-                if 'lives' in info:
+                if 'lives' in info: # XXX: Is this correct? `info` is a list of dicts. Does envpool and gym's vec environments do this differently? Maybe this only works for envpool.
                     real_done = np.logical_and(done, info['lives'] == 0)
-                    if real_done.any():
-                        mean_reward = self._ep_rewards[real_done].mean().item()
-                        mean_length = self._ep_len[real_done].mean().item()
-                        self.logger.log(reward=mean_reward, episode_length=mean_length)
-                        self._ep_rewards = self._ep_rewards*(1-real_done)
-                        self._ep_len = self._ep_len*(1-real_done)
-                        tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}')
                 else:
-                    mean_reward = self._ep_rewards[done].mean().item()
-                    mean_length = self._ep_len[done].mean().item()
+                    real_done = done
+                if real_done.any():
+                    mean_reward = self._ep_rewards[real_done].mean().item()
+                    mean_length = self._ep_len[real_done].mean().item()
+                    if 'task_id' in info[0]:
+                        task_id = [i['task_id'] for i in info]
+                        task_label = [i['task_label'] for i in info]
+                        id_to_label = {i:l for i,l in zip(task_id, task_label)}
+                        reward_by_task = {}
+                        ep_len_by_task = {}
+                        for tid in id_to_label.keys():
+                            task_done = (np.array(task_id) == tid) * real_done
+                            if not task_done.any():
+                                continue
+                            reward_by_task[f'task/{id_to_label[tid]}'] = self._ep_rewards[task_done].mean().item()
+                            ep_len_by_task[f'task/{id_to_label[tid]}'] = self._ep_len[task_done].mean().item()
+                        self.logger.log(reward_by_task=reward_by_task, episode_length_by_task=ep_len_by_task)
                     self.logger.log(reward=mean_reward, episode_length=mean_length)
-                    self._ep_rewards = self._ep_rewards*(1-done)
-                    self._ep_len = self._ep_len*(1-done)
-                    tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}\t {done.sum().item()} done')
+                    self._ep_rewards = self._ep_rewards*(1-real_done)
+                    self._ep_len = self._ep_len*(1-real_done)
+                    tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}\t {real_done.sum().item()} done')
+                #else:
+                #    mean_reward = self._ep_rewards[done].mean().item()
+                #    mean_length = self._ep_len[done].mean().item()
+                #    self.logger.log(reward=mean_reward, episode_length=mean_length)
+                #    self._ep_rewards = self._ep_rewards*(1-done)
+                #    self._ep_len = self._ep_len*(1-done)
+                #    tqdm.write(f'Iteration {i*self._num_train_envs:,}\t Training reward: {mean_reward}\t {done.sum().item()} done')
                 for callback in self.callbacks['on_episode_end']:
                     callback(self, (obs, reward, done, info))
 

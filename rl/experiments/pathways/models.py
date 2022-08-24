@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Sequence
 import math
 
 import torch
@@ -1090,6 +1090,62 @@ class DiscreteInput(torch.nn.Module):
         }
 
 
+class MatrixInput(torch.nn.Module):
+    def __init__(self, input_size: Sequence[int], key_size: int, value_size: int, num_heads: int = 1, shared_key: bool = False):
+        """
+        Args:
+            input_size: The size of the input matrix.
+            key_size: The size of the key.
+            value_size: The size of the value.
+            num_heads: ...
+            shared_key: If set to True, the same key will be used regardless of input. If set to False, the key will be computed as a linear function of the input.
+        """
+        super().__init__()
+        self._shared_key = shared_key
+        self._key_size = key_size
+        self._value_size = value_size
+
+        self.left_value = torch.nn.Parameter(
+            torch.nn.init.xavier_uniform_(
+                torch.empty([num_heads, input_size[0]])
+            )
+        )
+        self.right_value = torch.nn.Parameter(
+            torch.nn.init.xavier_uniform_(
+                torch.empty([input_size[1], value_size // num_heads])
+            )
+        )
+
+        if shared_key:
+            self.key = torch.nn.Parameter(
+                torch.nn.init.xavier_uniform_(
+                    torch.empty(key_size)
+                )
+            )
+        else:
+            self.left_key = torch.nn.Parameter(
+                torch.nn.init.xavier_uniform_(
+                    torch.empty([num_heads, input_size[0]])
+                )
+            )
+            self.right_key = torch.nn.Parameter(
+                torch.nn.init.xavier_uniform_(
+                    torch.empty([input_size[1], key_size // num_heads])
+                )
+            )
+    def forward(self, x: TensorType['batch_size','dim1','dim2',float]):
+        batch_size = x.shape[0]
+        if self._shared_key:
+            key = self.key.expand(batch_size, -1)
+        else:
+            key = self.left_key @ x @ self.right_key
+            key = key.view(batch_size, self._key_size)
+        return {
+            'key': key,
+            'value': (self.left_value @ x @ self.right_value).view(batch_size, self._value_size)
+        }
+
+
 class ModularPolicy(PolicyValueNetworkRecurrent):
     def __init__(self, inputs, num_actions, input_size, key_size, value_size, num_heads, ff_size, num_blocks=1,
             recurrence_type='RecurrentAttention'):
@@ -1280,6 +1336,7 @@ class ModularPolicy2(PolicyValueNetworkRecurrent):
                     ScalarInput,
                     DiscreteInput,
                     LinearInput,
+                    MatrixInput,
                 ]
         }
         input_modules: Dict[str,torch.nn.Module] = {}
@@ -1424,6 +1481,7 @@ class ModularPolicy3(PolicyValueNetworkRecurrent): # TODO
                     ScalarInput,
                     DiscreteInput,
                     LinearInput,
+                    MatrixInput,
                 ]
         }
         input_modules: Dict[str,torch.nn.Module] = {}
@@ -1603,6 +1661,7 @@ class ModularPolicy4(PolicyValueNetworkRecurrent):
                     ScalarInput,
                     DiscreteInput,
                     LinearInput,
+                    MatrixInput,
                 ]
         }
         input_modules: Dict[str,torch.nn.Module] = {}
@@ -1895,6 +1954,7 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                     ScalarInput,
                     DiscreteInput,
                     LinearInput,
+                    MatrixInput,
                 ]
         }
         input_modules: Dict[str,torch.nn.Module] = {}
@@ -2047,9 +2107,11 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
             output[k] = y['output']
             self.last_output_attention[k] = y['attn_output_weights'].cpu().detach().squeeze(1) # (batch_size, seq_len)
 
+        self.last_hidden = (new_keys, new_values, *new_internal_state)
+
         return {
             **output,
-            'hidden': (new_keys, new_values, *new_internal_state),
+            'hidden': self.last_hidden,
             'misc': {
                 'core_output': layer_output,
                 'input_labels': input_labels,
@@ -2266,7 +2328,8 @@ if __name__ == '__main__':
                 architecture=[24,24]
         ).to(device)
 
-        batch_size = 1024
+        #batch_size = 1024
+        batch_size = 128
         rand_input = {
                 'obs (image)': torch.randn(batch_size,3,56,56, device=device),
                 'reward': torch.randn([batch_size,1], device=device),
@@ -2284,6 +2347,10 @@ if __name__ == '__main__':
             loss.backward()
 
         num_iterations = 1_000
+
+        # Compile JIT code before timing
+        foo()
+        foo2()
 
         print('-'*80)
         print(f'{num_iterations} iterations of forward only')

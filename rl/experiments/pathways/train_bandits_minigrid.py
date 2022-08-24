@@ -947,6 +947,224 @@ def get_params():
         },
     })
 
+    a = params['exp-037']['agent']
+    a['parameters']['architecture'] = [6, 6, 6, 6]
+    params.add('exp-038', {
+        **params['exp-037'],
+        'agent': a,
+    })
+
+    # Go back to the smaller model. Add action map to the observation.
+    env_name = 'MiniGrid-Empty-Meta-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+                'action_shuffle': True,
+                'include_action_map': True,
+            },
+            'config': {
+                'size': 5,
+                'lava': True,
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-039', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Larger model is working. Go back to that architecture.
+    # Train on all other tasks of interest
+    env_name = 'MiniGrid-Empty-Meta-v0'
+    env_config_empty = {
+        'env_name': env_name,
+        'minigrid': True,
+        'minigrid_config': {},
+        'meta_config': {
+            'episode_stack': 1,
+            'dict_obs': True,
+            'randomize': False,
+            'action_shuffle': True,
+            'include_action_map': False,
+            'task_label': 'empty',
+            'task_id': 0,
+        },
+        'config': {
+            'size': 5,
+            'lava': True,
+        }
+    }
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config_fetch = {
+        'env_name': env_name,
+        'minigrid': True,
+        'minigrid_config': {},
+        'meta_config': {
+            'episode_stack': 1,
+            'dict_obs': True,
+            'randomize': False,
+            'action_shuffle': True,
+            'include_action_map': False,
+            'task_label': 'fetch',
+            'task_id': 1,
+        },
+        'config': {
+            'num_trials': 100,
+            'min_num_rooms': 1,
+            'max_num_rooms': 1,
+            'min_room_size': 5,
+            'max_room_size': 5,
+            'fetch_config': {
+                'num_objs': 2,
+                'num_obj_colors': 6,
+            },
+        }
+    }
+    env_config_bandits = {
+        'env_name': env_name,
+        'minigrid': True,
+        'minigrid_config': {},
+        'meta_config': {
+            'episode_stack': 1,
+            'dict_obs': True,
+            'randomize': False,
+            'action_shuffle': True,
+            'include_action_map': False,
+            'task_label': 'bandits',
+            'task_id': 2,
+        },
+        'config': {
+            'num_trials': 100,
+            'min_num_rooms': 1,
+            'max_num_rooms': 1,
+            'min_room_size': 5,
+            'max_room_size': 5,
+            'bandits_config': {
+                'probs': [1,0],
+            },
+        }
+    }
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [[
+            env_config_empty,
+            env_config_fetch,
+            env_config_bandits,
+        ][i%3] for i in range(num_envs)],
+    }
+    params.add('exp-040', {
+        **params['exp-038'],
+        'env_test': env_config,
+        'env_train': env_config,
+    }) # Not learning. Only the empty task can successfully learn.
+
+    # Try only training on one task with action shuffle. Bandits seems easier, so try that first.
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [env_config_bandits for _ in range(num_envs)],
+    }
+    params.add('exp-041', {
+        **params['exp-038'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [env_config_bandits for _ in range(num_envs)],
+    }
+    params.add('exp-041-bandits', {
+        **params['exp-038'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [env_config_fetch for _ in range(num_envs)],
+    }
+    params.add('exp-041-fetch', {
+        **params['exp-038'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Resume the series of experiments from exp-031
+    # Previously learned to solve the fetch task in larger rooms
+    # Now train the agent in a two room environment and no doors
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 2,
+                'min_room_size': 4,
+                'max_room_size': 5,
+                'door_prob': 0,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                },
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-042', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Add doors with 50% probability
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 2,
+                'min_room_size': 4,
+                'max_room_size': 5,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                },
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-043', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
     return params
 
 
@@ -1172,6 +1390,7 @@ def make_app():
             results_directory : Optional[str] = None,
             max_iterations : int = 5_000_000,
             starting_model: Optional[str] = None,
+            checkpoint_filename: Optional[str] = None,
             slurm : bool = typer.Option(False, '--slurm'),
             wandb : bool = typer.Option(False, '--wandb'),
             debug : bool = typer.Option(False, '--debug')):
@@ -1209,10 +1428,18 @@ def make_app():
                     verbose=True,
                     modifiable=True,
             )
+
+        if checkpoint_filename is not None:
+            with open(checkpoint_filename, 'rb') as f:
+                checkpoint = dill.load(f)
+            #exp_runner.exp.load_state_dict(checkpoint['exp'])
+            exp_runner.exp.agent.load_state_dict(checkpoint['exp']['agent'])
+
         if wandb:
             exp_runner.exp.logger.init_wandb({
                 'project': f'PPO-minigrid-bandits-{exp_name}'
             })
+            exp_runner.exp.agent._steps = 0 # W&B breaks otherwise
 
         if starting_model is not None:
             print(f'Starting training from pretrained weights: {starting_model}')
@@ -1960,6 +2187,7 @@ def make_app():
             reward_config: Tuple[float,float] = (1, -1),
             reward_scale: float = 1,
             prob: float = 0.9,
+            door_prob: float = 0,
             num_objs: int = 2,
             num_obj_types: int = 2,
             num_obj_colors: int = 1,
@@ -1974,145 +2202,10 @@ def make_app():
 
         num_trials = 1
         exp = load_checkpoint(TrainExperiment, checkpoint_filename)
-        desc_fn = lambda: None
-        if env_name == 'MiniGrid-NRoomBanditsSmall-v0':
-            env = make_vec_env(
-                env_type = 'gym_sync',
-                env_configs = [{
-                    'env_name': env_name,
-                    'minigrid': True,
-                    'minigrid_config': {},
-                    'meta_config': {
-                        'episode_stack': 100,
-                        'dict_obs': True,
-                        'randomize': False,
-                    },
-                    'config': {
-                        'rewards': reward_config,
-                        'shuffle_goals_on_reset': False,
-                        'include_reward_permutation': False,
-                    }
-                }]
-            )
-        elif env_name == 'MiniGrid-NRoomBanditsSmallBernoulli-v0':
-            env = make_vec_env(
-                env_type = 'gym_sync',
-                env_configs = [{
-                    'env_name': env_name,
-                    'minigrid': True,
-                    'minigrid_config': {},
-                    'meta_config': {
-                        'episode_stack': 100,
-                        'dict_obs': True,
-                        'randomize': False,
-                    },
-                    'config': {
-                        'reward_scale': reward_scale,
-                        'prob': prob,
-                        'shuffle_goals_on_reset': False,
-                        'include_reward_permutation': False,
-                    }
-                }]
-            )
-        elif env_name == 'MiniGrid-BanditsFetch-v0':
-            env = make_vec_env(
-                env_type = 'gym_sync',
-                env_configs = [{
-                    'env_name': env_name,
-                    'minigrid': True,
-                    'minigrid_config': {},
-                    'meta_config': {
-                        'episode_stack': 1,
-                        'dict_obs': True,
-                        'randomize': False,
-                    },
-                    'config': {
-                        'size': size,
-                        'num_trials': 100,
-                        'num_objs': num_objs,
-                        'num_obj_types': num_obj_types,
-                        'num_obj_colors': num_obj_colors,
-                        'unique_objs': True,
-                    }
-                }]
-            )
-            desc_fn = lambda: f'{env.envs[0].targetColor} {env.envs[0].targetType}' # type: ignore
-        elif env_name == 'MiniGrid-MultiRoom-v0':
-            env = make_vec_env(
-                env_type = 'gym_sync',
-                env_configs = [{
-                    'env_name': env_name,
-                    'minigrid': True,
-                    'minigrid_config': {},
-                    'meta_config': {
-                        'episode_stack': 1,
-                        'dict_obs': True,
-                        'randomize': False,
-                    },
-                    'config': {
-                        'num_trials': 100,
-                        'min_num_rooms': num_rooms,
-                        'max_num_rooms': num_rooms,
-                        'max_room_size': max_room_size,
-                        'min_room_size': min_room_size,
-                    }
-                }]
-            )
+
+        def make_env():
             desc_fn = lambda: None
-        elif env_name == 'MiniGrid-MultiRoom-v1':
-            env = make_vec_env(
-                env_type = 'gym_sync',
-                env_configs = [{
-                    'env_name': env_name,
-                    'minigrid': True,
-                    'minigrid_config': {},
-                    'meta_config': {
-                        'episode_stack': 1,
-                        'dict_obs': True,
-                        'randomize': False,
-                    },
-                    'config': {
-                        'num_trials': 100,
-                        'min_num_rooms': num_rooms,
-                        'max_num_rooms': num_rooms,
-                        'max_room_size': max_room_size,
-                        'fetch_config': {
-                            'num_objs': num_objs,
-                            'num_obj_types': num_obj_types,
-                            'num_obj_colors': num_obj_colors,
-                        },
-                        #'bandits_config': {
-                        #    'probs': [0.9, 0.1]
-                        #},
-                    }
-                }]
-            )
-            desc_fn = lambda: f'{env.envs[0].targetColor} {env.envs[0].targetType}' # type: ignore
-        elif env_name == 'MiniGrid-Empty-Meta-v0':
-            env = make_vec_env(
-                env_type = 'gym_sync',
-                env_configs = [{
-                    'env_name': env_name,
-                    'minigrid': True,
-                    'minigrid_config': {},
-                    'meta_config': {
-                        'episode_stack': 1,
-                        'dict_obs': True,
-                        'randomize': False,
-                        'action_shuffle': True,
-                        #'image_transformation': {
-                        #    'hflip': hflip,
-                        #},
-                    },
-                    'config': {
-                        #'wall': True,
-                        'lava': True,
-                    }
-                }]
-            )
-            desc_fn = lambda: f'{env.envs[0].action_map}' # type: ignore
-        else:
-            try:
+            if env_name == 'MiniGrid-NRoomBanditsSmall-v0':
                 env = make_vec_env(
                     env_type = 'gym_sync',
                     env_configs = [{
@@ -2123,15 +2216,156 @@ def make_app():
                             'episode_stack': 100,
                             'dict_obs': True,
                             'randomize': False,
-                            'image_transformation': {
-                                'hflip': hflip,
-                            },
                         },
-                        'config': {}
+                        'config': {
+                            'rewards': reward_config,
+                            'shuffle_goals_on_reset': False,
+                            'include_reward_permutation': False,
+                        }
                     }]
                 )
-            except:
-                raise ValueError(f'Unknown env_name: {env_name}')
+            elif env_name == 'MiniGrid-NRoomBanditsSmallBernoulli-v0':
+                env = make_vec_env(
+                    env_type = 'gym_sync',
+                    env_configs = [{
+                        'env_name': env_name,
+                        'minigrid': True,
+                        'minigrid_config': {},
+                        'meta_config': {
+                            'episode_stack': 100,
+                            'dict_obs': True,
+                            'randomize': False,
+                        },
+                        'config': {
+                            'reward_scale': reward_scale,
+                            'prob': prob,
+                            'shuffle_goals_on_reset': False,
+                            'include_reward_permutation': False,
+                        }
+                    }]
+                )
+            elif env_name == 'MiniGrid-BanditsFetch-v0':
+                env = make_vec_env(
+                    env_type = 'gym_sync',
+                    env_configs = [{
+                        'env_name': env_name,
+                        'minigrid': True,
+                        'minigrid_config': {},
+                        'meta_config': {
+                            'episode_stack': 1,
+                            'dict_obs': True,
+                            'randomize': False,
+                        },
+                        'config': {
+                            'size': size,
+                            'num_trials': 100,
+                            'num_objs': num_objs,
+                            'num_obj_types': num_obj_types,
+                            'num_obj_colors': num_obj_colors,
+                            'unique_objs': True,
+                        }
+                    }]
+                )
+                desc_fn = lambda: f'{env.envs[0].targetColor} {env.envs[0].targetType}' # type: ignore
+            elif env_name == 'MiniGrid-MultiRoom-v0':
+                env = make_vec_env(
+                    env_type = 'gym_sync',
+                    env_configs = [{
+                        'env_name': env_name,
+                        'minigrid': True,
+                        'minigrid_config': {},
+                        'meta_config': {
+                            'episode_stack': 1,
+                            'dict_obs': True,
+                            'randomize': False,
+                        },
+                        'config': {
+                            'num_trials': 100,
+                            'min_num_rooms': num_rooms,
+                            'max_num_rooms': num_rooms,
+                            'max_room_size': max_room_size,
+                            'min_room_size': min_room_size,
+                        }
+                    }]
+                )
+                desc_fn = lambda: None
+            elif env_name == 'MiniGrid-MultiRoom-v1':
+                env = make_vec_env(
+                    env_type = 'gym_sync',
+                    env_configs = [{
+                        'env_name': env_name,
+                        'minigrid': True,
+                        'minigrid_config': {},
+                        'meta_config': {
+                            'episode_stack': 1,
+                            'dict_obs': True,
+                            'randomize': False,
+                        },
+                        'config': {
+                            'num_trials': 100,
+                            'min_num_rooms': num_rooms,
+                            'max_num_rooms': num_rooms,
+                            'max_room_size': max_room_size,
+                            'door_prob': door_prob,
+                            'fetch_config': {
+                                'num_objs': num_objs,
+                                'num_obj_types': num_obj_types,
+                                'num_obj_colors': num_obj_colors,
+                            },
+                            #'bandits_config': {
+                            #    'probs': [0.9, 0.1]
+                            #},
+                        }
+                    }]
+                )
+                desc_fn = lambda: f'{env.envs[0].targetColor} {env.envs[0].targetType}' # type: ignore
+            elif env_name == 'MiniGrid-Empty-Meta-v0':
+                env = make_vec_env(
+                    env_type = 'gym_sync',
+                    env_configs = [{
+                        'env_name': env_name,
+                        'minigrid': True,
+                        'minigrid_config': {},
+                        'meta_config': {
+                            'episode_stack': 1,
+                            'dict_obs': True,
+                            'randomize': False,
+                            'action_shuffle': True,
+                            #'include_action_map': True,
+                            #'image_transformation': {
+                            #    'hflip': hflip,
+                            #},
+                        },
+                        'config': {
+                            #'wall': True,
+                            'lava': True,
+                        }
+                    }]
+                )
+                desc_fn = lambda: f'{env.envs[0].action_map}' # type: ignore
+            else:
+                try:
+                    env = make_vec_env(
+                        env_type = 'gym_sync',
+                        env_configs = [{
+                            'env_name': env_name,
+                            'minigrid': True,
+                            'minigrid_config': {},
+                            'meta_config': {
+                                'episode_stack': 100,
+                                'dict_obs': True,
+                                'randomize': False,
+                                'image_transformation': {
+                                    'hflip': hflip,
+                                },
+                            },
+                            'config': {}
+                        }]
+                    )
+                except:
+                    raise ValueError(f'Unknown env_name: {env_name}')
+            return env, desc_fn
+        env, desc_fn = make_env()
 
         def concat_images(images, padding=0, direction='h', align=0):
             if direction == 'h':
@@ -2262,8 +2496,11 @@ def make_app():
         results = {}
         fps = 25
 
-        results['agent'] = []
         results['reward'] = []
+        results['attention'] = []
+        results['hidden'] = []
+        results['input_labels'] = []
+        action_count = defaultdict(lambda: 0)
         agent = exp.exp.agent
         for i in range(num_trials):
             video_writer = cv2.VideoWriter( # type: ignore
@@ -2282,8 +2519,10 @@ def make_app():
             video_writer4 = None
             num_frames = 0
 
-            results['agent'].append([])
             results['reward'].append([])
+            results['attention'].append([])
+            results['hidden'].append([])
+            results['input_labels'].append(None)
             agent.reset()
             obs = env.reset()
             description = desc_fn()
@@ -2301,9 +2540,19 @@ def make_app():
                 results['reward'][-1].append(reward[0])
                 num_frames += 1
                 print(f'{num_frames} {action} {reward} {desc_fn()}')
+                action_count[action.item()] += 1
                 frame = env.envs[0].render(mode=None) # type: ignore
                 video_writer.write(frame[:,:,::-1])
                 video_writer2.write(np.moveaxis(obs['obs (image)'].squeeze(), 0, 2)[:,:,::-1])
+                results['input_labels'][-1] = agent.net.last_input_labels
+                results['attention'][-1].append((
+                    [x.numpy() for x in agent.net.last_attention],
+                    [x.numpy() for x in agent.net.last_ff_gating],
+                    {k: v.numpy() for k,v in agent.net.last_output_attention.items()},
+                ))
+                results['hidden'][-1].append([
+                    x.cpu().detach().numpy() for x in agent.net.last_hidden
+                ])
                 attn_img = draw_attention(
                         core_attention = agent.net.last_attention,
                         query_gating = agent.net.last_ff_gating,
@@ -2339,10 +2588,299 @@ def make_app():
             if video_writer4 is not None:
                 video_writer4.release()
             print(f'Trial {i} total reward: {np.sum(results["reward"][-1])}')
+            print(action_count)
             #print(env.envs[0].reward_permutation) # type: ignore
             print(description) # type: ignore
 
+            with open('results.pkl', 'wb') as f:
+                dill.dump(results, f)
+            print(f'Saved results to {os.path.abspath("results.pkl")}')
+
             breakpoint()
+
+    @app.command()
+    def plot_trajectory(results_filename: str, data_src: str = 'attention',
+            tsne_seed: int = 0, trail_length: int = 5, video_format: str = None):
+        with open(results_filename, 'rb') as f:
+            results = dill.load(f)
+
+        # Convert data to 1D arrays
+        if data_src == 'attention':
+            data = np.stack([
+                np.concatenate(
+                    [x.flatten() for x in attn[0]] + [x.flatten() for x in attn[1]] + [x.flatten() for x in attn[2].values()],
+                )
+                for attn in results['attention'][0]
+            ])
+        elif data_src == 'hidden':
+            data = np.stack([
+                np.concatenate([h.flatten() for h in hidden])
+                for hidden in results['hidden'][0]
+            ])
+        else:
+            raise ValueError(f'Unknown data_src: {data_src}')
+
+        # Dimensionality reduction with PCA
+        from sklearn.decomposition import PCA
+
+        pca = PCA(n_components=20)
+        pca.fit(data)
+        data_pca = pca.transform(data)
+
+        # t-SNE
+        from sklearn.manifold import TSNE
+        tsne = TSNE(n_components=2, random_state=tsne_seed)
+        data_tsne = tsne.fit_transform(data_pca)
+
+        # Plot all points
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.animation import ArtistAnimation
+        from matplotlib.animation import PillowWriter
+        from matplotlib.animation import FFMpegWriter
+
+        plt.figure()
+        plt.scatter(data_tsne[:,0], data_tsne[:,1])
+        plt.savefig('trajectory.png')
+
+        ax = plt.gca()
+        x_lim = ax.get_xlim()
+        y_lim = ax.get_ylim()
+
+        # Plot trajectory over the entire episode
+        if video_format is not None:
+            video_trail_length = 5
+            plt.figure()
+            ax = plt.gca()
+            ax.set_xlim(x_lim)
+            ax.set_ylim(y_lim)
+            artists = []
+            for end_index in range(1, data_tsne.shape[0]):
+                artists.append([])
+                for start_index in range(max(end_index-video_trail_length-1,0), end_index-1):
+                    x = data_tsne[start_index:start_index+2,0]
+                    y = data_tsne[start_index:start_index+2,1]
+                    alpha = 1 - (end_index - start_index - 1) / video_trail_length
+                    #print(x,y,alpha)
+                    a = ax.plot(x, y, '-',
+                            alpha=alpha,
+                            color='black'
+                    )
+                    artists[-1].append(a[0])
+
+                    r = results['reward'][0][start_index]
+                    if r > 0:
+                        artists[-1].append(ax.scatter(x[0], y[0], color='green', alpha=alpha))
+                    elif r < 0:
+                        artists[-1].append(ax.scatter(x[0], y[0], color='red', marker='X', alpha=alpha))
+
+            print('Rendering video')
+            animation = ArtistAnimation(plt.gcf(), artists, interval=50, blit=True)
+            if video_format == 'gif':
+                writer = PillowWriter(fps=5)
+                animation.save('trajectory.gif', writer=writer)
+                print(f'Saved video to {os.path.abspath("trajectory.gif")}')
+            elif video_format == 'mp4':
+                writer = FFMPEGWriter(fps=5)
+                animation.save('trajectory.mp4', writer=writer)
+                print(f'Saved video to {os.path.abspath("trajectory.mp4")}')
+            plt.close()
+
+        ##################################################
+        # Note: The hidden states at index i is the hidden state that is produced by the model just before observing the reward at index i.
+
+        # Plot trajectory just before reaching a positive reward
+        plt.figure()
+        ax = plt.gca()
+        ax.set_xlim(x_lim)
+        ax.set_ylim(y_lim)
+        ax.set_title('Trajectory before reaching a positive reward')
+        for i,r in enumerate(results['reward'][0]):
+            if r <= 0:
+                continue
+            ax.scatter(data_tsne[i,0], data_tsne[i,1], color='green')
+            for j in range(max(i-trail_length-1, 0), i):
+                x = data_tsne[j:j+2,0]
+                y = data_tsne[j:j+2,1]
+                alpha = 1 - (i - j - 1) / trail_length
+                ax.plot(x, y, '-',
+                        alpha=alpha,
+                        color='black'
+                )
+        plt.savefig('trajectory-before-positive.png')
+        print(f'Saved figure to {os.path.abspath("trajectory-before-positive.png")}')
+        plt.close()
+
+        # Plot trajectory just before reaching a negative reward
+        plt.figure()
+        ax = plt.gca()
+        ax.set_xlim(x_lim)
+        ax.set_ylim(y_lim)
+        ax.set_title('Trajectory before reaching a negative reward')
+        for i,r in enumerate(results['reward'][0]):
+            if r >= 0:
+                continue
+            ax.scatter(data_tsne[i,0], data_tsne[i,1], marker='X', color='red')
+            for j in range(max(i-trail_length-1, 0), i):
+                x = data_tsne[j:j+2,0]
+                y = data_tsne[j:j+2,1]
+                alpha = 1 - (i - j - 1) / trail_length
+                ax.plot(x, y, '-',
+                        alpha=alpha,
+                        color='black'
+                )
+        plt.savefig('trajectory-before-negative.png')
+        print(f'Saved figure to {os.path.abspath("trajectory-before-negative.png")}')
+        plt.close()
+
+        # Plot trajectory just after reaching a positive reward
+        plt.figure()
+        ax = plt.gca()
+        ax.set_xlim(x_lim)
+        ax.set_ylim(y_lim)
+        ax.set_title('Trajectory after reaching a positive reward')
+        for i,r in enumerate(results['reward'][0]):
+            if r <= 0:
+                continue
+            ax.scatter(data_tsne[i,0], data_tsne[i,1], color='green')
+            for j in range(i, min(i+trail_length, data_tsne.shape[0])):
+                x = data_tsne[j:j+2,0]
+                y = data_tsne[j:j+2,1]
+                alpha = 1 - (j - i) / trail_length
+                ax.plot(x, y, '-',
+                        alpha=alpha,
+                        color='black'
+                )
+        plt.savefig('trajectory-after-positive.png')
+        print(f'Saved figure to {os.path.abspath("trajectory-after-positive.png")}')
+        plt.close()
+
+        # Plot trajectory just after reaching a negative reward
+        plt.figure()
+        ax = plt.gca()
+        ax.set_xlim(x_lim)
+        ax.set_ylim(y_lim)
+        ax.set_title('Trajectory after reaching a negative reward')
+        for i,r in enumerate(results['reward'][0]):
+            if r >= 0:
+                continue
+            ax.scatter(data_tsne[i,0], data_tsne[i,1], marker='X', color='red')
+            for j in range(i, min(i+trail_length, data_tsne.shape[0])):
+                x = data_tsne[j:j+2,0]
+                y = data_tsne[j:j+2,1]
+                alpha = 1 - (j - i) / trail_length
+                print(x,y,alpha,j,i)
+                ax.plot(x, y, '-',
+                        alpha=alpha,
+                        color='black'
+                )
+        print(data_tsne.shape)
+        plt.savefig('trajectory-after-negative.png')
+        print(f'Saved figure to {os.path.abspath("trajectory-after-negative.png")}')
+        plt.close()
+
+        # Reward-triggered averaging (positive reward)
+        import matplotlib.gridspec
+        window_size = 51 # Must be odd
+
+        rta_data = []
+        for i,r in enumerate(results['reward'][0]):
+            if r <= 0:
+                continue
+            if i < window_size // 2:
+                continue
+            if i > data_tsne.shape[0] - window_size // 2:
+                continue
+            rta_data.append(data_pca[i-window_size//2:i+window_size//2+1,:])
+        rta_data = np.stack(rta_data, axis=0).mean(axis=0)
+        n = rta_data.shape[1]
+        colours = ['#ff6188', '#a9dc76', '#78dce8'] # Monokai's red/green/blue
+
+        plt.figure()
+        gs = (matplotlib.gridspec.GridSpec(n,1))
+        ax = []
+        for i in range(n):
+            ax.append(plt.subplot(gs[i]))
+            # Plot data
+            ax[-1].plot(range(-window_size//2, window_size//2), rta_data[:,i],
+                    color=colours[i%len(colours)])
+            # Remove the y-axis ticks and tick labels
+            ax[-1].set_yticks([])
+            ax[-1].set_yticklabels([])
+            # For all but the last subplot
+            if i != rta_data.shape[1] - 1:
+                # Remove the x-axis tick labels
+                ax[-1].set_xticklabels([])
+                # Remove spines
+                ax[-1].spines['right'].set_visible(False)
+                ax[-1].spines['top'].set_visible(False)
+                ax[-1].spines['left'].set_visible(False)
+                ax[-1].spines['bottom'].set_visible(False)
+            else:
+                # Remove spines
+                ax[-1].spines['right'].set_visible(False)
+                ax[-1].spines['top'].set_visible(False)
+                ax[-1].spines['left'].set_visible(False)
+            # Make background transparent
+            ax[-1].patch.set_alpha(0.0)
+            # Set vertical gridlines
+            ax[-1].xaxis.grid(True)
+        ax[0].set_title('Reward-triggered averaging (positive reward)')
+        ax[-1].set_xlabel('Time relative to reward')
+        gs.update(hspace = -0.5)
+        plt.tight_layout()
+        plt.savefig('rta-positive.png')
+
+        # Reward-triggered averaging (negative reward)
+        rta_data = []
+        for i,r in enumerate(results['reward'][0]):
+            if r >= 0:
+                continue
+            if i < window_size // 2:
+                continue
+            if i > data_tsne.shape[0] - window_size // 2:
+                continue
+            rta_data.append(data_pca[i-window_size//2:i+window_size//2+1,:])
+        rta_data = np.stack(rta_data, axis=0).mean(axis=0)
+        n = rta_data.shape[1]
+        colours = ['#ff6188', '#a9dc76', '#78dce8'] # Monokai's red/green/blue
+
+        plt.figure()
+        gs = (matplotlib.gridspec.GridSpec(n,1))
+        ax = []
+        for i in range(n):
+            ax.append(plt.subplot(gs[i]))
+            # Plot data
+            ax[-1].plot(range(-window_size//2, window_size//2), rta_data[:,i],
+                    color=colours[i%len(colours)])
+            # Remove the y-axis ticks and tick labels
+            ax[-1].set_yticks([])
+            ax[-1].set_yticklabels([])
+            # For all but the last subplot
+            if i != rta_data.shape[1] - 1:
+                # Remove the x-axis tick labels
+                ax[-1].set_xticklabels([])
+                # Remove spines
+                ax[-1].spines['right'].set_visible(False)
+                ax[-1].spines['top'].set_visible(False)
+                ax[-1].spines['left'].set_visible(False)
+                ax[-1].spines['bottom'].set_visible(False)
+            else:
+                # Remove spines
+                ax[-1].spines['right'].set_visible(False)
+                ax[-1].spines['top'].set_visible(False)
+                ax[-1].spines['left'].set_visible(False)
+            # Make background transparent
+            ax[-1].patch.set_alpha(0.0)
+            # Set vertical gridlines
+            ax[-1].xaxis.grid(True)
+        ax[0].set_title('Reward-triggered averaging (negative reward)')
+        ax[-1].set_xlabel('Time relative to reward')
+        gs.update(hspace = -0.5)
+        plt.tight_layout()
+        plt.savefig('rta-negative.png')
+
 
     commands = {
             'run': run,
@@ -2351,6 +2889,7 @@ def make_app():
             'run_impala': run_impala,
             'checkpoint': checkpoint,
             'plot': plot,
+            'plot_trajectory': plot_trajectory,
             'test': test,
             'video': video,
     }
