@@ -224,68 +224,66 @@ class AttnRecAgentPPO(PPOAgentRecurrentVec):
                 return self._init_minigrid_net(observation_space, action_space, device)
         raise Exception('Unsupported observation space or action space.')
     def _init_atari_net(self, observation_space, action_space, device):
+        inputs = {
+            'obs': {
+                'type': 'GreyscaleImageInput',
+                'config': {
+                    'in_channels': observation_space['obs'].shape[0]
+                },
+            },
+            'reward': {
+                'type': 'ScalarInput',
+            },
+            'action': {
+                'type': 'DiscreteInput' if isinstance(action_space, gym.spaces.Discrete) else 'LinearInput',
+                'config': {
+                    'input_size': action_space.n
+                },
+            },
+        }
+        outputs = {
+            'value': {
+                'type': 'LinearOutput',
+                'config': {
+                    'output_size': 1,
+                }
+            },
+            'action': {
+                'type': 'LinearOutput',
+                'config': {
+                    'output_size': action_space.n,
+                }
+            },
+        }
+        common_model_params = {
+            'input_size': 512,
+            'key_size': 512,
+            'value_size': 512,
+            'num_heads': 8,
+            'ff_size': 1024,
+            'recurrence_type': self._recurrence_type,
+        }
         if self._model_type == 'ModularPolicy':
             return ModularPolicy(
-                    inputs={
-                        'obs': {
-                            'type': 'GreyscaleImageInput',
-                            'config': {
-                                'in_channels': observation_space['obs'].shape[0]
-                            },
-                        },
-                        'reward': {
-                            'type': 'ScalarInput',
-                        },
-                    },
+                    inputs=inputs,
+                    **common_model_params,
                     num_actions=action_space.n,
-                    input_size=512,
-                    key_size=512,
-                    value_size=512,
-                    num_heads=8,
-                    ff_size = 1024,
-                    recurrence_type=self._recurrence_type,
                     num_blocks=self._num_recurrence_blocks,
             ).to(device)
         elif self._model_type == 'ModularPolicy2':
             return ModularPolicy2(
-                    inputs = {
-                        'obs': {
-                            'type': 'GreyscaleImageInput',
-                            'config': {
-                                'in_channels': observation_space['obs'].shape[0]
-                            },
-                        },
-                        'reward': {
-                            'type': 'ScalarInput',
-                        },
-                        'action': {
-                            'type': 'DiscreteInput' if isinstance(action_space, gym.spaces.Discrete) else 'LinearInput',
-                            'config': {
-                                'input_size': action_space.n
-                            },
-                        },
-                    },
-                    outputs = {
-                        'value': {
-                            'type': 'LinearOutput',
-                            'config': {
-                                'output_size': 1,
-                            }
-                        },
-                        'action': {
-                            'type': 'LinearOutput',
-                            'config': {
-                                'output_size': action_space.n,
-                            }
-                        },
-                    },
-                    input_size=512,
-                    key_size=512,
-                    value_size=512,
-                    num_heads=8,
-                    ff_size = 1024,
-                    recurrence_type=self._recurrence_type,
+                    inputs = inputs,
+                    outputs = outputs,
+                    **common_model_params,
                     num_blocks=self._num_recurrence_blocks,
+            ).to(device)
+        elif self._model_type == 'ModularPolicy5':
+            assert self._architecture is not None
+            return ModularPolicy5(
+                    inputs = inputs,
+                    outputs = outputs,
+                    **common_model_params,
+                    architecture=self._architecture,
             ).to(device)
         raise NotImplementedError()
     def _init_minigrid_net(self, observation_space, action_space, device):

@@ -277,6 +277,7 @@ class EpisodeStack(gym.Wrapper):
         self.num_episodes = num_episodes
         self.episode_count = 0
         self.dict_obs = dict_obs
+
         self._done = True
 
         if dict_obs:
@@ -384,7 +385,14 @@ class MetaWrapper(gym.Wrapper):
             image_transformation = None,
             task_id = None,
             task_label = None,
+            reward_delay_obs: int = 0,
+            reward_delay_algorithm: int = 0,
             seed: int = None):
+        """
+        Args:
+            reward_delay_obs (int): number of steps to delay the reward observed by the agent via its observations.
+            reward_delay_algorithm (int): number of steps to delay the reward observed by the learning algorithm via the environment's step() function.
+        """
         super().__init__(env)
         self.episode_stack = episode_stack
         self.randomize = randomize
@@ -393,6 +401,11 @@ class MetaWrapper(gym.Wrapper):
         self.include_action_map = include_action_map
         self.task_id = task_id
         self.task_label = task_label
+        self.reward_delay_obs = reward_delay_obs
+        self.reward_delay_algorithm = reward_delay_algorithm
+
+        self._delayed_rewards_obs = []
+        self._delayed_rewards_algorithm = []
 
         self.episode_count = 0
         self._done = True
@@ -473,6 +486,20 @@ class MetaWrapper(gym.Wrapper):
             obs, reward, done, info = self.env.step(action)
         self._done = done
 
+        # Handle delayed rewards
+        self._delayed_rewards_obs.append(reward)
+        self._delayed_rewards_algorithm.append(reward)
+
+        if len(self._delayed_rewards_obs) > self.reward_delay_obs:
+            obs_reward = self._delayed_rewards_obs.pop(0)
+        else:
+            obs_reward = 0
+
+        if len(self._delayed_rewards_algorithm) > self.reward_delay_algorithm:
+            reward = self._delayed_rewards_algorithm.pop(0)
+        else:
+            reward = 0
+
         # Add task ID
         if self.task_id is not None:
             info['task_id'] = self.task_id
@@ -486,14 +513,14 @@ class MetaWrapper(gym.Wrapper):
         if self.dict_obs:
             if isinstance(self.env.observation_space, gym.spaces.Dict):
                 obs = {
-                    'reward': np.array([reward], dtype=np.float32),
+                    'reward': np.array([obs_reward], dtype=np.float32),
                     'done': np.array([done], dtype=np.float32),
                     **{f'obs ({k})': v for k,v in obs.items()},
                     'action': original_action,
                 }
             else:
                 obs = {
-                    'reward': np.array([reward], dtype=np.float32),
+                    'reward': np.array([obs_reward], dtype=np.float32),
                     'done': np.array([done], dtype=np.float32),
                     'obs': obs,
                     'action': original_action,
@@ -1414,8 +1441,22 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
         num_trials=100,
         fetch_config: dict = None,
         bandits_config: dict = None,
+        task_randomization_prob: float = 0,
         seed = None,
     ):
+        """
+        Args:
+            min_num_rooms (int): minimum number of rooms
+            max_num_rooms (int): maximum number of rooms
+            min_room_size (int): minimum size of a room. The size includes the walls, so a room of size 3 in one dimension has one occupiable square in that dimension.
+            max_room_size (int): maximum size of a room
+            door_prob (float): probability of a door being placed in the opening between two rooms.
+            num_trials (int): number of trials per episode. A trial ends upon reaching the goal state or picking up an object.
+            fetch_config (dict): configuration for the fetch task. If None, no fetch task is used.
+            bandits_config (dict): configuration for the bandits task. If None, no bandits task is used.
+            task_randomization_prob (float): probability of switching tasks at the beginning of each trial.
+            seed (int): random seed.
+        """
         assert min_num_rooms > 0
         assert max_num_rooms >= min_num_rooms
         assert max_room_size >= 4
@@ -1429,6 +1470,7 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
         self.num_trials = num_trials
         self.fetch_config = fetch_config
         self.bandits_config = bandits_config
+        self.task_randomization_prob = task_randomization_prob
 
         self.rooms = []
 
@@ -1546,7 +1588,19 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
         total_room_sizes = sum([room.height * room.width for room in room_list])
         self.max_steps = total_room_sizes * self.num_trials
 
-    def _init_fetch(self, num_objs, num_obj_types=2, num_obj_colors=6, unique_objs=True):
+    def _init_fetch(self, num_objs, num_obj_types=2, num_obj_colors=6, unique_objs=True, prob=1.0):
+        """
+        Initialize the fetch task
+
+        Args:
+            num_objs: number of objects to generate.
+            num_obj_types: number of object types to choose from. Possible object types are "key" and "ball".
+            num_obj_colors: number of object colours to choose from. Colours are taken from `gym_minigrid.minigrid.COLOR_NAMES`.
+            unique_objs: if True, all objects will be unique. If False, objects can be repeated.
+            prob: Probability of obtaining a positive reward upon picking up the target object, or a negative reward upon picking up non-target objects.
+        """
+        self._fetch_reward_prob = prob
+
         types = ['key', 'ball'][:num_obj_types]
         colors = gym_minigrid.minigrid.COLOR_NAMES[:num_obj_colors]
 
@@ -1736,6 +1790,18 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
                 return new_room
         return None
 
+    def _randomize_task(self):
+        """ Randomize the goal object/states """
+
+        # Fetch task
+        target = self.objects[self._rand_int(0, len(self.objects))]
+        self.targetType = target.type
+        self.targetColor = target.color
+
+        # Bandit task
+        if self.bandits_config is not None:
+            raise NotImplementedError('Task randomization not implemented for bandits')
+
     def reset(self):
         obs = super().reset()
         self.trial_count = 0
@@ -1750,14 +1816,29 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
 
         if self.fetch_config is not None:
             if self.carrying:
+                reward_correct = self.fetch_config.get('reward_correct', 1)
+                reward_incorrect = self.fetch_config.get('reward_incorrect', -1)
+                p = self._fetch_reward_prob
+                # Check if the agent picked up the correct object
                 if self.carrying.color == self.targetColor and \
                    self.carrying.type == self.targetType:
-                    reward = self.fetch_config.get('reward_correct', 1)
+                    reward = reward_correct
+                    info['regret'] = 0
                 else:
-                    reward = self.fetch_config.get('reward_incorrect', -1)
+                    reward = reward_incorrect
+                    info['regret'] = reward_correct*p+reward_incorrect*(1-p) - reward_incorrect*p+reward_correct*(1-p)
+                # Flip the reward with some probability
+                if self.np_random.rand() > p:
+                    reward *= -1
+                # Place the object back in the environment
                 self.place_obj(self.carrying)
+                # Remove the object from the agent's hand
                 self.carrying = None
+                # End current trial
                 self.trial_count += 1
+                # Randomize task if needed
+                if self.np_random.rand() < self.task_randomization_prob:
+                    self._randomize_task()
 
         if self.bandits_config is not None:
             curr_cell = self.grid.get(*self.agent_pos) # type: ignore
@@ -1768,6 +1849,9 @@ class MultiRoomEnv_v1(gym_minigrid.minigrid.MiniGridEnv):
                 self.trial_count += 1
                 # Teleport the agent to a random location
                 self._init_agent()
+                # Randomize task if needed
+                if self.np_random.rand() < self.task_randomization_prob:
+                    self._randomize_task()
 
         if self.trial_count >= self.num_trials:
             done = True
@@ -1898,13 +1982,320 @@ gym_minigrid.register.register(
 )
 
 
+class DelayedRewardEnv(MultiRoomEnv_v1):
+    """
+    Environment with delayed reward.
+    """
+
+    def __init__(self,
+        min_num_rooms,
+        max_num_rooms,
+        min_room_size=5,
+        max_room_size=10,
+        door_prob=0.5,
+        num_trials=100,
+        fetch_config={
+            'num_objs': 2,
+            'num_obj_colors': 6,
+            'num_obj_types': 2,
+            'prob': 1, # Deterministic rewards
+            #'predetermined_objects': [] # Specify the exact objects to use. e.g. `['red ball', 'green key']`
+        },
+        task_randomization_prob: float = 0,
+        shaped_reward_setting: int = None,
+        seed = None,
+    ):
+        """
+        Args:
+            min_num_rooms (int): minimum number of rooms
+            max_num_rooms (int): maximum number of rooms
+            min_room_size (int): minimum size of a room. The size includes the walls, so a room of size 3 in one dimension has one occupiable square in that dimension.
+            max_room_size (int): maximum size of a room
+            door_prob (float): probability of a door being placed in the opening between two rooms.
+            num_trials (int): number of trials per episode. A trial ends upon reaching the goal state or picking up an object.
+            fetch_config (dict): configuration for the fetch task.
+            task_randomization_prob (float): probability of switching tasks at the beginning of each trial.
+            seed (int): random seed.
+        """
+        self.shaped_reward_setting = shaped_reward_setting
+        self.fetch_config = fetch_config # Needed to appease pyright
+        super().__init__(
+            min_num_rooms = min_num_rooms,
+            max_num_rooms = max_num_rooms,
+            min_room_size = min_room_size,
+            max_room_size = max_room_size,
+            door_prob = door_prob,
+            num_trials = num_trials,
+            fetch_config = fetch_config,
+            task_randomization_prob = task_randomization_prob,
+            seed = seed,
+        )
+
+    def _gen_grid(self, width, height):
+        room_list = []
+        self.rooms = room_list
+
+        # Choose a random number of rooms to generate
+        num_rooms = self._rand_int(self.min_num_rooms, self.max_num_rooms+1)
+
+        # Create first room
+        room_height = self._rand_int(self.min_room_size, self.max_room_size+1)
+        room_width = self._rand_int(self.min_room_size, self.max_room_size+1)
+        top = self._rand_int(1, height - room_height - 1)
+        left = self._rand_int(1, width - room_width - 1)
+        room_list.append(Room(top, top + room_height - 1, left, left + room_width - 1))
+
+        new_room_openings = [ (0, 'left'), (0, 'right'), (0, 'top'), (0, 'bottom') ]
+        while len(room_list) < num_rooms:
+            if len(new_room_openings) == 0:
+                break
+
+            # Choose a random place to connect the new room to
+            r = self._rand_int(0, len(new_room_openings))
+            starting_room_index, wall = new_room_openings[r]
+
+            temp_room = self._generate_room(
+                    room_list,
+                    idx = starting_room_index,
+                    wall = wall,
+                    min_size = self.min_room_size,
+                    max_size = self.max_room_size,
+                    width = width,
+                    height = height,
+            )
+            if temp_room is not None:
+                room_list.append(temp_room)
+                new_room_openings.append((len(room_list)-1, 'left'))
+                new_room_openings.append((len(room_list)-1, 'right'))
+                new_room_openings.append((len(room_list)-1, 'top'))
+                new_room_openings.append((len(room_list)-1, 'bottom'))
+            else:
+                new_room_openings.remove(new_room_openings[r])
+
+        self.grid = gym_minigrid.minigrid.Grid(width, height)
+        self.doors = []
+        wall = gym_minigrid.minigrid.Wall()
+        self.wall = wall
+
+        for room in room_list:
+            # Look for overlapping walls
+            overlapping_walls = {
+                'top': [],
+                'bottom': [],
+                'left': [],
+                'right': [],
+            }
+            for i in range(room.left + 1, room.right):
+                if self.grid.get(i,room.top) == wall and self.grid.get(i,room.top+1) is None and self.grid.get(i,room.top-1) is None:
+                    overlapping_walls['top'].append((room.top, i))
+                if self.grid.get(i,room.bottom) == wall and self.grid.get(i,room.bottom+1) is None and self.grid.get(i,room.bottom-1) is None:
+                    overlapping_walls['bottom'].append((room.bottom, i))
+            for j in range(room.top + 1, room.bottom):
+                if self.grid.get(room.left,j) == wall and self.grid.get(room.left+1,j) is None and self.grid.get(room.left-1,j) is None:
+                    overlapping_walls['left'].append((j, room.left))
+                if self.grid.get(room.right,j) == wall and self.grid.get(room.right+1,j) is None and self.grid.get(room.right-1,j) is None:
+                    overlapping_walls['right'].append((j, room.right))
+
+            # Create room
+            # Top wall
+            for i in range(room.left, room.right + 1):
+                self.grid.set(i, room.top, wall)
+            # Bottom wall
+            for i in range(room.left, room.right + 1):
+                self.grid.set(i, room.bottom, wall)
+            # Left wall
+            for i in range(room.top, room.bottom + 1):
+                self.grid.set(room.left, i, wall)
+            # Right wall
+            for i in range(room.top, room.bottom + 1):
+                self.grid.set(room.right, i, wall)
+
+            # Create doorways between rooms
+            for ow in overlapping_walls.values():
+                if len(ow) == 0:
+                    continue
+                opening = self._rand_elem(ow)
+                if self.np_random.rand() > self.door_prob:
+                    self.grid.set(opening[1], opening[0], None)
+                else:
+                    door = gym_minigrid.minigrid.Door(
+                        color = self._rand_elem(gym_minigrid.minigrid.COLOR_NAMES)
+                    )
+                    self.grid.set(opening[1], opening[0], door)
+                    self.doors.append(door)
+
+        self._init_agent()
+        self.mission = 'Pick up the correct object, then reach the green goal square.'
+
+        # Set max steps
+        total_room_sizes = sum([room.height * room.width for room in room_list])
+        self.max_steps = total_room_sizes * self.num_trials
+
+    def _init_fetch(self, num_objs, num_obj_types=2, num_obj_colors=6, unique_objs=True, prob=1.0, predetermined_objects=[]):
+        """
+        Initialize the fetch task
+
+        Args:
+            num_objs: number of objects to generate.
+            num_obj_types: number of object types to choose from. Possible object types are "key" and "ball".
+            num_obj_colors: number of object colours to choose from. Colours are taken from `gym_minigrid.minigrid.COLOR_NAMES`.
+            unique_objs: if True, all objects will be unique. If False, objects can be repeated.
+            prob: Probability of obtaining a positive reward upon picking up the target object, or a negative reward upon picking up non-target objects.
+        """
+        self._fetch_reward_prob = prob
+
+        types = ['key', 'ball'][:num_obj_types]
+        colors = gym_minigrid.minigrid.COLOR_NAMES[:num_obj_colors]
+
+        type_color_pairs = [(t,c) for t in types for c in colors]
+
+        objs = []
+
+        # For each object to be generated
+        predetermined_objects = predetermined_objects[:] # Copy list so we can `pop()`
+        while len(objs) < num_objs:
+            if len(predetermined_objects) > 0:
+                obj_color, obj_type = predetermined_objects.pop().split(' ')
+            else:
+                obj_type, obj_color = self._rand_elem(type_color_pairs)
+
+            if unique_objs:
+                type_color_pairs.remove((obj_type, obj_color))
+
+            if obj_type == 'key':
+                obj = gym_minigrid.minigrid.Key(obj_color)
+            elif obj_type == 'ball':
+                obj = gym_minigrid.minigrid.Ball(obj_color)
+            else:
+                raise ValueError(f'Unknown object type: {obj_type}')
+
+            self.place_obj(obj)
+            objs.append(obj)
+
+        self.objects = objs
+        self.removed_objects = [] # Objects that were picked up by the agent
+
+        # Choose a random object to be picked up
+        target = objs[self._rand_int(0, len(objs))]
+        self.targetType = target.type
+        self.targetColor = target.color
+
+        # Create goal state
+        # If the agent enters this state, it will receive a reward based on the objects it has picked up
+        self.goal = gym_minigrid.minigrid.Goal()
+        self.place_obj(self.goal, unobstructive=True)
+
+    def _randomize_task(self):
+        """ Randomize the goal object/states """
+        target = self.objects[self._rand_int(0, len(self.objects))]
+        self.targetType = target.type
+        self.targetColor = target.color
+
+    def _shaped_reward(self, setting=0):
+        """ Return the shaped reward for the current state. """
+        if setting == 0: # Reward for subtasks
+            obj = self.carrying
+            if obj is not None:
+                if obj.type == self.targetType and obj.color == self.targetColor:
+                    return 1.0
+            curr_cell = self.grid.get(*self.agent_pos) # type: ignore
+            if curr_cell == self.goal and len(self.removed_objects) > 0:
+                ...
+            raise NotImplementedError()
+        elif setting == 1: # Distance-based reward
+            # If the agent has picked up the target object, then the destination is the goal state. Otherwise, the destination is the target object.
+            dest = self.goal
+            for obj in self.removed_objects:
+                # Calculate reward and regret for the object
+                if obj.color != self.targetColor:
+                    continue
+                if obj.type != self.targetType:
+                    continue
+                dest = obj
+                break
+            # Compute the distance to the goal
+            assert dest.cur_pos is not None
+            distance = dest.cur_pos[0] - self.agent_pos[0] + dest.cur_pos[1] - self.agent_pos[1]
+            # Compute a reward based on the distance
+            reward = 1/(distance + 1)
+
+            return reward
+
+        raise ValueError(f'Unknown setting: {setting}')
+
+    def reset(self):
+        obs = super().reset()
+        assert isinstance(obs, dict)
+        self.trial_count = 0
+        self._init_fetch(**self.fetch_config)
+        if self.shaped_reward_setting is not None:
+            obs['shaped_reward'] = self._shaped_reward(self.shaped_reward_setting)
+        return obs
+
+    def step(self, action):
+        obs, _, done, info = gym_minigrid.minigrid.MiniGridEnv.step(self, action)
+
+        if self.shaped_reward_setting is not None: # Must happen before `self.carrying` is cleared.
+            obs['shaped_reward'] = self._shaped_reward(self.shaped_reward_setting)
+
+        if self.carrying:
+            self.removed_objects.append(self.carrying)
+            self.carrying = None
+        
+        curr_cell = self.grid.get(*self.agent_pos) # type: ignore
+        total_reward = 0
+        total_regret = 0
+        if curr_cell == self.goal and len(self.removed_objects) > 0:
+            reward_correct = self.fetch_config.get('reward_correct', 1)
+            reward_incorrect = self.fetch_config.get('reward_incorrect', -1)
+            p = self._fetch_reward_prob
+            # Process all objects that were picked up
+            for obj in self.removed_objects:
+                # Calculate reward and regret for the object
+                if obj.color == self.targetColor and \
+                   obj.type == self.targetType:
+                    reward = reward_correct
+                else:
+                    reward = reward_incorrect
+                    total_regret += reward_correct*p+reward_incorrect*(1-p) - reward_incorrect*p+reward_correct*(1-p)
+                # Flip the reward with some probability
+                if self.np_random.rand() > p:
+                    reward *= -1
+                # Sum up reward
+                total_reward += reward
+            info['regret'] = total_regret
+            # Place the objects back in the environment
+            for obj in self.removed_objects:
+                self.place_obj(obj)
+            self.removed_objects = []
+            # End current trial
+            self.trial_count += 1
+            # Randomize task if needed
+            if self.np_random.rand() < self.task_randomization_prob:
+                self._randomize_task()
+
+        if self.trial_count >= self.num_trials or self.step_count >= self.max_steps:
+            done = True
+            self.trial_count = 0
+        else:
+            done = False
+
+        return obs, total_reward, done, info
+
+
+gym_minigrid.register.register(
+    id='MiniGrid-Delayed-Reward-v0',
+    entry_point=DelayedRewardEnv,
+)
+
+
 if __name__ == '__main__':
-    env = gym.make('MiniGrid-MultiRoom-v1',
+    env = gym.make('MiniGrid-Delayed-Reward-v0',
             min_num_rooms=4,
             max_num_rooms=6,
             min_room_size=4,
             max_room_size=10,
-            fetch_config={'num_objs': 5},
+            fetch_config={'num_objs': 2},
             #bandits_config={
             #    'probs': [0.9, 0.1]
             #},

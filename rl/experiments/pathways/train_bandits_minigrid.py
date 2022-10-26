@@ -1165,6 +1165,299 @@ def get_params():
         'env_train': env_config,
     })
 
+    # Add more rooms and slightly larger rooms
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 4,
+                'min_room_size': 4,
+                'max_room_size': 6,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                },
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-044', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Stochastic rewards
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 4,
+                'min_room_size': 4,
+                'max_room_size': 6,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                    'prob': 0.9, # 0.1 chance of flipping the reward
+                },
+                #'task_randomization_prob': 0.02, # 86% chance of happening at least once, with a 50% change of the randomized task being unchanged.
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-045', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Increase model size
+    params.add_change('exp-046', {
+        'agent': {
+            'parameters': {
+                'architecture': [6, 6]
+            },
+        },
+    })
+
+    # Delayed Rewards
+    env_name = 'MiniGrid-Delayed-Reward-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 4,
+                'min_room_size': 4,
+                'max_room_size': 6,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                    'prob': 0.9, # 0.1 chance of flipping the reward
+                },
+                #'task_randomization_prob': 0.02, # 86% chance of happening at least once, with a 50% change of the randomized task being unchanged.
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-047', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Smaller rooms and deterministic rewards
+    env_name = 'MiniGrid-Delayed-Reward-v0'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 1,
+                'max_num_rooms': 1,
+                'min_room_size': 5,
+                'max_room_size': 6,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                    'prob': 1.0, # 0.0 chance of flipping the reward
+                },
+                #'task_randomization_prob': 0.02, # 86% chance of happening at least once, with a 50% change of the randomized task being unchanged.
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-048', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 1,
+                'max_num_rooms': 1,
+                'min_room_size': 5,
+                'max_room_size': 5,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 2,
+                    'num_obj_types': 1,
+                    'prob': 1.0, # 0.0 chance of flipping the reward
+                },
+                #'task_randomization_prob': 0.02, # 86% chance of happening at least once, with a 50% change of the randomized task being unchanged.
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-018-a', {
+        **params['exp-018'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Delayed reward with constant delay. Delay only applies to the agent's observation.
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+                'reward_delay_obs': 1,
+                'reward_delay_algorithm': 0,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 4,
+                'min_room_size': 4,
+                'max_room_size': 6,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                    'prob': 1.0, # 0.0 chance of flipping the reward
+                },
+                #'task_randomization_prob': 0.02, # 86% chance of happening at least once, with a 50% change of the randomized task being unchanged.
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-049', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Delayed reward with constant delay. Delay only applies to the algorithm's reward.
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+                'reward_delay_obs': 0,
+                'reward_delay_algorithm': 1,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 4,
+                'min_room_size': 4,
+                'max_room_size': 6,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                    'prob': 1.0, # 0.0 chance of flipping the reward
+                },
+                #'task_randomization_prob': 0.02, # 86% chance of happening at least once, with a 50% change of the randomized task being unchanged.
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-050', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
+    # Delayed reward with constant delay. Delay applies to both the agent and the algorithm's reward.
+    env_name = 'MiniGrid-MultiRoom-v1'
+    env_config = {
+        'env_type': 'gym_async',
+        'env_configs': [{
+            'env_name': env_name,
+            'minigrid': True,
+            'minigrid_config': {},
+            'meta_config': {
+                'episode_stack': 1,
+                'dict_obs': True,
+                'randomize': False,
+                'reward_delay_obs': 1,
+                'reward_delay_algorithm': 1,
+            },
+            'config': {
+                'num_trials': 100,
+                'min_num_rooms': 2,
+                'max_num_rooms': 4,
+                'min_room_size': 4,
+                'max_room_size': 6,
+                'door_prob': 0.5,
+                'fetch_config': {
+                    'num_objs': 2,
+                    'num_obj_colors': 6,
+                    'prob': 1.0, # 0.0 chance of flipping the reward
+                },
+                #'task_randomization_prob': 0.02, # 86% chance of happening at least once, with a 50% change of the randomized task being unchanged.
+            }
+        } for _ in range(num_envs)],
+    }
+    params.add('exp-051', {
+        **params['exp-031'],
+        'env_test': env_config,
+        'env_train': env_config,
+    })
+
     return params
 
 
@@ -1391,6 +1684,8 @@ def make_app():
             max_iterations : int = 5_000_000,
             starting_model: Optional[str] = None,
             checkpoint_filename: Optional[str] = None,
+            freeze_core: bool = False,
+            freeze_initial_hidden_state: bool = False,
             slurm : bool = typer.Option(False, '--slurm'),
             wandb : bool = typer.Option(False, '--wandb'),
             debug : bool = typer.Option(False, '--debug')):
@@ -1433,7 +1728,12 @@ def make_app():
             with open(checkpoint_filename, 'rb') as f:
                 checkpoint = dill.load(f)
             #exp_runner.exp.load_state_dict(checkpoint['exp'])
-            exp_runner.exp.agent.load_state_dict(checkpoint['exp']['agent'])
+            try:
+                exp_runner.exp.agent.load_state_dict(checkpoint['exp']['agent'])
+            except:
+                breakpoint()
+                # Check which parameters are different shapes (if any)
+                # Check differences in optimizer
 
         if wandb:
             exp_runner.exp.logger.init_wandb({
@@ -1456,6 +1756,13 @@ def make_app():
                 )
             else:
                 exp_runner.exp.agent.net.load_state_dict(loaded_data)
+
+        if freeze_core:
+            for p in exp_runner.exp.agent.net.attention.parameters():
+                p.requires_grad = False
+        if freeze_initial_hidden_state:
+            for p in exp_runner.exp.agent.net.initial_hidden_state.parameters():
+                p.requires_grad = False
 
         exp_runner.run()
         exp_runner.exp.logger.finish_wandb()
@@ -2186,7 +2493,7 @@ def make_app():
             env_name: str = 'MiniGrid-NRoomBanditsSmall-v0',
             reward_config: Tuple[float,float] = (1, -1),
             reward_scale: float = 1,
-            prob: float = 0.9,
+            prob: float = 1.0,
             door_prob: float = 0,
             num_objs: int = 2,
             num_obj_types: int = 2,
@@ -2194,6 +2501,7 @@ def make_app():
             num_rooms: int = 2,
             min_room_size: int = 4,
             max_room_size: int = 4,
+            task_randomization_prob: float = 0,
             size: int = 5,
             hflip: int = 0):
         import cv2
@@ -2311,10 +2619,12 @@ def make_app():
                                 'num_objs': num_objs,
                                 'num_obj_types': num_obj_types,
                                 'num_obj_colors': num_obj_colors,
+                                'prob': prob,
                             },
                             #'bandits_config': {
-                            #    'probs': [0.9, 0.1]
+                            #    'probs': [prob, 1-prob]
                             #},
+                            'task_randomization_prob': task_randomization_prob,
                         }
                     }]
                 )
@@ -2343,6 +2653,36 @@ def make_app():
                     }]
                 )
                 desc_fn = lambda: f'{env.envs[0].action_map}' # type: ignore
+            elif env_name == 'MiniGrid-Delayed-Reward-v0':
+                env = make_vec_env(
+                    env_type = 'gym_sync',
+                    env_configs = [{
+                        'env_name': env_name,
+                        'minigrid': True,
+                        'minigrid_config': {},
+                        'meta_config': {
+                            'episode_stack': 1,
+                            'dict_obs': True,
+                            'randomize': False,
+                        },
+                        'config': {
+                            'num_trials': 100,
+                            'min_num_rooms': num_rooms,
+                            'max_num_rooms': num_rooms,
+                            'max_room_size': max_room_size,
+                            'door_prob': door_prob,
+                            'fetch_config': {
+                                'num_objs': num_objs,
+                                'num_obj_types': num_obj_types,
+                                'num_obj_colors': num_obj_colors,
+                                'prob': prob,
+                                #'predetermined_objects': ['yellow key', 'grey key'],
+                            },
+                            'task_randomization_prob': task_randomization_prob,
+                        }
+                    }]
+                )
+                desc_fn = lambda: f'{env.envs[0].targetColor} {env.envs[0].targetType}' # type: ignore
             else:
                 try:
                     env = make_vec_env(
@@ -2492,14 +2832,41 @@ def make_app():
 
             return all_images_concat
 
+        def draw_text(text, font_family=Roboto, font_size=18, color=(0,0,0), padding=2):
+            font = PIL.ImageFont.truetype(font_family, font_size)
+
+            text_width, text_height = font.getsize(text)
+            img = PIL.Image.new('RGB',
+                    (text_width+2*padding, text_height+2*padding),
+                    color=(255,255,255))
+            draw = PIL.ImageDraw.Draw(img)
+            draw.fontmode = 'L' # type: ignore
+            draw.text(
+                    (padding, padding),
+                    text,
+                    font=font,
+                    fill=color
+            )
+            return img
+
+        def draw_rewards(rewards: list, target_object):
+            img1 = draw_text(
+                    'Reward: ' + ' '.join(f'{r}' for r in reversed(rewards[-5:])))
+            img2 = draw_text(
+                    f'Total Reward: {sum(rewards):.2f}')
+            img3 = draw_text(f'Target: {target_object}')
+            return concat_images([img1, img2, img3], direction='v', align=-1)
+
         agent = exp.exp.agent
         results = {}
         fps = 25
 
         results['reward'] = []
+        results['regret'] = []
         results['attention'] = []
         results['hidden'] = []
         results['input_labels'] = []
+        results['target'] = []
         action_count = defaultdict(lambda: 0)
         agent = exp.exp.agent
         for i in range(num_trials):
@@ -2520,13 +2887,13 @@ def make_app():
             num_frames = 0
 
             results['reward'].append([])
+            results['regret'].append([])
             results['attention'].append([])
             results['hidden'].append([])
             results['input_labels'].append(None)
+            results['target'].append([])
             agent.reset()
             obs = env.reset()
-            description = desc_fn()
-            print(description)
             done = np.array([False] * env.num_envs)
             agent.observe(obs, testing=True)
 
@@ -2534,12 +2901,16 @@ def make_app():
             video_writer.write(frame[:,:,::-1])
             video_writer2.write(np.moveaxis(obs['obs (image)'].squeeze(), 0, 2)[:,:,::-1])
             while not done[0]:
+                description = desc_fn()
+                results['target'][-1].append(description)
                 action = agent.act(obs)
-                obs, reward, done, _ = env.step(action)
+                obs, reward, done, info = env.step(action)
                 agent.observe(obs, reward, done, testing=True)
                 results['reward'][-1].append(reward[0])
+                results['regret'][-1].append(info[0].get('regret', None))
                 num_frames += 1
-                print(f'{num_frames} {action} {reward} {desc_fn()}')
+                trial_count = f'{env.envs[0].trial_count}/{env.envs[0].num_trials}' # type: ignore
+                print(f'{num_frames} {trial_count} {action} {reward} {description} {info[0].get("regret","")}')
                 action_count[action.item()] += 1
                 frame = env.envs[0].render(mode=None) # type: ignore
                 video_writer.write(frame[:,:,::-1])
@@ -2557,8 +2928,23 @@ def make_app():
                         core_attention = agent.net.last_attention,
                         query_gating = agent.net.last_ff_gating,
                         output_attention = agent.net.last_output_attention)
+                rewards_img = draw_rewards(
+                        [
+                            rew
+                            for rew,reg in zip(results['reward'][-1],results['regret'][-1])
+                            if reg is not None
+                        ],
+                        description
+                )
                 frame_and_attn = concat_images(
-                    [PIL.Image.fromarray(frame), attn_img],
+                    [
+                        PIL.Image.fromarray(frame),
+                        concat_images(
+                            [attn_img, rewards_img],
+                            padding = 5,
+                            direction='h',
+                        )
+                    ],
                     padding = 5,
                     direction = 'v',
                     align = 0,
@@ -2587,20 +2973,40 @@ def make_app():
                 video_writer3.release()
             if video_writer4 is not None:
                 video_writer4.release()
-            print(f'Trial {i} total reward: {np.sum(results["reward"][-1])}')
-            print(action_count)
+
+            print(f'Trial {i}')
+            print('Action Count', action_count)
+            print(f'Total Reward: {np.sum(results["reward"][-1])}')
             #print(env.envs[0].reward_permutation) # type: ignore
-            print(description) # type: ignore
+            #print(description) # type: ignore
+            task_order = []
+            task_trial_count = []
+            reward_by_task = []
+            regret_by_task = []
+            for t,rew,reg in zip(results['target'][-1], results['reward'][-1], results['regret'][-1]):
+                if reg is None:
+                    continue
+                if len(task_order) == 0 or task_order[-1] != t:
+                    task_order.append(t)
+                    task_trial_count.append(0)
+                    reward_by_task.append(0)
+                    regret_by_task.append(0)
+                task_trial_count[-1] += 1
+                reward_by_task[-1] += rew
+                regret_by_task[-1] += reg
+            print('Task order:', task_order)
+            print('Task trial count:', task_trial_count)
+            print('Reward by task:', reward_by_task)
+            print('Regret by task:', regret_by_task)
 
             with open('results.pkl', 'wb') as f:
                 dill.dump(results, f)
             print(f'Saved results to {os.path.abspath("results.pkl")}')
 
-            breakpoint()
-
     @app.command()
     def plot_trajectory(results_filename: str, data_src: str = 'attention',
-            tsne_seed: int = 0, trail_length: int = 5, video_format: str = None):
+            tsne_seed: int = 0, trail_length: int = 5, video_format: str = None,
+            video_fps: int = 5):
         with open(results_filename, 'rb') as f:
             results = dill.load(f)
 
@@ -2678,13 +3084,17 @@ def make_app():
             print('Rendering video')
             animation = ArtistAnimation(plt.gcf(), artists, interval=50, blit=True)
             if video_format == 'gif':
-                writer = PillowWriter(fps=5)
+                writer = PillowWriter(fps=video_fps)
                 animation.save('trajectory.gif', writer=writer)
                 print(f'Saved video to {os.path.abspath("trajectory.gif")}')
             elif video_format == 'mp4':
-                writer = FFMPEGWriter(fps=5)
+                writer = FFMpegWriter(fps=video_fps)
                 animation.save('trajectory.mp4', writer=writer)
                 print(f'Saved video to {os.path.abspath("trajectory.mp4")}')
+            elif video_format == 'webm':
+                writer = FFMpegWriter(fps=video_fps, codec='libvpx-vp9')
+                animation.save('trajectory.webm', writer=writer)
+                print(f'Saved video to {os.path.abspath("trajectory.wemb")}')
             plt.close()
 
         ##################################################
@@ -2881,6 +3291,116 @@ def make_app():
         plt.tight_layout()
         plt.savefig('rta-negative.png')
 
+    @app.command()
+    def plot_default_mode(checkpoint_filename : Path, results_filename: str,
+            tsne_seed: int = 0, video_format: str = 'webm', video_fps: int = 30):
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.animation import FuncAnimation
+        from matplotlib.animation import PillowWriter
+        from matplotlib.animation import FFMpegWriter
+
+        with open(results_filename, 'rb') as f:
+            results = dill.load(f)
+
+        # Data
+        data = results['hidden'][0]
+
+        # Model
+        exp = load_checkpoint(TrainExperiment, checkpoint_filename)
+        model = exp.exp.agent.net
+
+        final_hidden = []
+        for starting_hidden in tqdm(data):
+            # Run the model until it converges
+            with torch.no_grad():
+                hidden = [tuple(torch.tensor(x, device=torch.device('cuda')) for x in starting_hidden)]
+                for _ in tqdm(range(200)):
+                    hidden.append(model({}, hidden[-1])['hidden'])
+                    diff = float((torch.cat(hidden[-1]) - torch.cat(hidden[-2])).abs().mean().item())
+                    if diff < 1e-7:
+                        break
+            final_hidden.append(hidden[-1])
+
+            ## Plot change in hidden state over time
+            ## This is to verify that the state converges
+            #flat_hidden = [torch.cat(h).flatten() for h in hidden]
+            #y = [(a-b).abs().mean().item() for a,b in zip(flat_hidden[:-1], flat_hidden[1:])]
+            #x = range(len(y))
+
+            #plt.figure()
+            #plt.plot(x, y)
+            #plt.grid()
+            #plt.yscale('log')
+            #plt.xlabel('Iterations')
+            #plt.ylabel('Mean absolute change in hidden state')
+            #plt.savefig('plot.png')
+            #print(f'Plot saved to {os.path.abspath("plot.png")}')
+            #breakpoint()
+
+        # Flatten the hidden states
+        data_flat = np.stack([
+            np.concatenate([h.flatten().cpu() for h in hidden])
+            for hidden in final_hidden
+        ])
+
+        # PCA
+        from sklearn.decomposition import PCA
+
+        pca = PCA(n_components=20)
+        pca.fit(data_flat)
+        data_pca = pca.transform(data_flat)
+
+        # t-SNE
+        from sklearn.manifold import TSNE
+        tsne = TSNE(n_components=2, random_state=tsne_seed)
+        data_tsne = tsne.fit_transform(data_pca)
+        tsne_3d = TSNE(n_components=3, random_state=tsne_seed)
+        data_tsne_3d = tsne_3d.fit_transform(data_pca)
+
+        # Scatter plot of all points (2D)
+        plt.figure()
+        plt.scatter(data_tsne[:,0], data_tsne[:,1], c=range(data_tsne.shape[0]))
+        plt.colorbar()
+        plt.savefig('fixed-point.png')
+        print(f'Plot saved to {os.path.abspath("fixed-point.png")}')
+        plt.close()
+
+        # Scatter plot of all points (3D)
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        p = ax.scatter(data_tsne_3d[:,0], data_tsne_3d[:,1], data_tsne_3d[:,2],
+            c=range(len(data_tsne_3d)) # Colour by time
+        )
+        cbar = fig.colorbar(p)
+        cbar.ax.set_ylabel('Iterations', rotation=270)
+        plt.savefig('fixed-point-3d.png')
+        print(f'Plot saved to {os.path.abspath("fixed-point-3d.png")}')
+        # Animate
+        def animate(i):
+            ax.view_init(elev=20., azim=i)
+            return fig,
+
+        animation = FuncAnimation(fig, animate, frames=360, blit=True)
+        if video_format == 'gif':
+            writer = PillowWriter(fps=video_fps)
+            animation.save('fixed-point-3d.gif', writer=writer)
+            print(f'Saved video to {os.path.abspath("fixed-point-3d.gif")}')
+        elif video_format == 'mp4':
+            writer = FFMpegWriter(fps=video_fps)
+            animation.save('fixed-point-3d.mp4', writer=writer)
+            print(f'Saved video to {os.path.abspath("fixed-point-3d.mp4")}')
+        elif video_format == 'webm':
+            writer = FFMpegWriter(fps=video_fps, codec='libvpx')
+            animation.save('fixed-point-3d.webm', writer=writer)
+            print(f'Saved video to {os.path.abspath("fixed-point-3d.webm")}')
+        else:
+            raise ValueError(f'Unknown video format {video_format}')
+        #animation.save('fixed-point-3d.webm', fps=video_fps, extra_args=['-vcodec', 'libvpx-vp9'])
+
+        breakpoint()
+
 
     commands = {
             'run': run,
@@ -2890,6 +3410,7 @@ def make_app():
             'checkpoint': checkpoint,
             'plot': plot,
             'plot_trajectory': plot_trajectory,
+            'plot_default_mode': plot_default_mode,
             'test': test,
             'video': video,
     }

@@ -2417,6 +2417,8 @@ class PPOAgentRecurrentVec(A2CAgentRecurrentVec):
             if self.max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
             for p in self.net.parameters():
+                if p._grad is None:
+                    continue
                 if p._grad.isnan().any():
                     print('NaNs in gradients!')
                     breakpoint()

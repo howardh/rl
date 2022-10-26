@@ -2046,6 +2046,8 @@ class ModularPolicy5(PolicyValueNetworkRecurrent):
                     input_keys.append(y['key'].unsqueeze(0))
                     input_vals.append(y['value'].unsqueeze(0))
             else:
+                if k not in inputs:
+                    continue # Skip this input module if no data is provided
                 module_inputs = inputs[k]
                 y = module(module_inputs)
                 input_labels.append(k)
